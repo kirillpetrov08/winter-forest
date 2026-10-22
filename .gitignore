@@ -1,0 +1,24 @@
+# Gradle & build outputs
+.gradle/
+build/
+**/build/
+
+# Local SDK, secrets, signing & developer overrides (NEVER commit secrets!)
+local.properties
+keystore.properties
+secrets.properties
+*.jks
+*.keystore
+
+# Android Studio / IntelliJ IDEA
+.idea/
+*.iml
+.externalNativeBuild/
+.cxx/
+captures/
+output-metadata.json
+
+# OS & temporary files
+.DS_Store
+Thumbs.db
+*.log

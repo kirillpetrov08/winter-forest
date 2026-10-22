@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.WinterForest" parent="android:Theme.Material.NoActionBar">
+        <item name="android:statusBarColor">#FF091119</item>
+        <item name="android:navigationBarColor">#FF091119</item>
+        <item name="android:windowBackground">#FF091119</item>
+    </style>
+</resources>
