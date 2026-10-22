@@ -120,7 +120,7 @@ fun VirtualJoystick(
                         y = down.position.y.coerceIn(size.height * 0.25f, size.height * 0.75f)
                     )
                     anchorOffset = origin
-                    val maxRadiusPx = size.minDimension * 0.34f
+                    val maxRadiusPx = minOf(size.width, size.height) * 0.34f
 
                     while (true) {
                         val event = awaitPointerEvent()

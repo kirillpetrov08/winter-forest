@@ -59,7 +59,7 @@ label = sys.argv[1]
 lines = pathlib.Path(sys.argv[2]).read_text(errors="replace").splitlines()
 
 # 1) Emit each Kotlin/Java compile error as its OWN file/line annotation (survives truncation)
-error_pat = re.compile(r"^[ew]: file://.+?/winter-forest/(.+?):(\d+)(?::\d+)?\s+(.*)$")
+error_pat = re.compile(r"^[ew]: file://.+/winter-forest/(?:winter-forest/)?(.+?):(\d+)(?::\d+)?\s+(.*)$")
 emitted = 0
 for ln in lines:
     m = error_pat.match(ln)
