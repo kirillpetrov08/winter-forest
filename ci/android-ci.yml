@@ -40,6 +40,13 @@ jobs:
             bash scripts/ci-build-and-verify.sh
           else
             export ANDROID_HOME="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+            if [ ! -d "$ANDROID_HOME" ]; then
+              mkdir -p "$HOME/android-sdk/cmdline-tools"
+              curl -fsSL https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -o /tmp/cmdtools.zip
+              unzip -q /tmp/cmdtools.zip -d "$HOME/android-sdk/cmdline-tools"
+              mv "$HOME/android-sdk/cmdline-tools/cmdline-tools" "$HOME/android-sdk/cmdline-tools/latest"
+              export ANDROID_HOME="$HOME/android-sdk"
+            fi
             export ANDROID_SDK_ROOT="$ANDROID_HOME"
             for sm in "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "$ANDROID_HOME/tools/bin/sdkmanager"; do
               [ -x "$sm" ] && { yes | "$sm" --licenses >/dev/null 2>&1 || true; break; }
