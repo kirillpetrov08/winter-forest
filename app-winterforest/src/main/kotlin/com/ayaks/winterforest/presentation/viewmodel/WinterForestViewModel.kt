@@ -318,7 +318,8 @@ class WinterForestViewModel(
         // Пеший переход между локациями: идём, а не телепортируемся
         val journey = _uiState.value.travelJourney
         if (journey != null) {
-            val speed = if (isMoving) 1.65f else 1f
+            val movingNow = abs(current.joystickForward) > 0.05f || abs(current.joystickStrafe) > 0.05f
+            val speed = if (movingNow) 1.65f else 1f
             val left = journey.remainingSec - deltaSeconds * speed
             if (left <= 0f) {
                 val arrived = SurvivalEngine.travelToLocation(
@@ -647,8 +648,8 @@ class WinterForestViewModel(
         val outcome = block(run, state.baseProgress)
         _uiState.update {
             it.copy(
-                activeRun = outcome2.run,
-                baseProgress = outcome2.base,
+                activeRun = outcome.run,
+                baseProgress = outcome.base,
                 cooldowns = if (cooldownId != null && cooldownSec > 0f) {
                     it.cooldowns + (cooldownId to cooldownSec)
                 } else {
