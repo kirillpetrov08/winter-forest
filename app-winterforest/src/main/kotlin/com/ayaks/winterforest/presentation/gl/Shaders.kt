@@ -144,6 +144,28 @@ object Shaders {
             return fract(p.x * p.y);
         }
 
+        float noise2D(vec2 p) {
+            vec2 i = floor(p);
+            vec2 f = fract(p);
+            vec2 u = f * f * (3.0 - 2.0 * f);
+            return mix(
+                mix(hash21(i), hash21(i + vec2(1.0, 0.0)), u.x),
+                mix(hash21(i + vec2(0.0, 1.0)), hash21(i + vec2(1.0, 1.0)), u.x),
+                u.y
+            );
+        }
+
+        float fbm2(vec2 p) {
+            float v = 0.0;
+            float a = 0.55;
+            for (int i = 0; i < 4; i++) {
+                v += a * noise2D(p);
+                p = p * 2.13 + vec2(17.7, 9.2);
+                a *= 0.52;
+            }
+            return v;
+        }
+
         float noise1D(float x) {
             float i = floor(x);
             float f = fract(x);
@@ -160,9 +182,9 @@ object Shaders {
         }
 
         void main() {
-            // Восстанавливаем истинный 3D-луч взгляда камеры для панорамного неба и гор 360°
+            // Истинный 3D-луч взгляда для панорамного неба 360°
             vec2 ndc = vScreenUv * 2.0 - 1.0;
-            float tanHalfFov = 0.60086; // tan(62 deg / 2)
+            float tanHalfFov = 0.60086;
             vec3 rayCam = normalize(vec3(ndc.x * uAspect * tanHalfFov, ndc.y * tanHalfFov, -1.0));
 
             float cp = cos(uCamPitch);
@@ -174,58 +196,91 @@ object Shaders {
             vec3 dir = normalize(vec3(rayPitch.x * cy - rayPitch.z * sy, rayPitch.y, rayPitch.x * sy + rayPitch.z * cy));
 
             float elev = clamp(dir.y, -0.35, 1.0);
-            float skyGrad = clamp(pow(max(elev, 0.0), 0.62), 0.0, 1.0);
+            float az = atan(dir.z, dir.x);
+
+            // 1. Глубокий вертикальный градиент: зенит -> холодный горизонт
+            float skyGrad = clamp(pow(max(elev, 0.0), 0.58), 0.0, 1.0);
             vec3 col = mix(uSkyHorizon, uSkyZenith, skyGrad);
 
-            // Ночные звёзды и северное сияние (Aurora Borealis)
-            if (uAuroraStrength > 0.02 && elev > 0.02) {
-                vec2 starCell = floor(vec2(atan(dir.z, dir.x) * 46.0, elev * 90.0));
+            // 2. Тёплое зарево в стороне солнца (нормированный азимут к солнцу)
+            float sunAz = atan(uSunScreenUv.y - 0.5, uSunScreenUv.x - 0.5);
+            float azAlign = max(0.0, cos(az - sunAz));
+            float duskBand = pow(azAlign, 3.0) * exp(-abs(elev) * 4.2);
+            col += uSunHaloColor * duskBand * 0.28;
+
+            // 3. Звёздное небо: мерцание, разный размер, только выше горизонта
+            if (uAuroraStrength > 0.02 && elev > 0.015) {
+                vec2 starCell = floor(vec2(az * 60.0, elev * 110.0));
                 float starRnd = hash21(starCell);
-                if (starRnd > 0.986) {
-                    float twinkle = 0.55 + 0.45 * sin(uTime * 3.1 + starRnd * 40.0);
-                    col += vec3(0.82, 0.90, 1.0) * twinkle * uAuroraStrength * smoothstep(0.02, 0.25, elev);
+                if (starRnd > 0.978) {
+                    float mag = hash21(starCell + 4.7);
+                    float twinkle = 0.55 + 0.45 * sin(uTime * (2.2 + mag * 3.0) + starRnd * 40.0);
+                    vec2 starUv = fract(vec2(az * 60.0, elev * 110.0)) - 0.5;
+                    float starShape = smoothstep(0.34, 0.02, length(starUv));
+                    col += vec3(0.82, 0.90, 1.0) * starShape * twinkle * (0.35 + 0.65 * mag) *
+                        uAuroraStrength * smoothstep(0.015, 0.22, elev);
                 }
-                float az = atan(dir.z, dir.x);
+
+                // 4. Два живых занавеса северного сияния
                 float wave1 = sin(az * 3.0 + uTime * 0.28 + sin(az * 7.0 - uTime * 0.15) * 0.8);
-                float curtain = exp(-abs(elev - (0.30 + 0.09 * wave1)) * 7.5);
+                float wave2 = sin(az * 2.2 - uTime * 0.20 + sin(az * 5.0 + uTime * 0.12) * 1.1);
+                float curtain1 = exp(-abs(elev - (0.30 + 0.09 * wave1)) * 7.5);
+                float curtain2 = exp(-abs(elev - (0.46 + 0.11 * wave2)) * 9.5);
                 float streaks = 0.55 + 0.45 * sin(az * 26.0 + uTime * 0.9);
-                vec3 auroraCol = mix(vec3(0.10, 0.88, 0.58), vec3(0.42, 0.28, 0.92), clamp(elev * 1.4, 0.0, 1.0));
-                col += auroraCol * curtain * streaks * uAuroraStrength * 0.52;
+                float streaks2 = 0.55 + 0.45 * sin(az * 18.0 - uTime * 0.7 + 1.3);
+                vec3 auroraA = mix(vec3(0.10, 0.88, 0.58), vec3(0.42, 0.28, 0.92), clamp(elev * 1.4, 0.0, 1.0));
+                vec3 auroraB = mix(vec3(0.16, 0.72, 0.66), vec3(0.30, 0.42, 0.95), clamp(elev * 1.1, 0.0, 1.0));
+                col += auroraA * curtain1 * streaks * uAuroraStrength * 0.52;
+                col += auroraB * curtain2 * streaks2 * uAuroraStrength * 0.30;
             }
 
-            // Лёгкая слоистая облачность на высоте
-            if (elev > 0.03) {
-                float azCloud = atan(dir.z, dir.x) * 3.2 + uTime * 0.012;
-                float cloud = noise1D(azCloud * 2.4 + elev * 6.0) * 0.6 + noise1D(azCloud * 5.8 - elev * 9.0) * 0.4;
-                float cloudMask = smoothstep(0.56, 0.86, cloud) * exp(-elev * 2.8) * 0.28;
-                col = mix(col, mix(uSkyHorizon, uSunHaloColor, 0.35), cloudMask);
+            // 5. Два слоя облаков: высокие перистые + низкие плотные, с ветровым дрейфом
+            if (elev > 0.02) {
+                vec2 cloudUv = vec2(az * 2.1 + uTime * 0.012, elev * 3.4);
+                float highCloud = fbm2(cloudUv * 1.7 + vec2(uTime * 0.016, 0.0));
+                float lowCloud = fbm2(cloudUv * 3.1 + vec2(-uTime * 0.010, 2.3));
+                float cloudMask = smoothstep(0.52, 0.88, highCloud * 0.62 + lowCloud * 0.38) * exp(-elev * 2.4);
+                vec3 cloudLit = mix(uSkyHorizon * 1.06, uSunHaloColor, 0.42);
+                col = mix(col, cloudLit, cloudMask * 0.42);
+                float wisp = smoothstep(0.60, 0.95, lowCloud) * exp(-elev * 1.8) * 0.16;
+                col = mix(col, mix(uSkyHorizon, uSunHaloColor, 0.25), wisp);
             }
 
-            // Солнечный / лунный диск и мягкое атмосферное гало
+            // 6. Солнечный / лунный диск: диск с затемнением края и мягкое гало
             float dScreen = distance(vScreenUv, uSunScreenUv);
             float disc = smoothstep(0.042, 0.014, dScreen);
-            float halo = exp(-dScreen * 6.5) * 0.34;
-            col += uSunHaloColor * (disc * 0.88 + halo);
+            float limb = 1.0 - smoothstep(0.0, 0.042, dScreen) * 0.25;
+            float halo = exp(-dScreen * 5.6) * 0.36 + exp(-dScreen * 1.7) * 0.10;
+            col += uSunHaloColor * (disc * limb * 0.92 + halo);
 
-            // Два эшелона заснеженных горных хребтов вдоль горизонта 360°
-            float az = atan(dir.z, dir.x);
-            float farPeak = 0.135 * mountainRidge(az, 3.1, 4.2) + 0.015;
-            float nearPeak = 0.092 * mountainRidge(az, 5.4, 11.7) - 0.004;
+            // 7. Три эшелона заснеженных горных хребтов 360°
+            float farPeak = 0.150 * mountainRidge(az, 2.6, 4.2) + 0.012;
+            float midPeak = 0.118 * mountainRidge(az, 4.1, 8.9) + 0.002;
+            float nearPeak = 0.086 * mountainRidge(az, 6.2, 11.7) - 0.006;
 
             if (elev < farPeak) {
-                float snowLine = smoothstep(farPeak * 0.45, farPeak, elev);
-                vec3 farMtn = mix(uFogColor * 0.72, mix(uFogColor, vec3(0.92, 0.96, 1.0), 0.52), snowLine);
-                col = mix(col, farMtn, 0.82);
+                float snowLine = smoothstep(farPeak * 0.42, farPeak, elev);
+                vec3 farMtn = mix(uFogColor * 0.70, mix(uFogColor, vec3(0.92, 0.96, 1.0), 0.55), snowLine);
+                col = mix(col, farMtn, 0.80);
+            }
+            if (elev < midPeak) {
+                float snowLine = smoothstep(midPeak * 0.40, midPeak, elev);
+                vec3 midMtn = mix(uFogColor * 0.62, mix(uFogColor, vec3(0.93, 0.97, 1.0), 0.50), snowLine);
+                col = mix(col, midMtn, 0.86);
             }
             if (elev < nearPeak) {
-                float snowLine2 = smoothstep(nearPeak * 0.38, nearPeak, elev);
-                vec3 nearMtn = mix(uFogColor * 0.56, mix(uFogColor, vec3(0.95, 0.98, 1.0), 0.42), snowLine2);
-                col = mix(col, nearMtn, 0.92);
+                float snowLine2 = smoothstep(nearPeak * 0.36, nearPeak, elev);
+                vec3 nearMtn = mix(uFogColor * 0.52, mix(uFogColor, vec3(0.95, 0.98, 1.0), 0.44), snowLine2);
+                col = mix(col, nearMtn, 0.93);
             }
 
-            // Плавный переход горизонта в цвет воздушной дымки
-            float horizonHaze = smoothstep(0.06, -0.05, elev);
+            // 8. Плавная дымка горизонта
+            float horizonHaze = smoothstep(0.065, -0.05, elev);
             col = mix(col, uFogColor, horizonHaze * 0.94);
+
+            // 9. Дизеринг: убирает полосатость градиента на 8-битных экранах
+            float dither = (hash21(vScreenUv * vec2(1913.0, 1171.0) + uTime) - 0.5) * 0.012;
+            col += dither;
 
             gl_FragColor = vec4(col, 1.0);
         }

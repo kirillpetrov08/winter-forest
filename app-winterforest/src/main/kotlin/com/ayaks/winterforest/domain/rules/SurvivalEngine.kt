@@ -137,9 +137,12 @@ object SurvivalEngine {
         }
         val nextSprintFlag = if (nextStamina <= 1f) false else run.isSprinting
 
-        // 1. ГОЛОД: -1 ед. каждые 30 секунд реального игрового времени
+        // 1. ГОЛОД: постоянный расход + калории на спринт (не казуальный выживач)
         var nextHunger = (run.hunger - GameRunState.HUNGER_LOSS_PER_SECOND * deltaSeconds)
             .coerceIn(0f, GameRunState.MAX_STAT)
+        if (activelySprinting) {
+            nextHunger = (nextHunger - 0.45f * deltaSeconds).coerceIn(0f, GameRunState.MAX_STAT)
+        }
 
         // 2. ТЕПЛО: учитывает базовый костёр, полевые 3D-костры, ночной мороз, ветер, шубу, термос и факел
         val nearPlacedFire = updatedCampfires.any { fire ->
@@ -151,10 +154,10 @@ object SurvivalEngine {
             val fireGainPerSec = base.campfireRecoveryPerSec()
             (run.warmth + fireGainPerSec * deltaSeconds).coerceIn(0f, GameRunState.MAX_STAT)
         } else {
-            val baseColdPerSec = 0.26f * run.currentLocation.coldMultiplier
-            val nightFactor = if (nowNight) 1.65f else 1.0f
+            val baseColdPerSec = 0.32f * run.currentLocation.coldMultiplier
+            val nightFactor = if (nowNight) 2.2f else 1.0f
             val moveFactor = if (isMoving) 1.28f else 1.0f
-            val weatherFactor = if (snowingNow) 1.30f else 1.0f
+            val weatherFactor = if (snowingNow) 1.5f else 1.0f
             val torchMitigation = if (run.resinTorchRemainingSec > 0f) 0.50f else 1.0f
             val coldLossPerSec = baseColdPerSec *
                 nightFactor *
@@ -202,7 +205,9 @@ object SurvivalEngine {
         if (nextWarmth <= 0f) {
             healthDelta -= GameRunState.HYPOTHERMIA_DAMAGE_PER_SECOND * deltaSeconds
         }
-        if (nextHunger > 50f && nextWarmth > 50f && healthDelta >= 0f) {
+        // Регенерация — только у огня/в убежище при сытости и тепле (без «казуального» самоизлечения)
+        val restingWarm = warmingNearFire || run.isNearBaseCampfire
+        if (restingWarm && nextHunger > 65f && nextWarmth > 60f && healthDelta >= 0f) {
             healthDelta += GameRunState.PASSIVE_HEALTH_REGEN_PER_SECOND * deltaSeconds
         }
 
@@ -710,7 +715,19 @@ object SurvivalEngine {
             0
         }
         val levelBonus = if (run.level >= 3 && (run.totalResourcesGathered % 2 == 0)) 1 else 0
-        val rawYield = (target.baseYield + pickaxeBonus + axeWoodBonus + levelBonus).coerceIn(1, 6)
+        // Жёсткое правило выживания: профильный ресурс без инструмента — максимум 1 ед. руками
+        val requiredToolMissing = when (resType) {
+            ResourceType.WOOD -> run.equippedTool != EquippedTool.AXE
+            ResourceType.STONE, ResourceType.COAL, ResourceType.IRON ->
+                run.equippedTool != EquippedTool.PICKAXE &&
+                    SpecialLootId.PICKAXE !in base.persistentSpecialLoot
+            else -> false
+        }
+        val rawYield = if (requiredToolMissing) {
+            1
+        } else {
+            (target.baseYield + pickaxeBonus + axeWoodBonus + levelBonus).coerceIn(1, 6)
+        }
         val addResult = run.inventory.tryAddResource(resType, rawYield)
 
         if (addResult.isFullBlocked) {
@@ -736,7 +753,12 @@ object SurvivalEngine {
         val xpEarned = resType.xpReward * added
         val (nextXp, nextLevel) = applyXpGain(run.xp, run.level, xpEarned)
         val maxHp = GameRunState.BASE_MAX_HEALTH + (nextLevel - 1) * GameRunState.HEALTH_PER_LEVEL
-        val msg = "Собрано: ${resType.titleRu} +$added (+$xpEarned опыта)"
+        val toolNote = if (requiredToolMissing) {
+            " Без профильного инструмента руками — только 1 ед. (−7 сил)."
+        } else {
+            ""
+        }
+        val msg = "Собрано: ${resType.titleRu} +$added (+$xpEarned опыта)$toolNote"
 
         val updatedRun = run.copy(
             inventory = addResult.inventory,
@@ -746,6 +768,11 @@ object SurvivalEngine {
             xp = nextXp,
             level = nextLevel,
             health = run.health.coerceAtMost(maxHp),
+            stamina = if (requiredToolMissing) {
+                (run.stamina - 7f).coerceIn(0f, GameRunState.MAX_STAT)
+            } else {
+                run.stamina
+            },
             swingAnimRemainingSec = run.equippedTool.swingDurationSec,
             hitFeedbackTimerSec = 0.36f,
             hitWorldX = target.x,

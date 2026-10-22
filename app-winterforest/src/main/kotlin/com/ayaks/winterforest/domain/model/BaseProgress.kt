@@ -145,61 +145,77 @@ enum class BaseUpgradeType(
 }
 
 @Serializable
+enum class RecipeCategory(val titleRu: String) {
+    TOOLS("Инструменты"),
+    FOOD("Еда"),
+    FIRE("Огонь"),
+    GEAR("Снаряжение")
+}
+
+@Serializable
 enum class WorkbenchRecipe(
     val titleRu: String,
     val descriptionRu: String,
     val minWorkbenchLevel: Int,
     val requiresPickaxe: Boolean,
-    val cost: Map<ResourceType, Int>
+    val cost: Map<ResourceType, Int>,
+    val category: RecipeCategory
 ) {
     CRAFT_RESIN_TORCH(
         titleRu = "Смоляной факел",
         descriptionRu = "+50% тепла, яркий свет на 3 минуты и защита от волков",
         minWorkbenchLevel = 1,
         requiresPickaxe = false,
-        cost = mapOf(ResourceType.WOOD to 2, ResourceType.RESIN to 2)
+        cost = mapOf(ResourceType.WOOD to 2, ResourceType.RESIN to 2),
+        category = RecipeCategory.FIRE
     ),
     CRAFT_BERRY_TEA(
         titleRu = "Таёжный ягодный взвар",
         descriptionRu = "Горячий настой: +36 тепла, +26 сытости и +100% выносливости",
         minWorkbenchLevel = 1,
         requiresPickaxe = false,
-        cost = mapOf(ResourceType.BERRIES to 3, ResourceType.WOOD to 1)
+        cost = mapOf(ResourceType.BERRIES to 3, ResourceType.WOOD to 1),
+        category = RecipeCategory.FOOD
     ),
     CRAFT_ROAST_FEAST(
         titleRu = "Жаркое охотника",
         descriptionRu = "Сытный ужин у огня: +55 сытости, +24 тепла и +20 здоровья",
         minWorkbenchLevel = 1,
         requiresPickaxe = false,
-        cost = mapOf(ResourceType.MEAT to 1, ResourceType.BERRIES to 2)
+        cost = mapOf(ResourceType.MEAT to 1, ResourceType.BERRIES to 2),
+        category = RecipeCategory.FOOD
     ),
     CRAFT_HUNTING_SPEAR(
         titleRu = "Кованое копьё следопыта",
         descriptionRu = "Навсегда усиливает охоту копьём (+1 добычи и двойной урон зверю)",
         minWorkbenchLevel = 1,
         requiresPickaxe = false,
-        cost = mapOf(ResourceType.WOOD to 3, ResourceType.STONE to 2)
+        cost = mapOf(ResourceType.WOOD to 3, ResourceType.STONE to 2),
+        category = RecipeCategory.TOOLS
     ),
     CRAFT_WARM_COMPRESS(
         titleRu = "Тёплый перевязочный пакет",
         descriptionRu = "Мгновенно восстанавливает +28 здоровья и +15 тепла",
         minWorkbenchLevel = 2,
         requiresPickaxe = false,
-        cost = mapOf(ResourceType.CLOTH to 2, ResourceType.BERRIES to 2)
+        cost = mapOf(ResourceType.CLOTH to 2, ResourceType.BERRIES to 2),
+        category = RecipeCategory.GEAR
     ),
     CRAFT_FUR_BOOTS(
         titleRu = "Меховые унты севера",
         descriptionRu = "Постоянный бонус: +14% к скорости шага по снегу и меньше расход сил",
         minWorkbenchLevel = 2,
         requiresPickaxe = false,
-        cost = mapOf(ResourceType.HIDE to 2, ResourceType.CLOTH to 2)
+        cost = mapOf(ResourceType.HIDE to 2, ResourceType.CLOTH to 2),
+        category = RecipeCategory.GEAR
     ),
     CRAFT_MINERS_HEATER(
         titleRu = "Угольная грелка (рецепт Кирки)",
         descriptionRu = "Открывается Киркой: +65 тепла и +20 здоровья в походе",
         minWorkbenchLevel = 2,
         requiresPickaxe = true,
-        cost = mapOf(ResourceType.COAL to 2, ResourceType.IRON to 1)
+        cost = mapOf(ResourceType.COAL to 2, ResourceType.IRON to 1),
+        category = RecipeCategory.GEAR
     )
 }
 

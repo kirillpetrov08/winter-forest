@@ -37,7 +37,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.ayaks.winterforest.domain.model.EquippedTool
 import com.ayaks.winterforest.domain.model.GameRunState
+import com.ayaks.winterforest.domain.model.Inventory
+import com.ayaks.winterforest.domain.model.InventorySlot
 import com.ayaks.winterforest.domain.model.LocationId
+import com.ayaks.winterforest.domain.model.ResourceCategory
 import com.ayaks.winterforest.domain.model.ResourceType
 import com.ayaks.winterforest.domain.model.SpecialLootId
 import com.ayaks.winterforest.presentation.ui.theme.CrimsonDanger
@@ -332,12 +335,14 @@ fun QuickEquipmentHotbar(
     onSelectTool: (EquippedTool) -> Unit,
     onIgniteOrEquipTorch: () -> Unit,
     onQuickEat: () -> Unit,
+    onPlaceCampfire: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val torchCount = run.inventory.specialCount(SpecialLootId.RESIN_TORCH)
     val foodCount = run.inventory.countOf(ResourceType.MEAT) +
         run.inventory.countOf(ResourceType.FISH) +
         run.inventory.countOf(ResourceType.BERRIES)
+    val firesAffordable = run.inventory.countOf(ResourceType.WOOD) / GameRunState.FIELD_CAMPFIRE_WOOD_COST
 
     Row(
         horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -381,7 +386,18 @@ fun QuickEquipmentHotbar(
             title = "Еда",
             selected = false,
             badge = "×$foodCount",
+            enabled = foodCount > 0,
             onClick = onQuickEat
+        )
+        // 6-й слот хотбара: установка походного костра прямо из хотбара (2 Дерева)
+        HotbarSlotChip(
+            indexLabel = "6",
+            title = "Костёр",
+            selected = false,
+            badge = "×$firesAffordable",
+            enabled = firesAffordable > 0,
+            accentPlacement = true,
+            onClick = onPlaceCampfire
         )
     }
 }
@@ -392,10 +408,20 @@ private fun HotbarSlotChip(
     title: String,
     selected: Boolean,
     badge: String?,
+    enabled: Boolean = true,
+    accentPlacement: Boolean = false,
     onClick: () -> Unit
 ) {
-    val bg = if (selected) IceCyanPrimary.copy(alpha = 0.26f) else FrostedCardSurface.copy(alpha = 0.72f)
-    val borderCol = if (selected) IceCyanPrimary else Color(0x28FFFFFF)
+    val bg = when {
+        selected -> IceCyanPrimary.copy(alpha = 0.26f)
+        accentPlacement -> Color(0x2ED97724)
+        else -> FrostedCardSurface.copy(alpha = 0.72f)
+    }
+    val borderCol = when {
+        selected -> IceCyanPrimary
+        accentPlacement -> HearthAmberAccent.copy(alpha = 0.75f)
+        else -> Color(0x28FFFFFF)
+    }
 
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -403,20 +429,30 @@ private fun HotbarSlotChip(
             .clip(RoundedCornerShape(10.dp))
             .background(bg)
             .border(1.2.dp, borderCol, RoundedCornerShape(10.dp))
-            .clickable(onClick = onClick)
-            .padding(horizontal = 10.dp, vertical = 5.dp)
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 11.dp, vertical = 6.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(text = indexLabel, color = MistMutedText, fontSize = 9.sp)
             Text(
                 text = title,
-                color = if (selected) SnowCrispText else SnowCrispText.copy(alpha = 0.88f),
+                color = when {
+                    !enabled -> MistMutedText
+                    selected -> SnowCrispText
+                    accentPlacement -> HearthAmberAccent
+                    else -> SnowCrispText.copy(alpha = 0.88f)
+                },
                 fontSize = 11.sp,
                 fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
             )
         }
         if (badge != null) {
-            Text(text = badge, color = HearthAmberAccent, fontSize = 9.sp, fontWeight = FontWeight.SemiBold)
+            Text(
+                text = badge,
+                color = if (enabled) HearthAmberAccent else MistMutedText,
+                fontSize = 9.sp,
+                fontWeight = FontWeight.SemiBold
+            )
         }
     }
 }
@@ -449,5 +485,148 @@ fun MiniCompassBadge(
             fontSize = 10.sp,
             fontWeight = FontWeight.SemiBold
         )
+    }
+}
+
+/**
+ * Компактная векторная иконка ресурса для ячеек рюкзака (Canvas, без растровых ассетов).
+ */
+@Composable
+fun ResourceTypeGlyph(type: ResourceType, modifier: Modifier = Modifier) {
+    val tint = when (type.category) {
+        ResourceCategory.FUEL -> HearthAmberAccent
+        ResourceCategory.FOOD -> SpruceEmerald
+        ResourceCategory.MATERIAL -> IceCyanPrimary
+    }
+    Canvas(modifier = modifier.size(26.dp)) {
+        val w = size.width
+        val h = size.height
+        when (type) {
+            ResourceType.WOOD -> {
+                drawRoundRect(
+                    color = tint.copy(alpha = 0.95f),
+                    topLeft = Offset(w * 0.10f, h * 0.30f),
+                    size = androidx.compose.ui.geometry.Size(w * 0.80f, h * 0.22f),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(h * 0.11f)
+                )
+                drawRoundRect(
+                    color = tint.copy(alpha = 0.70f),
+                    topLeft = Offset(w * 0.18f, h * 0.56f),
+                    size = androidx.compose.ui.geometry.Size(w * 0.72f, h * 0.20f),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(h * 0.10f)
+                )
+            }
+            ResourceType.STONE, ResourceType.IRON, ResourceType.COAL -> {
+                drawCircle(color = tint.copy(alpha = 0.85f), radius = w * 0.30f, center = Offset(w * 0.42f, h * 0.52f))
+                drawCircle(color = tint.copy(alpha = 0.60f), radius = w * 0.20f, center = Offset(w * 0.68f, h * 0.38f))
+            }
+            ResourceType.BERRIES -> {
+                drawCircle(color = tint, radius = w * 0.14f, center = Offset(w * 0.34f, h * 0.42f))
+                drawCircle(color = tint.copy(alpha = 0.85f), radius = w * 0.14f, center = Offset(w * 0.62f, h * 0.38f))
+                drawCircle(color = tint.copy(alpha = 0.70f), radius = w * 0.14f, center = Offset(w * 0.48f, h * 0.66f))
+            }
+            ResourceType.FISH -> {
+                drawOval(color = tint, topLeft = Offset(w * 0.14f, h * 0.34f), size = androidx.compose.ui.geometry.Size(w * 0.52f, h * 0.32f))
+                drawLine(tint, Offset(w * 0.68f, h * 0.50f), Offset(w * 0.92f, h * 0.28f), strokeWidth = h * 0.07f)
+                drawLine(tint, Offset(w * 0.68f, h * 0.50f), Offset(w * 0.92f, h * 0.72f), strokeWidth = h * 0.07f)
+            }
+            ResourceType.CLOTH, ResourceType.HIDE -> {
+                drawOval(color = tint.copy(alpha = 0.85f), topLeft = Offset(w * 0.16f, h * 0.22f), size = androidx.compose.ui.geometry.Size(w * 0.68f, h * 0.56f))
+                drawArc(
+                    color = tint,
+                    startAngle = 200f, sweepAngle = 140f, useCenter = false,
+                    topLeft = Offset(w * 0.26f, h * 0.32f),
+                    size = androidx.compose.ui.geometry.Size(w * 0.48f, h * 0.36f),
+                    style = Stroke(width = h * 0.06f)
+                )
+            }
+            ResourceType.RESIN -> {
+                drawCircle(color = tint, radius = w * 0.22f, center = Offset(w * 0.50f, h * 0.58f))
+                drawLine(tint, Offset(w * 0.50f, h * 0.14f), Offset(w * 0.32f, h * 0.52f), strokeWidth = h * 0.10f)
+                drawLine(tint, Offset(w * 0.50f, h * 0.14f), Offset(w * 0.68f, h * 0.52f), strokeWidth = h * 0.10f)
+            }
+            else -> {
+                drawCircle(color = tint.copy(alpha = 0.9f), radius = w * 0.28f, center = Offset(w * 0.50f, h * 0.50f))
+                drawCircle(color = tint.copy(alpha = 0.55f), radius = w * 0.14f, center = Offset(w * 0.50f, h * 0.50f))
+            }
+        }
+    }
+}
+
+/**
+ * Ячейка рюкзака: слот-карточка с иконкой, стаком и выделением.
+ */
+@Composable
+fun InventoryCell(
+    slot: InventorySlot?,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val bg = when {
+        selected -> IceCyanPrimary.copy(alpha = 0.24f)
+        slot != null -> FrostedCardSurface.copy(alpha = 0.85f)
+        else -> Color(0x22FFFFFF)
+    }
+    val borderCol = if (selected) IceCyanPrimary else Color(0x2EFFFFFF)
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = modifier
+            .size(width = 74.dp, height = 62.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .background(bg)
+            .border(1.2.dp, borderCol, RoundedCornerShape(10.dp))
+            .clickable(enabled = slot != null, onClick = onClick)
+    ) {
+        if (slot != null) {
+            ResourceTypeGlyph(type = slot.type, modifier = Modifier.align(Alignment.TopCenter).padding(top = 6.dp))
+            Text(
+                text = "×${slot.count}",
+                color = SnowCrispText,
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(end = 5.dp, bottom = 3.dp)
+            )
+            Text(
+                text = slot.type.titleRu,
+                color = MistMutedText,
+                fontSize = 8.sp,
+                maxLines = 1,
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .padding(start = 5.dp, bottom = 3.dp)
+            )
+        } else {
+            Text("·", color = Color(0x33FFFFFF), fontSize = 14.sp)
+        }
+    }
+}
+
+/**
+ * Полная сетка рюкзака: MAX_SLOTS ячеек 5×4 с пустыми слотами и выделением.
+ */
+@Composable
+fun InventorySlotGrid(
+    inventory: Inventory,
+    selectedType: ResourceType?,
+    onSelectType: (ResourceType?) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        for (row in 0 until 4) {
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                for (col in 0 until 5) {
+                    val idx = row * 5 + col
+                    val slot = inventory.slots.getOrNull(idx)
+                    InventoryCell(
+                        slot = slot,
+                        selected = slot != null && slot.type == selectedType,
+                        onClick = { onSelectType(slot?.type) }
+                    )
+                }
+            }
+        }
     }
 }

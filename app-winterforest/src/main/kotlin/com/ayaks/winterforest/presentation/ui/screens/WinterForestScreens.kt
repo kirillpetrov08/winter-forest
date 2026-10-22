@@ -139,33 +139,9 @@ fun MainMenuScreen(
         )
     }
 
-    val previewRun = remember(state.baseProgress) {
-        SurvivalEngine.createNewRun(state.baseProgress)
-    }
-
     Box(modifier = Modifier.fillMaxSize()) {
-        // Живая 3D-панорама заснеженного лагеря, костра, елей и гор на фоне меню
-        AndroidView(
-            factory = { ctx ->
-                ForestGlSurfaceView(ctx).apply {
-                    forestRenderer.snapshot = RenderSceneSnapshot(
-                        run = previewRun,
-                        base = state.baseProgress,
-                        quality = state.settings.graphicsQuality,
-                        menuOrbitMode = true
-                    )
-                }
-            },
-            update = { glView ->
-                glView.forestRenderer.snapshot = RenderSceneSnapshot(
-                    run = previewRun,
-                    base = state.baseProgress,
-                    quality = state.settings.graphicsQuality,
-                    menuOrbitMode = true
-                )
-            },
-            modifier = Modifier.fillMaxSize()
-        )
+        // Живая 3D-панорама лагеря отрисовывается корневым PersistentForestScene
+        // (режим орбиты меню) — сцена остаётся тёплой и не гаснет при переходах.
 
         // Лёгкая кинематографическая виньетка для идеальной читаемости текста поверх 3D-сцены
         Box(
@@ -330,26 +306,9 @@ fun GameScreen(
     val activity = context as? Activity
 
     Box(modifier = Modifier.fillMaxSize().testTag("screen_game_3d")) {
-        // 1. Полноэкранная аппаратная 3D-сцена OpenGL ES 2.0/3.0 + тач-обзор камеры
-        AndroidView(
-            factory = { ctx ->
-                ForestGlSurfaceView(ctx, onFpsSample = viewModel::onFpsMeasured).apply {
-                    forestRenderer.snapshot = RenderSceneSnapshot(
-                        run = run,
-                        base = state.baseProgress,
-                        quality = state.settings.graphicsQuality,
-                        menuOrbitMode = false
-                    )
-                }
-            },
-            update = { glView ->
-                glView.forestRenderer.snapshot = RenderSceneSnapshot(
-                    run = run,
-                    base = state.baseProgress,
-                    quality = state.settings.graphicsQuality,
-                    menuOrbitMode = false
-                )
-            },
+        // 1. Живая 3D-сцена уже отрисовывается корневым PersistentForestScene —
+        // здесь только прозрачный слой свайп-обзора камеры поверх неё.
+        Box(
             modifier = Modifier
                 .fillMaxSize()
                 .pointerInput(Unit) {
@@ -547,12 +506,13 @@ fun GameScreen(
                 .padding(start = 14.dp, bottom = 10.dp)
         )
 
-        // 7. Нижний центральный 5-слотовый хотбар быстрого выбора оружия и еды
+        // 7. Нижний центральный 6-слотовый хотбар: инструменты, еда и установка костра
         QuickEquipmentHotbar(
             run = run,
             onSelectTool = { viewModel.onEquipTool(it) },
             onIgniteOrEquipTorch = { viewModel.onIgniteResinTorch() },
             onQuickEat = { viewModel.onActionQuickUse() },
+            onPlaceCampfire = { viewModel.onPlaceFieldCampfire() },
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .padding(bottom = 10.dp)
@@ -591,15 +551,6 @@ fun GameScreen(
                         color = if (run.isSprinting) HearthAmberAccent else SnowCrispText,
                         fontSize = 11.sp
                     )
-                }
-                Button(
-                    onClick = { viewModel.onPlaceFieldCampfire() },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD97724)),
-                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                    modifier = Modifier.height(34.dp)
-                ) {
-                    val woodQty = run.inventory.countOf(ResourceType.WOOD)
-                    Text("Костёр ($woodQty/2)", color = Color(0xFF1A0E04), fontWeight = FontWeight.SemiBold, fontSize = 11.sp)
                 }
             }
 
@@ -659,7 +610,7 @@ fun BaseInventoryScreen(
     Row(
         modifier = Modifier
             .fillMaxSize()
-            .background(DeepPineNight)
+            .background(Color(0xB3060C14))
             .displayCutoutPadding()
             .padding(14.dp),
         horizontalArrangement = Arrangement.spacedBy(14.dp)
@@ -832,33 +783,105 @@ private fun WorkbenchTab(
     base: BaseProgress,
     viewModel: WinterForestViewModel
 ) {
+    var activeCategory by remember { mutableStateOf<com.ayaks.winterforest.domain.model.RecipeCategory?>(null) }
     Card(colors = CardDefaults.cardColors(containerColor = FrostedCardSurface)) {
         Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(
-                "Рецепты верстака и костра (Уровень верстака: ${base.workbenchLevel}/5)",
+                "Верстак и кухня у костра • уровень ${base.workbenchLevel}/5",
                 fontWeight = FontWeight.Bold,
                 color = SnowCrispText
             )
+
+            // Фильтр категорий — быстрый доступ к нужному типу рецептов
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                val categories = listOf<com.ayaks.winterforest.domain.model.RecipeCategory?>(null) +
+                    com.ayaks.winterforest.domain.model.RecipeCategory.entries
+                for (cat in categories) {
+                    val active = activeCategory == cat
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(9.dp))
+                            .background(if (active) IceCyanPrimary else Color(0x22FFFFFF))
+                            .clickable { activeCategory = cat }
+                            .padding(horizontal = 11.dp, vertical = 5.dp)
+                    ) {
+                        Text(
+                            text = cat?.titleRu ?: "Все",
+                            color = if (active) Color(0xFF071521) else SnowCrispText,
+                            fontSize = 11.sp,
+                            fontWeight = if (active) FontWeight.Bold else FontWeight.Medium
+                        )
+                    }
+                }
+            }
+
             if (run == null) {
                 Text("Начните экспедицию, чтобы создавать снаряжение и горячие блюда.", color = MistMutedText)
             } else {
-                for (recipe in WorkbenchRecipe.entries) {
-                    val costStr = recipe.cost.entries.joinToString(", ") { "${it.key.titleRu}: ${it.value}" }
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                val visible = com.ayaks.winterforest.domain.model.WorkbenchRecipe.entries
+                    .filter { activeCategory == null || it.category == activeCategory }
+                for (recipe in visible) {
+                    val missing = recipe.cost.filter { (res, need) -> run.inventory.countOf(res) < need }
+                    val canCraft = missing.isEmpty() && base.workbenchLevel >= recipe.minWorkbenchLevel
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(Color(0x14FFFFFF))
+                            .padding(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        Column(Modifier.weight(1f)) {
-                            Text(recipe.titleRu, color = HearthAmberAccent, fontWeight = FontWeight.SemiBold)
-                            Text(recipe.descriptionRu, color = MistMutedText, fontSize = 11.5.sp)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text(recipe.titleRu, color = HearthAmberAccent, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                                Text(recipe.descriptionRu, color = MistMutedText, fontSize = 11.sp)
+                            }
+                            Button(
+                                onClick = { viewModel.onCraftRecipe(recipe) },
+                                enabled = canCraft,
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = HearthAmberAccent,
+                                    disabledContainerColor = Color(0x2AFFFFFF)
+                                ),
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                                modifier = Modifier.height(34.dp)
+                            ) {
+                                Text(
+                                    text = if (canCraft) "Создать" else "Недоступно",
+                                    color = if (canCraft) Color(0xFF1A1006) else MistMutedText,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
                         }
-                        Spacer(Modifier.width(10.dp))
-                        Button(onClick = { viewModel.onCraftRecipe(recipe) }) {
-                            Text("Создать ($costStr)", fontSize = 11.sp)
+                        // Понятная строка ингредиентов: сколько есть и сколько нужно
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            for ((res, need) in recipe.cost) {
+                                val have = run.inventory.countOf(res)
+                                val enough = have >= need
+                                Text(
+                                    text = "${res.titleRu} $have/$need",
+                                    color = if (enough) SpruceEmerald else CrimsonDanger,
+                                    fontSize = 10.5.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                        }
+                        if (base.workbenchLevel < recipe.minWorkbenchLevel) {
+                            Text(
+                                "Требуется верстак ${recipe.minWorkbenchLevel} ур.",
+                                color = CrimsonDanger,
+                                fontSize = 10.sp
+                            )
+                        } else if (missing.isNotEmpty()) {
+                            Text(
+                                "Не хватает: " + missing.entries.joinToString(", ") { "${it.key.titleRu} ×${it.value - run.inventory.countOf(it.key)}" },
+                                color = CrimsonDanger,
+                                fontSize = 10.sp
+                            )
                         }
                     }
-                    HorizontalDivider(color = Color(0x22FFFFFF))
                 }
             }
         }
@@ -872,36 +895,72 @@ private fun InventoryStorageTab(
     viewModel: WinterForestViewModel
 ) {
     val inv = run?.inventory ?: Inventory(specialItems = base.persistentSpecialLoot.associateWith { 1 })
+    var selectedType by remember { mutableStateOf<ResourceType?>(null) }
+
     Card(colors = CardDefaults.cardColors(containerColor = FrostedCardSurface)) {
-        Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(
-                "Походный рюкзак (${inv.occupiedSlots}/${Inventory.MAX_SLOTS} слотов) и склад лагеря",
+                "Рюкзак • ${inv.occupiedSlots}/${Inventory.MAX_SLOTS} ячеек",
                 fontWeight = FontWeight.Bold,
                 color = SnowCrispText
             )
-            if (inv.slots.isEmpty() && base.storageResources.isEmpty()) {
-                Text("Обычные ресурсы пока не собраны.", color = MistMutedText, fontSize = 13.sp)
-            } else {
-                for (slot in inv.slots) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text("${slot.type.titleRu}: ${slot.count}/${Inventory.MAX_STACK_SIZE}", color = SnowCrispText)
-                        if (run != null && (slot.type.isEdible || slot.type.isFuel)) {
-                            TextButton(onClick = { viewModel.onUseSpecificResource(slot.type) }) {
-                                Text("Использовать")
-                            }
+
+            // Сетка ячеек 5×4 — как в классических RPG: слоты, стаки, выделение
+            com.ayaks.winterforest.presentation.ui.components.InventorySlotGrid(
+                inventory = inv,
+                selectedType = selectedType,
+                onSelectType = { selectedType = it }
+            )
+
+            // Панель выбранного предмета
+            val selectedSlot = inv.slots.firstOrNull { it.type == selectedType }
+            if (selectedSlot != null) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(Color(0x18FFFFFF))
+                        .padding(10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    com.ayaks.winterforest.presentation.ui.components.ResourceTypeGlyph(type = selectedSlot.type)
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            "${selectedSlot.type.titleRu} • ${selectedSlot.count}/${Inventory.MAX_STACK_SIZE}",
+                            color = SnowCrispText,
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 12.sp
+                        )
+                        Text(
+                            when (selectedSlot.type.category) {
+                                com.ayaks.winterforest.domain.model.ResourceCategory.FUEL -> "Топливо: поддерживает огонь и тепло"
+                                com.ayaks.winterforest.domain.model.ResourceCategory.FOOD -> "Пища: восстанавливает сытость"
+                                com.ayaks.winterforest.domain.model.ResourceCategory.MATERIAL -> "Материал: крафт на верстаке"
+                            },
+                            color = MistMutedText,
+                            fontSize = 10.5.sp
+                        )
+                    }
+                    if (run != null && (selectedSlot.type.isEdible || selectedSlot.type.isFuel)) {
+                        Button(
+                            onClick = { viewModel.onUseSpecificResource(selectedSlot.type) },
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                            modifier = Modifier.height(34.dp)
+                        ) {
+                            Text("Использовать", fontSize = 11.sp)
                         }
                     }
                 }
-                if (base.storageResources.isNotEmpty()) {
-                    HorizontalDivider(color = Color(0x22FFFFFF))
-                    val storageSummary = base.storageResources.entries
-                        .joinToString(" • ") { "${it.key.titleRu}: ${it.value}" }
-                    Text("На складе базы: $storageSummary", color = IceCyanPrimary, fontSize = 12.sp)
-                }
+            } else {
+                Text("Коснитесь ячейки, чтобы выбрать предмет.", color = MistMutedText, fontSize = 11.sp)
+            }
+
+            if (base.storageResources.isNotEmpty()) {
+                HorizontalDivider(color = Color(0x33FFFFFF))
+                val storageSummary = base.storageResources.entries
+                    .joinToString(" • ") { "${it.key.titleRu}: ${it.value}" }
+                Text("Склад лагеря: $storageSummary", color = IceCyanPrimary, fontSize = 11.5.sp)
             }
 
             HorizontalDivider(color = Color(0x33FFFFFF))
@@ -1040,7 +1099,7 @@ fun ResultsScreen(
     Row(
         modifier = Modifier
             .fillMaxSize()
-            .background(DeepPineNight)
+            .background(Color(0xC4060C14))
             .displayCutoutPadding()
             .padding(24.dp),
         horizontalArrangement = Arrangement.spacedBy(24.dp),
@@ -1134,7 +1193,7 @@ fun SettingsScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(DeepPineNight)
+            .background(Color(0xC4060C14))
             .displayCutoutPadding()
             .verticalScroll(rememberScrollState())
             .padding(18.dp),
@@ -1263,7 +1322,7 @@ fun AboutScreen(viewModel: WinterForestViewModel) {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(DeepPineNight)
+            .background(Color(0xC4060C14))
             .displayCutoutPadding()
             .verticalScroll(rememberScrollState())
             .padding(20.dp),

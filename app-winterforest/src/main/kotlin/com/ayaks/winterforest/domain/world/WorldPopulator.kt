@@ -21,18 +21,22 @@ object WorldPopulator {
             return -0.26f + 0.03f * sin(x * 0.30f) * cos(z * 0.30f)
         }
         val flatten = ((centerDist - 6.2f) / 8.0f).coerceIn(0f, 1f)
-        val microDrift = 0.14f * sin(x * 0.38f + z * 0.21f) + 0.08f * cos(x * 0.62f - z * 0.44f)
+        val microDrift = 0.14f * sin(x * 0.38f + z * 0.21f) + 0.08f * cos(x * 0.62f - z * 0.44f) +
+            0.055f * sin(x * 1.15f - z * 0.9f) + 0.035f * cos(x * 1.8f + z * 1.55f)
         val raw = when (location) {
             LocationId.BASE_CLEARING ->
                 0.85f * sin(x * 0.085f) * cos(z * 0.075f) + 0.38f * sin((x + z) * 0.15f) + microDrift
             LocationId.DENSE_SPRUCE ->
-                1.35f * sin(x * 0.105f + 1.1f) * cos(z * 0.095f) + 0.52f * cos(x * 0.20f) + microDrift
+                1.35f * sin(x * 0.105f + 1.1f) * cos(z * 0.095f) + 0.52f * cos(x * 0.20f) +
+                0.34f * sin(x * 0.31f + z * 0.27f) + microDrift
             LocationId.FROZEN_LAKE ->
                 1.55f * ((centerDist - 22.5f) / 13f).coerceAtLeast(0f) + 0.28f * sin(x * 0.14f) + microDrift * 0.6f
             LocationId.ABANDONED_MINE ->
-                0.95f * cos(x * 0.125f) * sin(z * 0.115f) + 0.42f * sin(z * 0.25f) + microDrift * 0.5f
+                0.95f * cos(x * 0.125f) * sin(z * 0.115f) + 0.42f * sin(z * 0.25f) +
+                0.30f * cos(x * 0.29f - z * 0.33f) + microDrift * 0.5f
             LocationId.HUNTERS_CABIN ->
-                1.55f * sin(x * 0.078f + 0.6f) * cos(z * 0.088f - 0.4f) + 0.58f * sin(x * 0.18f) + microDrift
+                1.55f * sin(x * 0.078f + 0.6f) * cos(z * 0.088f - 0.4f) + 0.58f * sin(x * 0.18f) +
+                0.36f * cos(x * 0.24f + z * 0.29f) + microDrift
         }
         return raw * flatten
     }
@@ -67,27 +71,35 @@ object WorldPopulator {
             LocationId.BASE_CLEARING -> listOf(
                 WildlifeKind.SNOW_HARE,
                 WildlifeKind.SNOW_HARE,
+                WildlifeKind.SNOW_HARE,
+                WildlifeKind.NORTHERN_DEER,
                 WildlifeKind.NORTHERN_DEER
             )
             LocationId.DENSE_SPRUCE -> listOf(
                 WildlifeKind.SNOW_HARE,
                 WildlifeKind.SNOW_HARE,
                 WildlifeKind.NORTHERN_DEER,
+                WildlifeKind.NORTHERN_DEER,
+                WildlifeKind.TIMBER_WOLF,
                 WildlifeKind.TIMBER_WOLF
             )
             LocationId.FROZEN_LAKE -> listOf(
                 WildlifeKind.SNOW_HARE,
                 WildlifeKind.NORTHERN_DEER,
+                WildlifeKind.NORTHERN_DEER,
                 WildlifeKind.TIMBER_WOLF
             )
             LocationId.ABANDONED_MINE -> listOf(
                 WildlifeKind.SNOW_HARE,
+                WildlifeKind.TIMBER_WOLF,
                 WildlifeKind.TIMBER_WOLF
             )
             LocationId.HUNTERS_CABIN -> listOf(
                 WildlifeKind.SNOW_HARE,
+                WildlifeKind.SNOW_HARE,
                 WildlifeKind.NORTHERN_DEER,
                 WildlifeKind.NORTHERN_DEER,
+                WildlifeKind.TIMBER_WOLF,
                 WildlifeKind.TIMBER_WOLF,
                 WildlifeKind.TIMBER_WOLF
             )
@@ -126,11 +138,11 @@ object WorldPopulator {
         val totalWeight = weights.sumOf { it.value.toDouble() }.toFloat().coerceAtLeast(0.01f)
 
         val nodeCount = when (location) {
-            LocationId.BASE_CLEARING -> 24
-            LocationId.DENSE_SPRUCE -> 32
-            LocationId.FROZEN_LAKE -> 22
-            LocationId.ABANDONED_MINE -> 24
-            LocationId.HUNTERS_CABIN -> 26
+            LocationId.BASE_CLEARING -> 34
+            LocationId.DENSE_SPRUCE -> 46
+            LocationId.FROZEN_LAKE -> 30
+            LocationId.ABANDONED_MINE -> 36
+            LocationId.HUNTERS_CABIN -> 38
         }
 
         for (index in 0 until nodeCount) {
@@ -152,7 +164,7 @@ object WorldPopulator {
             }
 
             val kind = kindForResource(location, chosenType)
-            val yieldAmount = rng.nextInt(1, 4)
+            val yieldAmount = rng.nextInt(1, 3)
 
             result += ResourceNode(
                 id = "${location.name.lowercase()}_node_$index",

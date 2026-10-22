@@ -347,10 +347,10 @@ data class GameRunState(
         const val MAX_REWARDED_SKIPS_PER_GAME_DAY = 3
         const val MAX_REVIVES_PER_RUN = 1
 
-        const val HUNGER_LOSS_PER_SECOND = 1f / 30f
-        const val STARVATION_DAMAGE_PER_SECOND = 1f / 5f
-        const val HYPOTHERMIA_DAMAGE_PER_SECOND = 1f / 3f
-        const val PASSIVE_HEALTH_REGEN_PER_SECOND = 0.25f
+        const val HUNGER_LOSS_PER_SECOND = 1f / 26f
+        const val STARVATION_DAMAGE_PER_SECOND = 1f / 3f
+        const val HYPOTHERMIA_DAMAGE_PER_SECOND = 1f / 2f
+        const val PASSIVE_HEALTH_REGEN_PER_SECOND = 0.12f
 
         const val STAMINA_DRAIN_PER_SECOND = 16f
         const val STAMINA_REGEN_PER_SECOND = 15f
