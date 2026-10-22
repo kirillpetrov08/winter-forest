@@ -702,19 +702,28 @@ class MeshBuilder(initialFloatsCapacity: Int = 16384) {
         swayX: Float = 0f,
         r: Float = 1f, g: Float = 0.88f, b: Float = 0.48f, a: Float = 0.95f
     ) {
-        for (i in 0 until 3) {
-            val ang = (i / 3f) * Math.PI.toFloat()
-            val dx = cos(ang) * width * 0.5f
-            val dz = sin(ang) * width * 0.5f
-            val nx = -sin(ang)
-            val nz = cos(ang)
-            addVertex(cx - dx, baseY, cz - dz, nx, 0.25f, nz, 0f, 1f, r, g * 0.72f, b * 0.45f, a)
-            addVertex(cx + dx, baseY, cz + dz, nx, 0.25f, nz, 1f, 1f, r, g * 0.72f, b * 0.45f, a)
-            addVertex(cx + swayX, baseY + height, cz, nx, 0.25f, nz, 0.5f, 0.04f, 1f, 0.96f, 0.72f, a * 0.92f)
+        // Внешние языки с полупрозрачным выдохом + светлое ядро: живое пламя под любым углом
+        val layers = arrayOf(
+            floatArrayOf(1.00f, 1.00f, 0.72f, 0.32f),
+            floatArrayOf(0.52f, 0.82f, 1.06f, 0.22f)
+        )
+        for ((layer, params) in layers.withIndex()) {
+            val wf = params[0]; val hf = params[1]; val bright = params[2]; val alphaMul = params[3]
+            for (i in 0 until 3) {
+                val ang = (i / 3f) * Math.PI.toFloat() + layer * 0.35f
+                val dx = cos(ang) * width * 0.5f * wf
+                val dz = sin(ang) * width * 0.5f * wf
+                val nx = -sin(ang)
+                val nz = cos(ang)
+                val h = height * hf
+                addVertex(cx - dx, baseY, cz - dz, nx, 0.25f, nz, 0f, 1f, r, g * bright, b * 0.45f, a)
+                addVertex(cx + dx, baseY, cz + dz, nx, 0.25f, nz, 1f, 1f, r, g * bright, b * 0.45f, a)
+                addVertex(cx + swayX * wf, baseY + h, cz, nx, 0.25f, nz, 0.5f, 0.04f, 1f, 0.96f, 0.72f, a * alphaMul)
 
-            addVertex(cx + dx, baseY, cz + dz, -nx, 0.25f, -nz, 0f, 1f, r, g * 0.72f, b * 0.45f, a)
-            addVertex(cx - dx, baseY, cz - dz, -nx, 0.25f, -nz, 1f, 1f, r, g * 0.72f, b * 0.45f, a)
-            addVertex(cx + swayX, baseY + height, cz, -nx, 0.25f, -nz, 0.5f, 0.04f, 1f, 0.96f, 0.72f, a * 0.92f)
+                addVertex(cx + dx, baseY, cz + dz, -nx, 0.25f, -nz, 0f, 1f, r, g * bright, b * 0.45f, a)
+                addVertex(cx - dx, baseY, cz - dz, -nx, 0.25f, -nz, 1f, 1f, r, g * bright, b * 0.45f, a)
+                addVertex(cx + swayX * wf, baseY + h, cz, -nx, 0.25f, -nz, 0.5f, 0.04f, 1f, 0.96f, 0.72f, a * alphaMul)
+            }
         }
     }
 

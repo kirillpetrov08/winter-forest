@@ -757,8 +757,8 @@ class ForestGlRenderer(
             val flick = 0.86f + 0.20f * sin(animTimeSec * 10.5f)
             fire.addCrossedFlame(
                 0f, baseY + 0.16f, 0f,
-                width = 0.82f + base.campfireLevel * 0.08f,
-                height = (1.15f + base.campfireLevel * 0.16f) * flick,
+                width = 0.52f + base.campfireLevel * 0.06f,
+                height = (0.85f + base.campfireLevel * 0.12f) * flick,
                 swayX = sin(animTimeSec * 6.5f) * 0.06f
             )
             for (s in 0 until 8) {
@@ -783,14 +783,14 @@ class ForestGlRenderer(
             stone.addSculptedBoulder(fc.x - 0.35f, fy, fc.z + 0.12f, 0.18f, 0.14f, 0.16f, 23)
             bark.addTaperedCylinder(fc.x - 0.35f, fy + 0.04f, fc.z - 0.2f, fc.x + 0.35f, fy + 0.22f, fc.z + 0.2f, 0.07f, 0.06f, 6)
             val flick = 0.85f + 0.22f * sin(animTimeSec * 11.2f)
-            fire.addCrossedFlame(fc.x, fy + 0.12f, fc.z, 0.62f, 0.95f * flick, sin(animTimeSec * 7f) * 0.05f)
+            fire.addCrossedFlame(fc.x, fy + 0.12f, fc.z, 0.44f, 0.72f * flick, sin(animTimeSec * 7f) * 0.05f)
         }
 
         for (node in run.currentLocationNodes()) {
             if (node.isAvailable && node.kind == WorldObjectKind.SPECIAL_CACHE) {
                 val ny = WorldPopulator.terrainHeight(loc, node.x, node.z)
                 val hover = ny + 1.05f + 0.16f * sin(animTimeSec * 3.1f)
-                fire.addCrossedFlame(node.x, hover, node.z, 0.36f, 0.58f, 0f, 1f, 0.92f, 0.42f, 0.92f)
+                fire.addCrossedFlame(node.x, hover, node.z, 0.24f, 0.42f, 0f, 1f, 0.92f, 0.42f, 0.85f)
             }
         }
 

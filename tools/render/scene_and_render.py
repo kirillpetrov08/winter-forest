@@ -552,19 +552,23 @@ class Mesh:
 
     def add_crossed_flame(self, cx, base_y, cz, width, height, sway_x=0.0,
                           r=1.0, g=0.88, b=0.48, a=0.95):
-        for i in range(3):
-            ang = i / 3.0 * math.pi
-            dx, dz = math.cos(ang) * width * 0.5, math.sin(ang) * width * 0.5
-            nx, nz = -math.sin(ang), math.cos(ang)
-            self.vert(cx - dx, base_y, cz - dz, nx, 0.25, nz, 0.0, 1.0, r, g * 0.72, b * 0.45, a)
-            self.vert(cx + dx, base_y, cz + dz, nx, 0.25, nz, 1.0, 1.0, r, g * 0.72, b * 0.45, a)
-            self.vert(cx + sway_x, base_y + height, cz, nx, 0.25, nz, 0.5, 0.04, 1.0, 0.96, 0.72, a * 0.92)
-            self.vert(cx + dx, base_y, cz + dz, -nx, 0.25, -nz, 0.0, 1.0, r, g * 0.72, b * 0.45, a)
-            self.vert(cx - dx, base_y, cz - dz, -nx, 0.25, -nz, 1.0, 1.0, r, g * 0.72, b * 0.45, a)
-            self.vert(cx + sway_x, base_y + height, cz, -nx, 0.25, -nz, 0.5, 0.04, 1.0, 0.96, 0.72, a * 0.92)
+        # Внешние языки (полупрозрачный выдох к верху) + светлое ядро — пламя, а не «конус»
+        for layer, (wf, hf, bright, alpha_mul) in enumerate((
+                (1.00, 1.00, 0.72, 0.32), (0.52, 0.82, 1.06, 0.22))):
+            for i in range(3):
+                ang = i / 3.0 * math.pi + layer * 0.35
+                dx, dz = math.cos(ang) * width * 0.5 * wf, math.sin(ang) * width * 0.5 * wf
+                nx, nz = -math.sin(ang), math.cos(ang)
+                h = height * hf
+                self.vert(cx - dx, base_y, cz - dz, nx, 0.25, nz, 0.0, 1.0, r, g * bright, b * 0.45, a)
+                self.vert(cx + dx, base_y, cz + dz, nx, 0.25, nz, 1.0, 1.0, r, g * bright, b * 0.45, a)
+                self.vert(cx + sway_x * wf, base_y + h, cz, nx, 0.25, nz, 0.5, 0.04, 1.0, 0.96, 0.72, a * alpha_mul)
+                self.vert(cx + dx, base_y, cz + dz, -nx, 0.25, -nz, 0.0, 1.0, r, g * bright, b * 0.45, a)
+                self.vert(cx - dx, base_y, cz - dz, -nx, 0.25, -nz, 1.0, 1.0, r, g * bright, b * 0.45, a)
+                self.vert(cx + sway_x * wf, base_y + h, cz, -nx, 0.25, -nz, 0.5, 0.04, 1.0, 0.96, 0.72, a * alpha_mul)
 
     def add_shadow_disc(self, cx, y, cz, radius, alpha=0.38):
-        segs = 12
+        segs = 18
         step = TWO_PI / segs
         for i in range(segs):
             a0, a1 = i * step, (i + 1) * step
@@ -1390,8 +1394,8 @@ def build_shot(shot):
         base_y = terrain_height(loc, 0.0, 0.0)
         flick = 0.86 + 0.20 * math.sin(elapsed * 10.5)
         fire.add_crossed_flame(0.0, base_y + 0.16, 0.0,
-                               0.82 + shot.get("campfire_level", 1) * 0.08,
-                               (1.15 + shot.get("campfire_level", 1) * 0.16) * flick,
+                               0.52 + shot.get("campfire_level", 1) * 0.06,
+                               (0.85 + shot.get("campfire_level", 1) * 0.12) * flick,
                                math.sin(elapsed * 6.5) * 0.06)
         for s in range(8):
             rise = ((elapsed * 1.45 + s * 0.37) % 2.6)
@@ -1412,13 +1416,13 @@ def build_shot(shot):
         bark.add_tapered_cylinder(fc[0] - 0.35, fy + 0.04, fc[1] - 0.2, fc[0] + 0.35, fy + 0.22, fc[1] + 0.2,
                                   0.07, 0.06, 6)
         flick = 0.85 + 0.22 * math.sin(elapsed * 11.2)
-        fire.add_crossed_flame(fc[0], fy + 0.12, fc[1], 0.62, 0.95 * flick, math.sin(elapsed * 7.0) * 0.05)
+        fire.add_crossed_flame(fc[0], fy + 0.12, fc[1], 0.44, 0.72 * flick, math.sin(elapsed * 7.0) * 0.05)
 
     for node in shot.get("nodes", []):
         if node.get("available", True) and node["kind"] == "SPECIAL_CACHE":
             ny = terrain_height(loc, node["x"], node["z"])
             hover = ny + 1.05 + 0.16 * math.sin(elapsed * 3.1)
-            fire.add_crossed_flame(node["x"], hover, node["z"], 0.36, 0.58, 0.0, 1.0, 0.92, 0.42, 0.92)
+            fire.add_crossed_flame(node["x"], hover, node["z"], 0.24, 0.42, 0.0, 1.0, 0.92, 0.42, 0.85)
 
     fwd_x, fwd_z = math.sin(yaw), -math.cos(yaw)
     for idx, beast in enumerate(shot.get("wildlife", [])):
