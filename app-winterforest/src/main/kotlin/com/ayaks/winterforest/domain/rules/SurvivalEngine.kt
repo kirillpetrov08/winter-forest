@@ -137,11 +137,17 @@ object SurvivalEngine {
         }
         val nextSprintFlag = if (nextStamina <= 1f) false else run.isSprinting
 
+        val weatherNow = AdvancedMechanics.weatherFor(run.elapsedRealSeconds)
+        val shelterDecayed = run.shelterAt?.let {
+            val left = it.remainingSec - deltaSeconds
+            if (left <= 0f) null else it.copy(remainingSec = left)
+        }
         // 1. ГОЛОД: постоянный расход + калории на спринт (не казуальный выживач)
         var nextHunger = (run.hunger - GameRunState.HUNGER_LOSS_PER_SECOND * deltaSeconds)
             .coerceIn(0f, GameRunState.MAX_STAT)
         if (activelySprinting) {
-            nextHunger = (nextHunger - 0.45f * deltaSeconds).coerceIn(0f, GameRunState.MAX_STAT)
+            nextHunger = (nextHunger - 0.45f * AdvancedMechanics.sprintStaminaMultiplier(base) * deltaSeconds)
+                .coerceIn(0f, GameRunState.MAX_STAT)
         }
 
         // 2. ТЕПЛО: учитывает базовый костёр, полевые 3D-костры, ночной мороз, ветер, шубу, термос и факел
@@ -154,7 +160,10 @@ object SurvivalEngine {
             val fireGainPerSec = base.campfireRecoveryPerSec()
             (run.warmth + fireGainPerSec * deltaSeconds).coerceIn(0f, GameRunState.MAX_STAT)
         } else {
-            val baseColdPerSec = 0.32f * run.currentLocation.coldMultiplier
+            val weatherEvent = AdvancedMechanics.weatherFor(run.elapsedRealSeconds)
+            val weatherMul = AdvancedMechanics.coldMultiplierFor(weatherEvent) * AdvancedMechanics.coldPerkMultiplier(base)
+            val shelterMul = if (run.shelterAt?.covers(run.playerX, run.playerZ) == true) 0.6f else 1f
+            val baseColdPerSec = 0.32f * run.currentLocation.coldMultiplier * weatherMul * shelterMul
             val nightFactor = if (nowNight) 2.2f else 1.0f
             val moveFactor = if (isMoving) 1.28f else 1.0f
             val weatherFactor = if (snowingNow) 1.5f else 1.0f
@@ -208,7 +217,8 @@ object SurvivalEngine {
         // Регенерация — только у огня/в убежище при сытости и тепле (без «казуального» самоизлечения)
         val restingWarm = warmingNearFire || run.isNearBaseCampfire
         if (restingWarm && nextHunger > 65f && nextWarmth > 60f && healthDelta >= 0f) {
-            healthDelta += GameRunState.PASSIVE_HEALTH_REGEN_PER_SECOND * deltaSeconds
+            healthDelta += GameRunState.PASSIVE_HEALTH_REGEN_PER_SECOND *
+                AdvancedMechanics.regenMultiplier(base) * deltaSeconds
         }
 
         val xpGain = newlyCompletedDays * 35
@@ -263,6 +273,8 @@ object SurvivalEngine {
                 nodesByLocation = updatedNodes,
                 wildlifeByLocation = updatedWildlifeMap,
                 fieldCampfires = emptyList(),
+                weatherEvent = weatherNow,
+                shelterAt = shelterDecayed,
                 isSnowing = snowingNow,
                 resinTorchRemainingSec = 0f,
                 portableFireRemainingSec = 0f,
@@ -305,6 +317,8 @@ object SurvivalEngine {
             nodesByLocation = updatedNodes,
             wildlifeByLocation = updatedWildlifeMap,
             fieldCampfires = updatedCampfires,
+            weatherEvent = weatherNow,
+            shelterAt = shelterDecayed,
             isSnowing = snowingNow,
             resinTorchRemainingSec = nextTorchSec,
             portableFireRemainingSec = nextPortableFireSec,
@@ -318,7 +332,8 @@ object SurvivalEngine {
             hitFeedbackTimerSec = nextHitSec,
             lastStatusMessage = statusMessage
         )
-        return EngineStepOutcome(aliveRun, updatedBase, message = statusMessage)
+        val raidedRun = AdvancedMechanics.nightEventTick(aliveRun, updatedBase, deltaSeconds)
+        return EngineStepOutcome(raidedRun, updatedBase, message = raidedRun.lastStatusMessage)
     }
 
     private fun stepWildlifeSimulation(
@@ -569,7 +584,7 @@ object SurvivalEngine {
             EquippedTool.TORCH -> 18f
         }
         val hitY = WorldPopulator.terrainHeight(run.currentLocation, target.x, target.z) + 0.6f
-        val remainingHp = (target.hp - damage).coerceAtLeast(0f)
+        val remainingHp = (target.hp - damage * AdvancedMechanics.hunterDamageMultiplier(base)).coerceAtLeast(0f)
 
         if (remainingHp > 0f) {
             val fleeSec = if (tool == EquippedTool.TORCH && target.kind.isPredator) 7.5f else 4.0f
@@ -627,7 +642,11 @@ object SurvivalEngine {
                 hitWorldZ = target.z,
                 lastStatusMessage = msg
             ),
-            base.copy(totalWildlifeHunted = base.totalWildlifeHunted + 1),
+            AdvancedMechanics.trackChallenge(
+                base.copy(totalWildlifeHunted = base.totalWildlifeHunted + 1),
+                DailyChallengeId.Kind.KILL_WOLF,
+                if (target.kind == com.ayaks.winterforest.domain.model.WildlifeKind.TIMBER_WOLF) 1 else 0
+            ),
             true,
             msg
         )
@@ -747,9 +766,14 @@ object SurvivalEngine {
             target.copy(respawnRemainingSec = GameRunState.NODE_RESPAWN_SECONDS)
         )
         val woodDelta = if (resType == ResourceType.WOOD) added else 0
-        val updatedBase = base.copy(
+        var updatedBase = base.copy(
             lifetimeWoodGathered = base.lifetimeWoodGathered + woodDelta
         )
+        updatedBase = when (resType) {
+            ResourceType.WOOD -> AdvancedMechanics.trackChallenge(updatedBase, DailyChallengeId.Kind.GATHER_WOOD, added)
+            ResourceType.STONE -> AdvancedMechanics.trackChallenge(updatedBase, DailyChallengeId.Kind.GATHER_STONE, added)
+            else -> updatedBase
+        }
         val xpEarned = resType.xpReward * added
         val (nextXp, nextLevel) = applyXpGain(run.xp, run.level, xpEarned)
         val maxHp = GameRunState.BASE_MAX_HEALTH + (nextLevel - 1) * GameRunState.HEALTH_PER_LEVEL
@@ -1491,7 +1515,7 @@ object SurvivalEngine {
         type: ResourceType
     ): Int = run.inventory.countOf(type) + (base.storageResources[type] ?: 0)
 
-    private fun spendResourcesAcrossInventoryAndBase(
+    fun spendResourcesAcrossInventoryAndBase(
         inventory: Inventory,
         base: BaseProgress,
         cost: Map<ResourceType, Int>
@@ -1518,7 +1542,7 @@ object SurvivalEngine {
         return workingInv to base.copy(storageResources = workingStorage)
     }
 
-    private fun applyXpGain(currentXp: Int, currentLevel: Int, addedXp: Int): Pair<Int, Int> {
+    fun applyXpGain(currentXp: Int, currentLevel: Int, addedXp: Int): Pair<Int, Int> {
         var xp = currentXp + addedXp.coerceAtLeast(0)
         var lvl = currentLevel
         while (xp >= lvl * GameRunState.XP_PER_LEVEL_STEP) {

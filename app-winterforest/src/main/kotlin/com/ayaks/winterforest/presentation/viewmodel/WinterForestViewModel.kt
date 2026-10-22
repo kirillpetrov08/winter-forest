@@ -37,6 +37,13 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
+/** Пеший переход между соседними локациями (идём, а не телепортируемся). */
+data class TravelJourney(
+    val destination: com.ayaks.winterforest.domain.model.LocationId,
+    val totalSec: Float,
+    val remainingSec: Float
+)
+
 data class WinterForestUiState(
     val isInitialized: Boolean = false,
     val destination: AppDestination = AppDestination.MAIN_MENU,
@@ -50,7 +57,9 @@ data class WinterForestUiState(
     val showResetConfirmationDialog: Boolean = false,
     val joystickForward: Float = 0f,
     val joystickStrafe: Float = 0f,
-    val measuredFps: Int = 60
+    val measuredFps: Int = 60,
+    val cooldowns: Map<String, Float> = emptyMap(),
+    val travelJourney: TravelJourney? = null
 ) {
     val hasActiveSave: Boolean
         get() = activeRun != null && activeRun.phase == RunPhase.PLAYING
@@ -266,7 +275,7 @@ class WinterForestViewModel(
         }
     }
 
-    fun onPlaceFieldCampfire() = applyEngineAction { run, base ->
+    fun onPlaceFieldCampfire() = applyEngineAction(cooldownId = "place_campfire", cooldownSec = 3.0f) { run, base ->
         SurvivalEngine.placeFieldCampfire(run, base)
     }
 
@@ -297,6 +306,37 @@ class WinterForestViewModel(
         if (run.phase == RunPhase.DEAD) return
 
         portalCooldownSec = (portalCooldownSec - deltaSeconds).coerceAtLeast(0f)
+
+        // Кулдауны кнопок тикают всегда
+        if (_uiState.value.cooldowns.isNotEmpty()) {
+            _uiState.update { st ->
+                st.copy(cooldowns = st.cooldowns.mapValues { (_, v) -> (v - deltaSeconds).coerceAtLeast(0f) }
+                    .filterValues { it > 0.01f })
+            }
+        }
+
+        // Пеший переход между локациями: идём, а не телепортируемся
+        val journey = _uiState.value.travelJourney
+        if (journey != null) {
+            val speed = if (isMoving) 1.65f else 1f
+            val left = journey.remainingSec - deltaSeconds * speed
+            if (left <= 0f) {
+                val arrived = SurvivalEngine.travelToLocation(
+                    run, current.baseProgress, journey.destination
+                )
+                _uiState.update {
+                    it.copy(
+                        activeRun = arrived.run,
+                        baseProgress = arrived.base,
+                        travelJourney = null
+                    )
+                }
+                persistCheckpointAsync()
+                return
+            } else {
+                _uiState.update { it.copy(travelJourney = journey.copy(remainingSec = left)) }
+            }
+        }
 
         val isMoving = abs(current.joystickForward) > 0.05f || abs(current.joystickStrafe) > 0.05f
         val movedRun = if (isMoving) {
@@ -339,11 +379,18 @@ class WinterForestViewModel(
             isMoving = isMoving
         )
 
-        val diedJustNow = outcome.run.phase == RunPhase.DEAD
+        // Очки навыков за уровни + синхронизация ежедневных испытаний
+        val levelGain = (outcome.run.level - run.level).coerceAtLeast(0)
+        val dayIndex = (outcome.run.elapsedRealSeconds / GameRunState.FULL_CYCLE_SECONDS).toInt()
+        var nextBase = com.ayaks.winterforest.domain.rules.AdvancedMechanics.syncDaily(outcome.base, dayIndex)
+        if (levelGain > 0) nextBase = nextBase.copy(perkPoints = nextBase.perkPoints + levelGain)
+        val outcome2 = outcome.copy(base = nextBase)
+
+        val diedJustNow = outcome2.run.phase == RunPhase.DEAD
         _uiState.update {
             it.copy(
-                activeRun = outcome.run,
-                baseProgress = outcome.base,
+                activeRun = outcome2.run,
+                baseProgress = outcome2.base,
                 destination = if (diedJustNow) AppDestination.RESULTS else it.destination,
                 joystickForward = if (diedJustNow) 0f else it.joystickForward,
                 joystickStrafe = if (diedJustNow) 0f else it.joystickStrafe
@@ -365,23 +412,23 @@ class WinterForestViewModel(
         }
     }
 
-    fun onActionGather() = applyEngineAction { run, base ->
+    fun onActionGather() = applyEngineAction(cooldownId = "gather", cooldownSec = 1.2f) { run, base ->
         SurvivalEngine.gatherNearest(run, base, withToolStrikeBonus = false)
     }
 
-    fun onActionStrike() = applyEngineAction { run, base ->
+    fun onActionStrike() = applyEngineAction(cooldownId = "strike", cooldownSec = 1.0f) { run, base ->
         SurvivalEngine.performSmartAction(run, base, withToolStrikeBonus = true)
     }
 
-    fun onActionQuickUse() = applyEngineAction { run, base ->
+    fun onActionQuickUse() = applyEngineAction(cooldownId = "quick_use", cooldownSec = 0.9f) { run, base ->
         SurvivalEngine.quickUseBestSurvivalItem(run, base)
     }
 
-    fun onUseSpecificResource(type: ResourceType) = applyEngineAction { run, base ->
+    fun onUseSpecificResource(type: ResourceType) = applyEngineAction(cooldownId = "use_item", cooldownSec = 0.9f) { run, base ->
         SurvivalEngine.useResource(run, base, type)
     }
 
-    fun onIgniteResinTorch() = applyEngineAction { run, base ->
+    fun onIgniteResinTorch() = applyEngineAction(cooldownId = "ignite", cooldownSec = 2.0f) { run, base ->
         SurvivalEngine.igniteResinTorch(run, base)
     }
 
@@ -391,20 +438,49 @@ class WinterForestViewModel(
 
     fun onTravelToLocation(destination: LocationId) {
         val state = _uiState.value
-        val existingRun = state.activeRun ?: SurvivalEngine.createNewRun(state.baseProgress)
-        val outcome = SurvivalEngine.travelToLocation(existingRun, state.baseProgress, destination)
+        val existingRun = state.activeRun ?: return
+        if (destination == existingRun.currentLocation) return
+        // Пеший переход: идём до соседней локации, а не телепортируемся
+        val total = com.ayaks.winterforest.domain.rules.AdvancedMechanics.travelSeconds(
+            existingRun.currentLocation, destination
+        )
         _uiState.update {
             it.copy(
-                activeRun = outcome.run,
-                baseProgress = outcome.base,
-                destination = if (outcome.actionSucceeded) AppDestination.GAME else it.destination
+                travelJourney = TravelJourney(destination, total, total),
+                destination = AppDestination.GAME
             )
         }
-        persistCheckpointAsync()
-        if (outcome.actionSucceeded) {
-            startGameLoopIfNeeded()
-        }
     }
+
+    fun onFishAtHole() = applyEngineAction(cooldownId = "fish", cooldownSec = 6.0f) { run, base ->
+        com.ayaks.winterforest.domain.rules.AdvancedMechanics.fishAtHole(run, base)
+    }
+
+    fun onPlaceSnowShelter() = applyEngineAction(cooldownId = "shelter", cooldownSec = 6.0f) { run, base ->
+        com.ayaks.winterforest.domain.rules.AdvancedMechanics.placeSnowShelter(run, base)
+    }
+
+    fun onUnlockPerk(perk: com.ayaks.winterforest.domain.rules.PerkId) {
+        _uiState.update { st ->
+            st.copy(baseProgress = com.ayaks.winterforest.domain.rules.AdvancedMechanics.unlockPerk(st.baseProgress, perk))
+        }
+        persistCheckpointAsync()
+    }
+
+    fun onClaimDaily(challenge: com.ayaks.winterforest.domain.rules.DailyChallengeId) {
+        _uiState.update { st ->
+            val base = com.ayaks.winterforest.domain.rules.AdvancedMechanics.claimChallenge(st.baseProgress, challenge)
+            val run = st.activeRun
+            if (base != st.baseProgress && run != null) {
+                val (xp, lvl) = SurvivalEngine.applyXpGain(run.xp, run.level, challenge.rewardXp)
+                st.copy(baseProgress = base, activeRun = run.copy(xp = xp, level = lvl))
+            } else {
+                st.copy(baseProgress = base)
+            }
+        }
+        persistCheckpointAsync()
+    }
+
 
     fun onDepositAllToBase() = applyEngineAction { run, base ->
         SurvivalEngine.depositAllToBaseStorage(run, base)
@@ -427,8 +503,13 @@ class WinterForestViewModel(
         SurvivalEngine.installThermosOnBase(run, base)
     }
 
-    fun onCraftRecipe(recipe: WorkbenchRecipe) = applyEngineAction { run, base ->
-        SurvivalEngine.craftAtWorkbench(run, base, recipe)
+    fun onCraftRecipe(recipe: WorkbenchRecipe) = applyEngineAction(cooldownId = "craft", cooldownSec = 2.5f) { run, base ->
+        val o = SurvivalEngine.craftAtWorkbench(run, base, recipe)
+        if (o.actionSucceeded) {
+            o.copy(base = com.ayaks.winterforest.domain.rules.AdvancedMechanics.trackChallenge(
+                o.base, com.ayaks.winterforest.domain.rules.DailyChallengeId.Kind.CRAFT, 1
+            ))
+        } else o
     }
 
     fun onStartCampfireCooking() = applyEngineAction { run, base ->
@@ -557,6 +638,8 @@ class WinterForestViewModel(
     }
 
     private fun applyEngineAction(
+        cooldownId: String? = null,
+        cooldownSec: Float = 0f,
         block: (GameRunState, BaseProgress) -> com.ayaks.winterforest.domain.rules.EngineStepOutcome
     ) {
         val state = _uiState.value
@@ -564,8 +647,13 @@ class WinterForestViewModel(
         val outcome = block(run, state.baseProgress)
         _uiState.update {
             it.copy(
-                activeRun = outcome.run,
-                baseProgress = outcome.base
+                activeRun = outcome2.run,
+                baseProgress = outcome2.base,
+                cooldowns = if (cooldownId != null && cooldownSec > 0f) {
+                    it.cooldowns + (cooldownId to cooldownSec)
+                } else {
+                    it.cooldowns
+                }
             )
         }
         persistCheckpointAsync()

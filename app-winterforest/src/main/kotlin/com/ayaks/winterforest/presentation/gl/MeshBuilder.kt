@@ -360,7 +360,7 @@ class MeshBuilder(initialFloatsCapacity: Int = 16384) {
         x1: Float, y1: Float, z1: Float,
         r0: Float,
         r1: Float,
-        segments: Int = 8,
+        segments: Int = 14,
         r: Float = 1f, g: Float = 1f, b: Float = 1f, a: Float = 1f,
         capEnds: Boolean = true
     ) {
@@ -476,8 +476,8 @@ class MeshBuilder(initialFloatsCapacity: Int = 16384) {
         r: Float = 1f, g: Float = 1f, b: Float = 1f,
         snowCapTint: Boolean = true
     ) {
-        val latBands = 8
-        val lonSegs = 12
+        val latBands = 14
+        val lonSegs = 20
         fun displacedPoint(latIdx: Int, lonIdx: Int): FloatArray {
             val v = latIdx.toFloat() / latBands.toFloat()
             val phi = (v - 0.5f) * Math.PI.toFloat()
@@ -546,8 +546,8 @@ class MeshBuilder(initialFloatsCapacity: Int = 16384) {
         rx: Float,
         ry: Float,
         rz: Float,
-        latBands: Int = 8,
-        lonSegs: Int = 12,
+        latBands: Int = 12,
+        lonSegs: Int = 18,
         yawRad: Float = 0f,
         r: Float = 1f,
         g: Float = 1f,
@@ -602,7 +602,7 @@ class MeshBuilder(initialFloatsCapacity: Int = 16384) {
         baseY: Float,
         cz: Float,
         profile: FloatArray,
-        segments: Int = 12,
+        segments: Int = 18,
         r: Float = 1f,
         g: Float = 1f,
         b: Float = 1f,
@@ -663,7 +663,7 @@ class MeshBuilder(initialFloatsCapacity: Int = 16384) {
         cz: Float,
         radius: Float,
         height: Float,
-        segments: Int = 8,
+        segments: Int = 14,
         r: Float = 1f,
         g: Float = 1f,
         b: Float = 1f,

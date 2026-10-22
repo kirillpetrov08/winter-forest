@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -32,6 +33,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -493,6 +495,16 @@ fun MiniCompassBadge(
  */
 @Composable
 fun ResourceTypeGlyph(type: ResourceType, modifier: Modifier = Modifier) {
+    val bmp = rememberAssetIcon("icons/${assetIconNameFor(type)}.png")
+    if (bmp != null) {
+        androidx.compose.foundation.Image(
+            bitmap = bmp,
+            contentDescription = type.titleRu,
+            modifier = modifier,
+            contentScale = androidx.compose.ui.layout.ContentScale.Fit
+        )
+        return
+    }
     val tint = when (type.category) {
         ResourceCategory.FUEL -> HearthAmberAccent
         ResourceCategory.FOOD -> SpruceEmerald
@@ -501,61 +513,95 @@ fun ResourceTypeGlyph(type: ResourceType, modifier: Modifier = Modifier) {
     Canvas(modifier = modifier.size(26.dp)) {
         val w = size.width
         val h = size.height
-        when (type) {
-            ResourceType.WOOD -> {
-                drawRoundRect(
-                    color = tint.copy(alpha = 0.95f),
-                    topLeft = Offset(w * 0.10f, h * 0.30f),
-                    size = androidx.compose.ui.geometry.Size(w * 0.80f, h * 0.22f),
-                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(h * 0.11f)
-                )
-                drawRoundRect(
-                    color = tint.copy(alpha = 0.70f),
-                    topLeft = Offset(w * 0.18f, h * 0.56f),
-                    size = androidx.compose.ui.geometry.Size(w * 0.72f, h * 0.20f),
-                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(h * 0.10f)
-                )
+        drawCircle(color = tint.copy(alpha = 0.9f), radius = w * 0.32f, center = Offset(w * 0.5f, h * 0.5f))
+        drawCircle(color = tint.copy(alpha = 0.5f), radius = w * 0.16f, center = Offset(w * 0.5f, h * 0.5f))
+    }
+}
+
+/** Имя предметной иконки в assets/icons для ресурса. */
+fun assetIconNameFor(type: ResourceType): String = when (type) {
+    ResourceType.WOOD -> "icon_wood"
+    ResourceType.STONE -> "icon_stone"
+    ResourceType.IRON -> "icon_iron_ore"
+    ResourceType.COAL -> "icon_coal"
+    ResourceType.CLOTH -> "icon_cloth"
+    ResourceType.HIDE -> "icon_hide"
+    ResourceType.MEAT -> "icon_meat"
+    ResourceType.FISH -> "icon_fish"
+    ResourceType.BERRIES -> "icon_berries"
+    ResourceType.RESIN -> "icon_resin"
+    ResourceType.ICE -> "icon_ice"
+    else -> "icon_stone"
+}
+
+/** Загрузка PNG из assets как ImageBitmap (с кэшем через remember). */
+@Composable
+fun rememberAssetIcon(path: String): androidx.compose.ui.graphics.ImageBitmap? {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    return remember(path) {
+        runCatching {
+            context.assets.open(path).use { stream ->
+                android.graphics.BitmapFactory.decodeStream(stream)?.asImageBitmap()
             }
-            ResourceType.STONE, ResourceType.IRON, ResourceType.COAL -> {
-                drawCircle(color = tint.copy(alpha = 0.85f), radius = w * 0.30f, center = Offset(w * 0.42f, h * 0.52f))
-                drawCircle(color = tint.copy(alpha = 0.60f), radius = w * 0.20f, center = Offset(w * 0.68f, h * 0.38f))
-            }
-            ResourceType.BERRIES -> {
-                drawCircle(color = tint, radius = w * 0.14f, center = Offset(w * 0.34f, h * 0.42f))
-                drawCircle(color = tint.copy(alpha = 0.85f), radius = w * 0.14f, center = Offset(w * 0.62f, h * 0.38f))
-                drawCircle(color = tint.copy(alpha = 0.70f), radius = w * 0.14f, center = Offset(w * 0.48f, h * 0.66f))
-            }
-            ResourceType.FISH -> {
-                drawOval(color = tint, topLeft = Offset(w * 0.14f, h * 0.34f), size = androidx.compose.ui.geometry.Size(w * 0.52f, h * 0.32f))
-                drawLine(tint, Offset(w * 0.68f, h * 0.50f), Offset(w * 0.92f, h * 0.28f), strokeWidth = h * 0.07f)
-                drawLine(tint, Offset(w * 0.68f, h * 0.50f), Offset(w * 0.92f, h * 0.72f), strokeWidth = h * 0.07f)
-            }
-            ResourceType.CLOTH, ResourceType.HIDE -> {
-                drawOval(color = tint.copy(alpha = 0.85f), topLeft = Offset(w * 0.16f, h * 0.22f), size = androidx.compose.ui.geometry.Size(w * 0.68f, h * 0.56f))
-                drawArc(
-                    color = tint,
-                    startAngle = 200f, sweepAngle = 140f, useCenter = false,
-                    topLeft = Offset(w * 0.26f, h * 0.32f),
-                    size = androidx.compose.ui.geometry.Size(w * 0.48f, h * 0.36f),
-                    style = Stroke(width = h * 0.06f)
-                )
-            }
-            ResourceType.RESIN -> {
-                drawCircle(color = tint, radius = w * 0.22f, center = Offset(w * 0.50f, h * 0.58f))
-                drawLine(tint, Offset(w * 0.50f, h * 0.14f), Offset(w * 0.32f, h * 0.52f), strokeWidth = h * 0.10f)
-                drawLine(tint, Offset(w * 0.50f, h * 0.14f), Offset(w * 0.68f, h * 0.52f), strokeWidth = h * 0.10f)
-            }
-            else -> {
-                drawCircle(color = tint.copy(alpha = 0.9f), radius = w * 0.28f, center = Offset(w * 0.50f, h * 0.50f))
-                drawCircle(color = tint.copy(alpha = 0.55f), radius = w * 0.14f, center = Offset(w * 0.50f, h * 0.50f))
-            }
-        }
+        }.getOrNull()
     }
 }
 
 /**
- * Ячейка рюкзака: слот-карточка с иконкой, стаком и выделением.
+ * Кнопка с внутренним кулдауном: фон заполняется слева направо по прогрессу
+ * перезарядки, на время кулдауна кнопка некликабельна.
  */
+@Composable
+fun CooldownButton(
+    label: String,
+    cooldownRemainingSec: Float,
+    cooldownTotalSec: Float,
+    enabled: Boolean = true,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val cooling = cooldownRemainingSec > 0.05f
+    val readyFraction = if (cooling && cooldownTotalSec > 0f) {
+        (1f - cooldownRemainingSec / cooldownTotalSec).coerceIn(0f, 1f)
+    } else {
+        1f
+    }
+    val bg = if (cooling) Color(0x33FFFFFF) else Color(0xE6243444)
+    val fg = if (!enabled || cooling) MistMutedText else SnowCrispText
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = modifier
+            .height(36.dp)
+            .clip(RoundedCornerShape(9.dp))
+            .background(bg)
+            .border(1.dp, if (cooling) Color(0x2EFFFFFF) else Color(0x557CC6FE), RoundedCornerShape(9.dp))
+            .clickable(enabled = enabled && !cooling, onClick = onClick)
+    ) {
+        // заливка прогресса слева направо
+        if (cooling) {
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .background(IceCyanPrimary.copy(alpha = 0.28f * readyFraction))
+            )
+            Box(
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .fillMaxWidth(readyFraction)
+                    .background(IceCyanPrimary.copy(alpha = 0.34f))
+            )
+        }
+        Text(
+            text = label,
+            color = fg,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            modifier = Modifier.padding(horizontal = 10.dp)
+        )
+    }
+}
+
 @Composable
 fun InventoryCell(
     slot: InventorySlot?,

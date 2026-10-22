@@ -19,7 +19,13 @@ enum class ProceduralTextureId {
     TIMBER,
     FIRE_EMBER,
     METAL_STEEL,
-    FUR_HIDE
+    FUR_HIDE,
+    METAL_CORRUGATED,
+    BURLAP,
+    CONCRETE,
+    LOG_WALL,
+    TARP,
+    CHARRED
 }
 
 /**
@@ -211,6 +217,17 @@ object ProceduralTextures {
                         r = (0.86f * shade).coerceIn(0f, 1f)
                         g = (0.83f * shade).coerceIn(0f, 1f)
                         b = (0.79f * shade).coerceIn(0f, 1f)
+                    }
+
+                    else -> {
+                        // Фолбэк для новых материалов (профлист/бетон/мешковина/сруб/тент/угли)
+                        val base = fbm(u * 6f, v * 6f, octaves = 4, seed = seed + 313)
+                        val detail = ridgedFbm(u * 18f, v * 18f, octaves = 3, seed = seed + 407)
+                        val shade = (0.42f + 0.36f * base + 0.22f * detail).coerceIn(0.12f, 1f)
+                        val warm = if (id == ProceduralTextureId.METAL_CORRUGATED || id == ProceduralTextureId.LOG_WALL) 0.12f else 0f
+                        r = (shade * (0.92f + warm)).coerceIn(0f, 1f)
+                        g = (shade * 0.93f).coerceIn(0f, 1f)
+                        b = (shade * 0.95f).coerceIn(0f, 1f)
                     }
                 }
 

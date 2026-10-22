@@ -386,19 +386,6 @@ fun GameScreen(
                 )
             }
 
-            // Подсказка текущей цели выживания
-            Text(
-                text = "Цель: ${run.currentObjectiveTitleRu(state.baseProgress)}",
-                color = IceCyanPrimary,
-                fontSize = 10.sp,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(Color(0xB4091520))
-                    .padding(horizontal = 8.dp, vertical = 4.dp)
-            )
-        }
-
         // 4. Верхняя центральная строка живых событий + пропуск активного таймера
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -408,17 +395,6 @@ fun GameScreen(
                 .width(340.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
-            Text(
-                text = run.lastStatusMessage,
-                color = SnowCrispText,
-                fontSize = 11.sp,
-                maxLines = 2,
-                modifier = Modifier
-                    .clip(RoundedCornerShape(9.dp))
-                    .background(Color(0xBA0C1A28))
-                    .padding(horizontal = 10.dp, vertical = 5.dp)
-            )
-
             val activeTimer = run.activeSkippableTimer()
             if (activeTimer != null) {
                 Row(
@@ -556,33 +532,48 @@ fun GameScreen(
                 }
             }
 
+            // Действия с перезарядкой: внутри кнопки прогресс слева направо
+            com.ayaks.winterforest.presentation.ui.components.CooldownButton(
+                label = "Добыть",
+                cooldownRemainingSec = state.cooldowns["gather"] ?: 0f,
+                cooldownTotalSec = 1.2f,
+                onClick = { viewModel.onActionGather() },
+                modifier = Modifier.width(120.dp)
+            )
+            com.ayaks.winterforest.presentation.ui.components.CooldownButton(
+                label = "Рыбалка",
+                cooldownRemainingSec = state.cooldowns["fish"] ?: 0f,
+                cooldownTotalSec = 6.0f,
+                onClick = { viewModel.onFishAtHole() },
+                modifier = Modifier.width(120.dp)
+            )
+            com.ayaks.winterforest.presentation.ui.components.CooldownButton(
+                label = "Укрытие",
+                cooldownRemainingSec = state.cooldowns["shelter"] ?: 0f,
+                cooldownTotalSec = 6.0f,
+                onClick = { viewModel.onPlaceSnowShelter() },
+                modifier = Modifier.width(120.dp)
+            )
+
             Row(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Button(
+                com.ayaks.winterforest.presentation.ui.components.CooldownButton(
+                    label = "Еда / Тепло",
+                    cooldownRemainingSec = state.cooldowns["quick_use"] ?: 0f,
+                    cooldownTotalSec = 0.9f,
                     onClick = { viewModel.onActionQuickUse() },
-                    colors = ButtonDefaults.buttonColors(containerColor = HearthAmberAccent),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                    modifier = Modifier.height(42.dp)
-                ) {
-                    Text("Еда / Тепло", color = Color(0xFF1A1006), fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                }
+                    modifier = Modifier.width(128.dp).height(42.dp)
+                )
 
-                Button(
+                com.ayaks.winterforest.presentation.ui.components.CooldownButton(
+                    label = primaryLabel,
+                    cooldownRemainingSec = state.cooldowns["strike"] ?: 0f,
+                    cooldownTotalSec = 1.0f,
                     onClick = { viewModel.onActionStrike() },
-                    shape = CircleShape,
-                    colors = ButtonDefaults.buttonColors(containerColor = primaryColor),
-                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
-                    modifier = Modifier.height(54.dp)
-                ) {
-                    Text(
-                        text = primaryLabel,
-                        color = Color(0xFF07131C),
-                        fontWeight = FontWeight.ExtraBold,
-                        fontSize = 12.sp
-                    )
-                }
+                    modifier = Modifier.width(150.dp).height(54.dp)
+                )
             }
         }
     }
@@ -606,7 +597,8 @@ fun BaseInventoryScreen(
         "Верстак (7 рецептов)",
         "Рюкзак и склад",
         "Карта 5 локаций",
-        "Реликвии и отряд"
+        "Реликвии и отряд",
+        "Навыки и задания"
     )
 
     Row(
@@ -683,7 +675,8 @@ fun BaseInventoryScreen(
                 1 -> WorkbenchTab(run, base, viewModel)
                 2 -> InventoryStorageTab(run, base, viewModel)
                 3 -> ExpeditionMapTab(run, base, viewModel)
-                else -> RelicsAndLoadoutTab(run, base, viewModel)
+                4 -> RelicsAndLoadoutTab(run, base, viewModel)
+                else -> SkillsAndDailyTab(base, viewModel)
             }
         }
     }
@@ -1350,6 +1343,119 @@ fun AboutScreen(viewModel: WinterForestViewModel) {
                     color = MistMutedText
                 )
                 Text("Разработчик: Ayaks • Контакт: kirillpetrov08@gmail.com • Версия: 2.0.0", color = IceCyanPrimary)
+            }
+        }
+    }
+}
+
+
+/** Вкладка «Навыки и задания»: дерево перков и ежедневные испытания. */
+@Composable
+private fun SkillsAndDailyTab(
+    base: BaseProgress,
+    viewModel: WinterForestViewModel
+) {
+    val am = com.ayaks.winterforest.domain.rules.AdvancedMechanics
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Card(colors = CardDefaults.cardColors(containerColor = FrostedCardSurface)) {
+            Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
+                Text(
+                    "Навыки выживальщика • очков: ${am.availableSkillPoints(base)}",
+                    fontWeight = FontWeight.Bold,
+                    color = SnowCrispText
+                )
+                for (perk in com.ayaks.winterforest.domain.rules.PerkId.entries) {
+                    val owned = perk in base.perks
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(9.dp))
+                            .background(if (owned) Color(0x1E4CC67E) else Color(0x14FFFFFF))
+                            .padding(9.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(9.dp)
+                    ) {
+                        com.ayaks.winterforest.presentation.ui.components.rememberAssetIcon(
+                            when (perk) {
+                                com.ayaks.winterforest.domain.rules.PerkId.WARM_BLOODED -> "glyphs/glyph_warmth.png"
+                                com.ayaks.winterforest.domain.rules.PerkId.GATHERER -> "glyphs/glyph_backpack.png"
+                                com.ayaks.winterforest.domain.rules.PerkId.MARATHONER -> "glyphs/glyph_sprint.png"
+                                com.ayaks.winterforest.domain.rules.PerkId.HUNTER -> "glyphs/glyph_warning.png"
+                                com.ayaks.winterforest.domain.rules.PerkId.SURVIVOR -> "glyphs/glyph_health.png"
+                                com.ayaks.winterforest.domain.rules.PerkId.FISHERMAN -> "glyphs/glyph_hunger.png"
+                            }
+                        )?.let { bmp ->
+                            androidx.compose.foundation.Image(
+                                bitmap = bmp,
+                                contentDescription = perk.titleRu,
+                                modifier = Modifier.size(26.dp)
+                            )
+                        }
+                        Column(Modifier.weight(1f)) {
+                            Text(perk.titleRu, color = HearthAmberAccent, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+                            Text(perk.descriptionRu, color = MistMutedText, fontSize = 10.5.sp)
+                        }
+                        if (!owned) {
+                            Button(
+                                onClick = { viewModel.onUnlockPerk(perk) },
+                                enabled = am.canUnlockPerk(base, perk),
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 3.dp),
+                                modifier = Modifier.height(30.dp)
+                            ) {
+                                Text("Открыть", fontSize = 10.5.sp)
+                            }
+                        } else {
+                            Text("✓", color = SpruceEmerald, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        }
+                    }
+                }
+            }
+        }
+
+        Card(colors = CardDefaults.cardColors(containerColor = FrostedCardSurface)) {
+            Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
+                Text("Ежедневные испытания", fontWeight = FontWeight.Bold, color = SnowCrispText)
+                if (base.dailyDayIndex < 0) {
+                    Text("Испытания появятся в первые сутки экспедиции.", color = MistMutedText, fontSize = 11.sp)
+                } else {
+                    for (ch in am.currentDailySet(base.dailyDayIndex)) {
+                        val progress = base.dailyProgress[ch.name] ?: 0
+                        val done = am.isChallengeComplete(base, ch)
+                        val claimed = ch.name in base.dailyClaimed
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(9.dp))
+                                .background(Color(0x14FFFFFF))
+                                .padding(9.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(9.dp)
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text(ch.titleRu, color = SnowCrispText, fontWeight = FontWeight.SemiBold, fontSize = 11.5.sp)
+                                Text(
+                                    "${progress.coerceAtMost(ch.target)}/${ch.target} • награда: ${ch.rewardXp} опыта",
+                                    color = if (done) SpruceEmerald else MistMutedText,
+                                    fontSize = 10.5.sp
+                                )
+                            }
+                            when {
+                                claimed -> Text("✓", color = SpruceEmerald, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                done -> Button(
+                                    onClick = { viewModel.onClaimDaily(ch) },
+                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 3.dp),
+                                    modifier = Modifier.height(30.dp)
+                                ) { Text("Забрать", fontSize = 10.5.sp) }
+                                else -> Text("в процессе", color = MistMutedText, fontSize = 10.sp)
+                            }
+                        }
+                    }
+                }
             }
         }
     }

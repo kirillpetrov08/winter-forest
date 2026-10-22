@@ -222,6 +222,11 @@ enum class WorkbenchRecipe(
 @Serializable
 data class BaseProgress(
     val shelterLevel: Int = 1,
+    val perks: Set<com.ayaks.winterforest.domain.rules.PerkId> = emptySet(),
+    val perkPoints: Int = 0,
+    val dailyDayIndex: Int = -1,
+    val dailyProgress: Map<String, Int> = emptyMap(),
+    val dailyClaimed: Set<String> = emptySet(),
     val campfireLevel: Int = 1,
     val workbenchLevel: Int = 1,
     val storageResources: Map<ResourceType, Int> = emptyMap(),

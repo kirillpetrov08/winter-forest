@@ -123,6 +123,8 @@ data class TargetPromptInfo(
 data class GameRunState(
     val phase: RunPhase = RunPhase.PLAYING,
     val currentLocation: LocationId = LocationId.BASE_CLEARING,
+    val weatherEvent: com.ayaks.winterforest.domain.rules.WeatherEvent = com.ayaks.winterforest.domain.rules.WeatherEvent.CLEAR,
+    val shelterAt: com.ayaks.winterforest.domain.rules.ShelterSite? = null,
     val playerX: Float = 0f,
     val playerY: Float = 0f,
     val playerZ: Float = 5.5f,
@@ -357,7 +359,11 @@ data class GameRunState(
         const val FIELD_CAMPFIRE_WOOD_COST = 2
         const val FIELD_CAMPFIRE_DURATION_SECONDS = 95f
 
-        const val WORLD_HALF_BOUND = 38f
+        const val WORLD_HALF_BOUND = 52f
+        const val SHELTER_WOOD_COST = 4
+        const val SHELTER_CLOTH_COST = 2
+        const val SHELTER_DURATION_SECONDS = 420f
+        const val SHELTER_RADIUS_SQ = 7.5f * 7.5f
         const val INTERACT_RADIUS = 3.8f
         const val INTERACT_RADIUS_SQ = INTERACT_RADIUS * INTERACT_RADIUS
         const val CAMPFIRE_WARMTH_RADIUS_SQ = 5.5f * 5.5f

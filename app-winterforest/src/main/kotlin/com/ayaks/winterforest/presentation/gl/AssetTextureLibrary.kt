@@ -27,6 +27,12 @@ object AssetTextureLibrary {
         ProceduralTextureId.FIRE_EMBER -> "flame_streak"
         ProceduralTextureId.METAL_STEEL -> "metal_worn"
         ProceduralTextureId.FUR_HIDE -> "fur_deer"
+        ProceduralTextureId.METAL_CORRUGATED -> "metal_corrugated"
+        ProceduralTextureId.BURLAP -> "burlap"
+        ProceduralTextureId.CONCRETE -> "concrete_dirty"
+        ProceduralTextureId.LOG_WALL -> "log_wall"
+        ProceduralTextureId.TARP -> "tarp_blue"
+        ProceduralTextureId.CHARRED -> "charred_wood"
     }
 
     fun loadRgba(

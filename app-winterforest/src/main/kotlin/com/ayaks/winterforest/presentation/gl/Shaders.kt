@@ -136,6 +136,9 @@ object Shaders {
         uniform float uAspect;
         uniform float uTime;
         uniform float uAuroraStrength;
+        uniform sampler2D uCloudsHigh;
+        uniform sampler2D uCloudsLow;
+        uniform sampler2D uSunDisc;
         varying vec2 vScreenUv;
 
         float hash21(vec2 p) {
@@ -234,24 +237,28 @@ object Shaders {
                 col += auroraB * curtain2 * streaks2 * uAuroraStrength * 0.30;
             }
 
-            // 5. Два слоя облаков: высокие перистые + низкие плотные, с ветровым дрейфом
-            if (elev > 0.02) {
-                vec2 cloudUv = vec2(az * 2.1 + uTime * 0.012, elev * 3.4);
-                float highCloud = fbm2(cloudUv * 1.7 + vec2(uTime * 0.016, 0.0));
-                float lowCloud = fbm2(cloudUv * 3.1 + vec2(-uTime * 0.010, 2.3));
-                float cloudMask = smoothstep(0.52, 0.88, highCloud * 0.62 + lowCloud * 0.38) * exp(-elev * 2.4);
+            // 5. Два текстурных слоя облаков (assets/sky/clouds_*) с ветровым дрейфом
+            if (elev > 0.015) {
+                vec2 cuvHigh = vec2(az * 0.16 + uTime * 0.0032, elev * 0.85 + 0.08);
+                vec2 cuvLow = vec2(az * 0.11 - uTime * 0.0021 + 0.37, elev * 0.72 + 0.05);
+                float highA = texture2D(uCloudsHigh, cuvHigh).a;
+                float lowA = texture2D(uCloudsLow, cuvLow).a;
+                float highMask = smoothstep(0.12, 0.72, highA) * exp(-elev * 1.9);
+                float lowMask = smoothstep(0.22, 0.85, lowA) * exp(-elev * 1.35);
                 vec3 cloudLit = mix(uSkyHorizon * 1.06, uSunHaloColor, 0.42);
-                col = mix(col, cloudLit, cloudMask * 0.42);
-                float wisp = smoothstep(0.60, 0.95, lowCloud) * exp(-elev * 1.8) * 0.16;
-                col = mix(col, mix(uSkyHorizon, uSunHaloColor, 0.25), wisp);
+                col = mix(col, cloudLit, highMask * 0.34 + lowMask * 0.30);
             }
 
-            // 6. Солнечный / лунный диск: диск с затемнением края и мягкое гало
+            // 6. Диск солнца/луны из текстуры + мягкое гало
             float dScreen = distance(vScreenUv, uSunScreenUv);
-            float disc = smoothstep(0.042, 0.014, dScreen);
-            float limb = 1.0 - smoothstep(0.0, 0.042, dScreen) * 0.25;
+            vec2 sunTexUv = (vScreenUv - uSunScreenUv) / 0.085 + 0.5;
+            vec4 sunTex = vec4(0.0);
+            if (sunTexUv.x > 0.0 && sunTexUv.x < 1.0 && sunTexUv.y > 0.0 && sunTexUv.y < 1.0) {
+                sunTex = texture2D(uSunDisc, sunTexUv);
+            }
             float halo = exp(-dScreen * 5.6) * 0.36 + exp(-dScreen * 1.7) * 0.10;
-            col += uSunHaloColor * (disc * limb * 0.92 + halo);
+            col += uSunHaloColor * halo;
+            col = mix(col, sunTex.rgb * 1.08, sunTex.a);
 
             // 7. Три эшелона заснеженных горных хребтов 360°
             float farPeak = 0.150 * mountainRidge(az, 2.6, 4.2) + 0.012;

@@ -1050,6 +1050,53 @@ class ForestGlRenderer(
         skyAspectLoc = GLES20.glGetUniformLocation(skyProgram, "uAspect")
         skyTimeLoc = GLES20.glGetUniformLocation(skyProgram, "uTime")
         skyAuroraLoc = GLES20.glGetUniformLocation(skyProgram, "uAuroraStrength")
+        skyCloudsHighLoc = GLES20.glGetUniformLocation(skyProgram, "uCloudsHigh")
+        skyCloudsLowLoc = GLES20.glGetUniformLocation(skyProgram, "uCloudsLow")
+        skySunDiscLoc = GLES20.glGetUniformLocation(skyProgram, "uSunDisc")
+        ensureSkyTextures()
+    }
+
+    private var skyTexHigh = 0
+    private var skyTexLow = 0
+    private var skyTexSun = 0
+    private var skyCloudsHighLoc = -1
+    private var skyCloudsLowLoc = -1
+    private var skySunDiscLoc = -1
+
+    private fun uploadSkyTexture(path: String, wrapRepeat: Boolean): Int {
+        val ctx = appContext ?: return 0
+        val bmp = runCatching {
+            ctx.assets.open(path).use { android.graphics.BitmapFactory.decodeStream(it) }
+        }.getOrNull() ?: return 0
+        val outSize = if (wrapRepeat) 1024 else 256
+        val scaled = if (bmp.width != outSize || bmp.height != outSize) {
+            android.graphics.Bitmap.createScaledBitmap(bmp, outSize, outSize, true)
+        } else {
+            bmp
+        }
+        val buf = java.nio.ByteBuffer.allocateDirect(outSize * outSize * 4)
+            .order(java.nio.ByteOrder.nativeOrder())
+        scaled.copyPixelsToBuffer(buf)
+        buf.position(0)
+        val tex = IntArray(1)
+        GLES20.glGenTextures(1, tex, 0)
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, tex[0])
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
+        val wrap = if (wrapRepeat) GLES20.GL_REPEAT else GLES20.GL_CLAMP_TO_EDGE
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, wrap)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, wrap)
+        GLES20.glTexImage2D(
+            GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA,
+            outSize, outSize, 0, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, buf
+        )
+        return tex[0]
+    }
+
+    private fun ensureSkyTextures() {
+        if (skyTexHigh == 0) skyTexHigh = uploadSkyTexture("sky/clouds_high.png", wrapRepeat = true)
+        if (skyTexLow == 0) skyTexLow = uploadSkyTexture("sky/clouds_low.png", wrapRepeat = true)
+        if (skyTexSun == 0) skyTexSun = uploadSkyTexture("sky/sun_disc.png", wrapRepeat = false)
     }
 
     private fun drawSkyDome(
@@ -1076,6 +1123,17 @@ class ForestGlRenderer(
         GLES20.glUniform1f(skyAspectLoc, aspectRatio)
         GLES20.glUniform1f(skyTimeLoc, timeSec)
         GLES20.glUniform1f(skyAuroraLoc, auroraStrength)
+
+        ensureSkyTextures()
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, skyTexHigh)
+        GLES20.glUniform1i(skyCloudsHighLoc, 0)
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE1)
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, skyTexLow)
+        GLES20.glUniform1i(skyCloudsLowLoc, 1)
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE2)
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, skyTexSun)
+        GLES20.glUniform1i(skySunDiscLoc, 2)
 
         GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, skyQuadVbo)
         GLES20.glEnableVertexAttribArray(skyQuadAttrLoc)
