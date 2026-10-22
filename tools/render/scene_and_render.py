@@ -1181,6 +1181,12 @@ def render_sky(zenith, horizon, fog_col, sun_uv, sun_halo, cam_yaw, cam_pitch, a
 
     az = np.arctan2(dz, dx)
 
+    # тёплое зарево в стороне солнца (как в новом GLSL SKY_FRAGMENT_SHADER)
+    sun_az = np.arctan2(sun_uv[1] - 0.5, sun_uv[0] - 0.5)
+    az_align = np.maximum(0.0, np.cos(az - sun_az))
+    dusk_band = (az_align ** 3) * np.exp(-np.abs(elev) * 4.2)
+    col += sc * (dusk_band * 0.28)[..., None]
+
     if aurora > 0.02:
         star_x = np.floor(az * 46.0)
         star_y = np.floor(elev * 90.0)
@@ -1198,11 +1204,17 @@ def render_sky(zenith, horizon, fog_col, sun_uv, sun_halo, cam_yaw, cam_pitch, a
             return h0 + (h1 - h0) * uu
 
         wave1 = np.sin(az * 3.0 + time_sec * 0.28 + np.sin(az * 7.0 - time_sec * 0.15) * 0.8)
+        wave2 = np.sin(az * 2.2 - time_sec * 0.20 + np.sin(az * 5.0 + time_sec * 0.12) * 1.1)
         curtain = np.exp(-np.abs(elev - (0.30 + 0.09 * wave1)) * 7.5)
+        curtain2 = np.exp(-np.abs(elev - (0.46 + 0.11 * wave2)) * 9.5)
         streaks = 0.55 + 0.45 * np.sin(az * 26.0 + time_sec * 0.9)
+        streaks2 = 0.55 + 0.45 * np.sin(az * 18.0 - time_sec * 0.7 + 1.3)
         aur_mix = np.clip(elev * 1.4, 0, 1)[..., None]
         aur_col = np.array([0.10, 0.88, 0.58]) + (np.array([0.42, 0.28, 0.92]) - np.array([0.10, 0.88, 0.58])) * aur_mix
+        aur_mix2 = np.clip(elev * 1.1, 0, 1)[..., None]
+        aur_col2 = np.array([0.16, 0.72, 0.66]) + (np.array([0.30, 0.42, 0.95]) - np.array([0.16, 0.72, 0.66])) * aur_mix2
         col += aur_col * (curtain * streaks * aurora * 0.52)[..., None]
+        col += aur_col2 * (curtain2 * streaks2 * aurora * 0.30)[..., None]
 
         # clouds + mountains only outside mine — always computed below
     # clouds
@@ -1216,18 +1228,43 @@ def render_sky(zenith, horizon, fog_col, sun_uv, sun_halo, cam_yaw, cam_pitch, a
         h1 = hash21(i_ + 1.0, np.full_like(i_, 1.7))
         return h0 + (h1 - h0) * uu
 
-    cloud_az = az * 3.2 + time_sec * 0.012
-    cloud = noise1d(cloud_az * 2.4 + elev * 6.0) * 0.6 + noise1d(cloud_az * 5.8 - elev * 9.0) * 0.4
-    cloud_mask = np.clip((cloud - 0.56) / 0.30, 0, 1) * np.exp(-elev * 2.8) * 0.28
-    cloud_mask = np.where(elev > 0.03, cloud_mask, 0.0)
-    cloud_col = hc + (sc - hc) * 0.35
-    col = col + (cloud_col - col) * cloud_mask[..., None]
+    # два слоя облаков (fbm-подобная структура как в GLSL)
+    def noise2d(px_, py_):
+        ix = np.floor(px_); iy = np.floor(py_)
+        fx = px_ - ix; fy = py_ - iy
+        ux = fx * fx * (3.0 - 2.0 * fx); uy = fy * fy * (3.0 - 2.0 * fy)
+        h00 = hash21(ix, iy); h10 = hash21(ix + 1.0, iy)
+        h01 = hash21(ix, iy + 1.0); h11 = hash21(ix + 1.0, iy + 1.0)
+        return h00 + (h10 - h00) * ux + (h01 - h00) * uy + (h00 - h10 - h01 + h11) * ux * uy
 
-    # sun disc + halo
+    def fbm2(px_, py_):
+        v_ = np.zeros_like(px_)
+        a_ = 0.55
+        for bi in range(4):
+            v_ = v_ + a_ * noise2d(px_, py_)
+            px_, py_ = px_ * 2.13 + 17.7, py_ * 2.13 + 9.2
+            a_ *= 0.52
+        return v_
+
+    cloud_u = az * 2.1 + time_sec * 0.012
+    cloud_v = elev * 3.4
+    high_cloud = fbm2(cloud_u * 1.7 + time_sec * 0.016, cloud_v * 1.7)
+    low_cloud = fbm2(cloud_u * 3.1 - time_sec * 0.010, cloud_v * 3.1 + 2.3)
+    cloud_mix = high_cloud * 0.62 + low_cloud * 0.38
+    cloud_mask = np.clip((cloud_mix - 0.52) / 0.36, 0, 1) * np.exp(-elev * 2.4)
+    cloud_mask = np.where(elev > 0.02, cloud_mask, 0.0) * 0.42
+    cloud_lit = hc + (sc - hc) * 0.42
+    col = col + (cloud_lit - col) * cloud_mask[..., None]
+    wisp = np.clip((low_cloud - 0.60) / 0.35, 0, 1) * np.exp(-elev * 1.8) * 0.16
+    wisp_col = hc + (sc - hc) * 0.25
+    col = col + (wisp_col - col) * wisp[..., None]
+
+    # sun disc + halo (с затемнением края и широким гало, как в GLSL)
     sun_d = np.sqrt((u - sun_uv[0]) ** 2 + (v - sun_uv[1]) ** 2)
     disc = np.clip((0.042 - sun_d) / (0.042 - 0.014), 0, 1)
-    halo = np.exp(-sun_d * 6.5) * 0.34
-    col += sc * ((disc * 0.88 + halo)[..., None])
+    limb = 1.0 - np.clip(sun_d / 0.042, 0, 1) * 0.25
+    halo = np.exp(-sun_d * 5.6) * 0.36 + np.exp(-sun_d * 1.7) * 0.10
+    col += sc * ((disc * limb * 0.92 + halo)[..., None])
 
     # mountains (two ridges)
     def mtn_ridge(azq, freq, shift):
@@ -1236,18 +1273,27 @@ def render_sky(zenith, horizon, fog_col, sun_uv, sun_halo, cam_yaw, cam_pitch, a
         h_ += 0.14 * np.abs(noise1d(azq * freq * 4.41 + shift * 2.3) * 2.0 - 1.0)
         return h_
 
-    far_peak = 0.135 * mtn_ridge(az, 3.1, 4.2) + 0.015
-    near_peak = 0.092 * mtn_ridge(az, 5.4, 11.7) - 0.004
+    far_peak = 0.150 * mtn_ridge(az, 2.6, 4.2) + 0.012
+    mid_peak = 0.118 * mtn_ridge(az, 4.1, 8.9) + 0.002
+    near_peak = 0.086 * mtn_ridge(az, 6.2, 11.7) - 0.006
 
-    snow_line = np.clip((elev - far_peak * 0.45) / np.maximum(far_peak * 0.55, 1e-4), 0, 1)
-    far_mtn = fc * 0.72 + ((fc + (np.array([0.92, 0.96, 1.0]) - fc) * 0.52) - fc * 0.72) * snow_line[..., None]
-    col = np.where((elev < far_peak)[..., None], col + (far_mtn - col) * 0.82, col)
+    snow_line = np.clip((elev - far_peak * 0.42) / np.maximum(far_peak * 0.58, 1e-4), 0, 1)
+    far_mtn = fc * 0.70 + ((fc + (np.array([0.92, 0.96, 1.0]) - fc) * 0.55) - fc * 0.70) * snow_line[..., None]
+    col = np.where((elev < far_peak)[..., None], col + (far_mtn - col) * 0.80, col)
 
-    snow_line2 = np.clip((elev - near_peak * 0.38) / np.maximum(near_peak * 0.62, 1e-4), 0, 1)
-    near_mtn = fc * 0.56 + ((fc + (np.array([0.95, 0.98, 1.0]) - fc) * 0.42) - fc * 0.56) * snow_line2[..., None]
-    col = np.where((elev < near_peak)[..., None], col + (near_mtn - col) * 0.92, col)
+    snow_line_m = np.clip((elev - mid_peak * 0.40) / np.maximum(mid_peak * 0.60, 1e-4), 0, 1)
+    mid_mtn = fc * 0.62 + ((fc + (np.array([0.93, 0.97, 1.0]) - fc) * 0.50) - fc * 0.62) * snow_line_m[..., None]
+    col = np.where((elev < mid_peak)[..., None], col + (mid_mtn - col) * 0.86, col)
 
-    horizon_haze = np.clip((0.06 - elev) / 0.11, 0, 1)
+    snow_line2 = np.clip((elev - near_peak * 0.36) / np.maximum(near_peak * 0.64, 1e-4), 0, 1)
+    near_mtn = fc * 0.52 + ((fc + (np.array([0.95, 0.98, 1.0]) - fc) * 0.44) - fc * 0.52) * snow_line2[..., None]
+    col = np.where((elev < near_peak)[..., None], col + (near_mtn - col) * 0.93, col)
+
+    # дизеринг против полосатости градиента
+    dither = (hash21(u * 1913.0, v * 1171.0) - 0.5) * 0.012
+    col += dither[..., None]
+
+    horizon_haze = np.clip((0.065 - elev) / 0.115, 0, 1)
     col = col + (fc - col) * (horizon_haze * 0.94)[..., None]
 
     out = np.clip(col * 255.0 + 0.5, 0, 255).astype(np.uint8)
