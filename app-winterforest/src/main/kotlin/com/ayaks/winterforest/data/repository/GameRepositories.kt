@@ -8,6 +8,7 @@ import com.ayaks.winterforest.data.db.SavePayloadCodec
 import com.ayaks.winterforest.data.preferences.SettingsDataStore
 import com.ayaks.winterforest.domain.model.BaseProgress
 import com.ayaks.winterforest.domain.model.GameRunState
+import com.ayaks.winterforest.domain.model.GraphicsQuality
 import com.ayaks.winterforest.domain.repository.GameRepository
 import com.ayaks.winterforest.domain.repository.LoadSaveResult
 import com.ayaks.winterforest.domain.repository.UserSettings
@@ -16,10 +17,6 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
-/**
- * Основная production-реализация репозитория на связке Room (структурированные сохранения
- * с контролем целостности CRC32) + Jetpack DataStore Preferences (настройки и флаг согласия).
- */
 class RoomGameRepository(
     private val dao: GameProgressDao,
     private val settingsDataStore: SettingsDataStore
@@ -95,15 +92,23 @@ class RoomGameRepository(
         settingsDataStore.setLookSensitivity(sensitivity)
     }
 
+    override suspend fun updateGraphicsQuality(quality: GraphicsQuality) {
+        settingsDataStore.setGraphicsQuality(quality)
+    }
+
+    override suspend fun updateShowFpsCounter(enabled: Boolean) {
+        settingsDataStore.setShowFpsCounter(enabled)
+    }
+
+    override suspend fun updateAutoSprint(enabled: Boolean) {
+        settingsDataStore.setAutoSprint(enabled)
+    }
+
     override suspend fun updateGdprConsent(granted: Boolean) {
         settingsDataStore.setGdprConsent(granted)
     }
 }
 
-/**
- * Дисковая JVM-совместимая реализация GameRepository на том же формате конвертов SavePayloadCodec (CRC32 + JSON).
- * Используется для детерминированных интеграционных JUnit-тестов сохранения, перезапуска и битых файлов.
- */
 class FileBackedGameRepository(private val rootDir: File) : GameRepository {
 
     private val baseFile = File(rootDir, "base_progress.json")
@@ -171,6 +176,18 @@ class FileBackedGameRepository(private val rootDir: File) : GameRepository {
 
     override suspend fun updateLookSensitivity(sensitivity: Float) {
         settingsState.value = settingsState.value.copy(lookSensitivity = sensitivity.coerceIn(0.3f, 2.5f))
+    }
+
+    override suspend fun updateGraphicsQuality(quality: GraphicsQuality) {
+        settingsState.value = settingsState.value.copy(graphicsQuality = quality)
+    }
+
+    override suspend fun updateShowFpsCounter(enabled: Boolean) {
+        settingsState.value = settingsState.value.copy(showFpsCounter = enabled)
+    }
+
+    override suspend fun updateAutoSprint(enabled: Boolean) {
+        settingsState.value = settingsState.value.copy(autoSprintEnabled = enabled)
     }
 
     override suspend fun updateGdprConsent(granted: Boolean) {

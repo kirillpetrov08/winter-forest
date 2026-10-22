@@ -2,11 +2,15 @@ package com.ayaks.winterforest.domain.repository
 
 import com.ayaks.winterforest.domain.model.BaseProgress
 import com.ayaks.winterforest.domain.model.GameRunState
+import com.ayaks.winterforest.domain.model.GraphicsQuality
 import kotlinx.coroutines.flow.Flow
 
 data class UserSettings(
     val soundVolume: Float = 0.80f,
     val lookSensitivity: Float = 1.0f,
+    val graphicsQuality: GraphicsQuality = GraphicsQuality.HIGH,
+    val showFpsCounter: Boolean = false,
+    val autoSprintEnabled: Boolean = true,
     val gdprUserConsent: Boolean = false,
     val consentDialogShown: Boolean = false,
     // Геолокация отключена безусловно по требованиям конфиденциальности игры
@@ -34,4 +38,8 @@ interface GameRepository {
     suspend fun updateSoundVolume(volume: Float)
     suspend fun updateLookSensitivity(sensitivity: Float)
     suspend fun updateGdprConsent(granted: Boolean)
+
+    suspend fun updateGraphicsQuality(quality: GraphicsQuality) {}
+    suspend fun updateShowFpsCounter(enabled: Boolean) {}
+    suspend fun updateAutoSprint(enabled: Boolean) {}
 }

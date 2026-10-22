@@ -3,6 +3,92 @@ package com.ayaks.winterforest.domain.model
 import kotlinx.serialization.Serializable
 
 @Serializable
+enum class GraphicsQuality(
+    val titleRu: String,
+    val subtitleRu: String,
+    val textureSize: Int,
+    val terrainSteps: Int,
+    val perimeterTrees: Int,
+    val snowParticles: Int,
+    val fogDistanceScale: Float
+) {
+    LOW(
+        titleRu = "Низкое",
+        subtitleRu = "Максимум FPS для бюджетных устройств",
+        textureSize = 128,
+        terrainSteps = 38,
+        perimeterTrees = 20,
+        snowParticles = 45,
+        fogDistanceScale = 0.85f
+    ),
+    MEDIUM(
+        titleRu = "Среднее",
+        subtitleRu = "Плавные 60 FPS и сбалансированная дальность",
+        textureSize = 192,
+        terrainSteps = 54,
+        perimeterTrees = 30,
+        snowParticles = 100,
+        fogDistanceScale = 0.96f
+    ),
+    HIGH(
+        titleRu = "Высокое",
+        subtitleRu = "Чёткие текстуры 256px, тени АО, сияние и густой лес",
+        textureSize = 256,
+        terrainSteps = 68,
+        perimeterTrees = 42,
+        snowParticles = 185,
+        fogDistanceScale = 1.05f
+    ),
+    ULTRA(
+        titleRu = "Ультра",
+        subtitleRu = "Текстуры 512px, плотный рельеф, дальний лес и буря",
+        textureSize = 512,
+        terrainSteps = 84,
+        perimeterTrees = 54,
+        snowParticles = 290,
+        fogDistanceScale = 1.18f
+    );
+
+    companion object {
+        fun fromOrdinal(index: Int): GraphicsQuality =
+            entries.getOrElse(index.coerceIn(0, entries.lastIndex)) { HIGH }
+    }
+}
+
+@Serializable
+enum class EquippedTool(
+    val titleRu: String,
+    val shortLabelRu: String,
+    val reachMeters: Float,
+    val swingDurationSec: Float
+) {
+    AXE(
+        titleRu = "Топор лесоруба",
+        shortLabelRu = "Топор",
+        reachMeters = 4.1f,
+        swingDurationSec = 0.34f
+    ),
+    PICKAXE(
+        titleRu = "Горняцкое кайло",
+        shortLabelRu = "Кирка",
+        reachMeters = 4.0f,
+        swingDurationSec = 0.36f
+    ),
+    SPEAR(
+        titleRu = "Охотничье копьё",
+        shortLabelRu = "Копьё",
+        reachMeters = 5.3f,
+        swingDurationSec = 0.28f
+    ),
+    TORCH(
+        titleRu = "Смоляной факел",
+        shortLabelRu = "Факел",
+        reachMeters = 3.8f,
+        swingDurationSec = 0.32f
+    )
+}
+
+@Serializable
 enum class StarterLoadout(
     val titleRu: String,
     val descriptionRu: String,
@@ -68,10 +154,31 @@ enum class WorkbenchRecipe(
 ) {
     CRAFT_RESIN_TORCH(
         titleRu = "Смоляной факел",
-        descriptionRu = "+50% тепла и яркий свет на 3 минуты (расходуемый)",
+        descriptionRu = "+50% тепла, яркий свет на 3 минуты и защита от волков",
         minWorkbenchLevel = 1,
         requiresPickaxe = false,
         cost = mapOf(ResourceType.WOOD to 2, ResourceType.RESIN to 2)
+    ),
+    CRAFT_BERRY_TEA(
+        titleRu = "Таёжный ягодный взвар",
+        descriptionRu = "Горячий настой: +36 тепла, +26 сытости и +100% выносливости",
+        minWorkbenchLevel = 1,
+        requiresPickaxe = false,
+        cost = mapOf(ResourceType.BERRIES to 3, ResourceType.WOOD to 1)
+    ),
+    CRAFT_ROAST_FEAST(
+        titleRu = "Жаркое охотника",
+        descriptionRu = "Сытный ужин у огня: +55 сытости, +24 тепла и +20 здоровья",
+        minWorkbenchLevel = 1,
+        requiresPickaxe = false,
+        cost = mapOf(ResourceType.MEAT to 1, ResourceType.BERRIES to 2)
+    ),
+    CRAFT_HUNTING_SPEAR(
+        titleRu = "Кованое копьё следопыта",
+        descriptionRu = "Навсегда усиливает охоту копьём (+1 добычи и двойной урон зверю)",
+        minWorkbenchLevel = 1,
+        requiresPickaxe = false,
+        cost = mapOf(ResourceType.WOOD to 3, ResourceType.STONE to 2)
     ),
     CRAFT_WARM_COMPRESS(
         titleRu = "Тёплый перевязочный пакет",
@@ -79,6 +186,13 @@ enum class WorkbenchRecipe(
         minWorkbenchLevel = 2,
         requiresPickaxe = false,
         cost = mapOf(ResourceType.CLOTH to 2, ResourceType.BERRIES to 2)
+    ),
+    CRAFT_FUR_BOOTS(
+        titleRu = "Меховые унты севера",
+        descriptionRu = "Постоянный бонус: +14% к скорости шага по снегу и меньше расход сил",
+        minWorkbenchLevel = 2,
+        requiresPickaxe = false,
+        cost = mapOf(ResourceType.HIDE to 2, ResourceType.CLOTH to 2)
     ),
     CRAFT_MINERS_HEATER(
         titleRu = "Угольная грелка (рецепт Кирки)",
@@ -98,6 +212,9 @@ data class BaseProgress(
     val persistentSpecialLoot: Set<SpecialLootId> = emptySet(),
     val thermosInstalledOnBase: Boolean = false,
     val warmCoatEquipped: Boolean = false,
+    val furBootsCrafted: Boolean = false,
+    val masterSpearCrafted: Boolean = false,
+    val totalWildlifeHunted: Int = 0,
     val selectedLoadout: StarterLoadout = StarterLoadout.SURVIVOR,
     val bestDaysSurvived: Int = 0,
     val lifetimeWoodGathered: Int = 0,
@@ -138,7 +255,6 @@ data class BaseProgress(
     }
 
     fun warmthLossMultiplier(): Float {
-        // Укрытие: -8% потери тепла за каждый уровень выше 1 (или -6% на ур. 1 .. -38% на ур. 5)
         val shelterFactor = (1f - (shelterLevel - 1) * 0.08f).coerceAtLeast(0.60f)
         val thermosFactor = if (thermosInstalledOnBase) {
             1f - SpecialLootId.THERMOS_WARMTH_LOSS_REDUCTION
@@ -152,6 +268,8 @@ data class BaseProgress(
         }
         return shelterFactor * thermosFactor * coatFactor
     }
+
+    fun movementSpeedMultiplier(): Float = if (furBootsCrafted) 1.14f else 1.0f
 
     fun campfireRecoveryPerSec(): Float = 4.5f + (campfireLevel - 1) * 2.0f
 

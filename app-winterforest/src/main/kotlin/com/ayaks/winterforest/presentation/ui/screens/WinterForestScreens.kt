@@ -2,19 +2,23 @@ package com.ayaks.winterforest.presentation.ui.screens
 
 import android.app.Activity
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.displayCutoutPadding
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
@@ -30,6 +34,10 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -42,9 +50,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import com.ayaks.winterforest.domain.model.BaseProgress
 import com.ayaks.winterforest.domain.model.BaseUpgradeType
+import com.ayaks.winterforest.domain.model.GraphicsQuality
 import com.ayaks.winterforest.domain.model.Inventory
 import com.ayaks.winterforest.domain.model.LocationId
+import com.ayaks.winterforest.domain.model.ResourceType
 import com.ayaks.winterforest.domain.model.SpecialLootId
 import com.ayaks.winterforest.domain.model.StarterLoadout
 import com.ayaks.winterforest.domain.model.WorkbenchRecipe
@@ -52,10 +63,13 @@ import com.ayaks.winterforest.domain.rules.SurvivalEngine
 import com.ayaks.winterforest.presentation.gl.ForestGlSurfaceView
 import com.ayaks.winterforest.presentation.gl.RenderSceneSnapshot
 import com.ayaks.winterforest.presentation.navigation.AppDestination
+import com.ayaks.winterforest.presentation.ui.components.CrosshairOverlay
 import com.ayaks.winterforest.presentation.ui.components.HealthBarColor
 import com.ayaks.winterforest.presentation.ui.components.HungerBarColor
 import com.ayaks.winterforest.presentation.ui.components.MainMenuAdaptiveBanner
-import com.ayaks.winterforest.presentation.ui.components.MiniCompassBadge
+import com.ayaks.winterforest.presentation.ui.components.MiniRadarHud
+import com.ayaks.winterforest.presentation.ui.components.QuickEquipmentHotbar
+import com.ayaks.winterforest.presentation.ui.components.StaminaBarColor
 import com.ayaks.winterforest.presentation.ui.components.SurvivalStatBar
 import com.ayaks.winterforest.presentation.ui.components.VirtualJoystick
 import com.ayaks.winterforest.presentation.ui.components.WarmthBarColor
@@ -72,6 +86,10 @@ import com.ayaks.winterforest.presentation.viewmodel.WinterForestUiState
 import com.ayaks.winterforest.presentation.viewmodel.WinterForestViewModel
 import kotlin.math.roundToInt
 
+/**
+ * Горизонтальное Главное меню с живой 3D-панорамой зимнего лагеря на фоне
+ * и адаптивным баннером РСЯ строго в нижней кромке экрана меню.
+ */
 @Composable
 fun MainMenuScreen(
     state: WinterForestUiState,
@@ -121,106 +139,160 @@ fun MainMenuScreen(
         )
     }
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(
-                Brush.verticalGradient(
-                    colors = listOf(Color(0xFF102436), Color(0xFF0A1622), DeepPineNight)
+    val previewRun = remember(state.baseProgress) {
+        SurvivalEngine.createNewRun(state.baseProgress)
+    }
+
+    Box(modifier = Modifier.fillMaxSize()) {
+        // Живая 3D-панорама заснеженного лагеря, костра, елей и гор на фоне меню
+        AndroidView(
+            factory = { ctx ->
+                ForestGlSurfaceView(ctx).apply {
+                    forestRenderer.snapshot = RenderSceneSnapshot(
+                        run = previewRun,
+                        base = state.baseProgress,
+                        quality = state.settings.graphicsQuality,
+                        menuOrbitMode = true
+                    )
+                }
+            },
+            update = { glView ->
+                glView.forestRenderer.snapshot = RenderSceneSnapshot(
+                    run = previewRun,
+                    base = state.baseProgress,
+                    quality = state.settings.graphicsQuality,
+                    menuOrbitMode = true
                 )
-            )
-            .statusBarsPadding()
-    ) {
+            },
+            modifier = Modifier.fillMaxSize()
+        )
+
+        // Лёгкая кинематографическая виньетка для идеальной читаемости текста поверх 3D-сцены
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.horizontalGradient(
+                        colors = listOf(
+                            Color(0xCC06111B),
+                            Color(0x66081521),
+                            Color(0xBF07131E)
+                        )
+                    )
+                )
+        )
+
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(horizontal = 24.dp, vertical = 20.dp),
-            verticalArrangement = Arrangement.SpaceBetween,
-            horizontalAlignment = Alignment.CenterHorizontally
+                .displayCutoutPadding()
+                .padding(horizontal = 24.dp, vertical = 14.dp),
+            verticalArrangement = Arrangement.SpaceBetween
         ) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Spacer(Modifier.height(16.dp))
-                Text(
-                    text = "WINTER FOREST",
-                    fontSize = 32.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = SnowCrispText,
-                    letterSpacing = 2.sp
-                )
-                Text(
-                    text = "Выживание в заснеженном северном лесу",
-                    fontSize = 14.sp,
-                    color = IceCyanPrimary
-                )
-                Spacer(Modifier.height(12.dp))
-                Card(
-                    colors = CardDefaults.cardColors(containerColor = FrostedCardSurface),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(12.dp),
-                        horizontalArrangement = Arrangement.SpaceEvenly
-                    ) {
-                        StatPill("Рекорд", "${state.baseProgress.bestDaysSurvived} дн.")
-                        StatPill("Уровень базы", "${state.baseProgress.totalBaseLevel}")
-                        StatPill(
-                            "Коллекция",
-                            "${state.baseProgress.persistentSpecialLoot.size}/${SpecialLootId.entries.size}"
-                        )
-                    }
-                }
-            }
-
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+            Row(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(24.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                if (state.hasActiveSave) {
+                // Левая колонка: логотип, атмосфера и сводка мета-прогресса выжившего
+                Column(
+                    modifier = Modifier.weight(1.15f),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Text(
+                        text = "WINTER FOREST",
+                        fontSize = 36.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = SnowCrispText,
+                        letterSpacing = 3.sp
+                    )
+                    Text(
+                        text = "Выживание от первого лица в суровой арктической тайге",
+                        fontSize = 14.sp,
+                        color = IceCyanPrimary,
+                        fontWeight = FontWeight.Medium
+                    )
+
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = Color(0xC40B1926)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 14.dp, vertical = 12.dp),
+                            horizontalArrangement = Arrangement.SpaceAround
+                        ) {
+                            StatPill("Рекорд", "${state.baseProgress.bestDaysSurvived} дн.")
+                            StatPill("Ур. базы", "${state.baseProgress.totalBaseLevel}/15")
+                            StatPill(
+                                "Реликвии",
+                                "${state.baseProgress.persistentSpecialLoot.size}/${SpecialLootId.entries.size}"
+                            )
+                            StatPill("Охота", "${state.baseProgress.totalWildlifeHunted}")
+                        }
+                    }
+
+                    Text(
+                        text = "Снаряжение: «${state.baseProgress.selectedLoadout.titleRu}» • Графика: ${state.settings.graphicsQuality.titleRu}",
+                        color = MistMutedText,
+                        fontSize = 12.sp
+                    )
+                }
+
+                // Правая колонка: кнопки навигации под горизонтальный хват
+                Column(
+                    modifier = Modifier.weight(0.95f),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    if (state.hasActiveSave) {
+                        Button(
+                            onClick = { viewModel.continueSavedGame() },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(46.dp)
+                                .testTag("btn_continue")
+                        ) {
+                            val day = state.activeRun?.dayNumberDisplay ?: 1
+                            val loc = state.activeRun?.currentLocation?.titleRu.orEmpty()
+                            Text("Продолжить (День $day • $loc)", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+
                     Button(
-                        onClick = { viewModel.continueSavedGame() },
+                        onClick = { viewModel.startNewGame() },
+                        colors = ButtonDefaults.buttonColors(containerColor = HearthAmberAccent),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(52.dp)
-                            .testTag("btn_continue")
+                            .height(46.dp)
+                            .testTag("btn_new_game")
                     ) {
-                        val day = state.activeRun?.dayNumberDisplay ?: 1
-                        val loc = state.activeRun?.currentLocation?.titleRu.orEmpty()
-                        Text("Продолжить (День $day • $loc)", fontSize = 15.sp)
+                        Text("Новая экспедиция", color = Color(0xFF1A1006), fontWeight = FontWeight.Bold, fontSize = 15.sp)
                     }
-                }
 
-                Button(
-                    onClick = { viewModel.startNewGame() },
-                    colors = ButtonDefaults.buttonColors(containerColor = HearthAmberAccent),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(52.dp)
-                        .testTag("btn_new_game")
-                ) {
-                    Text("Новая игра", color = Color(0xFF1A1006), fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                        OutlinedButton(
+                            onClick = { viewModel.navigateTo(AppDestination.BASE_INVENTORY) },
+                            modifier = Modifier.weight(1.25f).height(42.dp)
+                        ) {
+                            Text("База, крафт и карта", fontSize = 12.sp)
+                        }
+                        OutlinedButton(
+                            onClick = { viewModel.navigateTo(AppDestination.SETTINGS) },
+                            modifier = Modifier.weight(0.85f).height(42.dp)
+                        ) {
+                            Text("Настройки", fontSize = 12.sp)
+                        }
+                    }
 
-                OutlinedButton(
-                    onClick = { viewModel.navigateTo(AppDestination.BASE_INVENTORY) },
-                    modifier = Modifier.fillMaxWidth().height(48.dp)
-                ) {
-                    Text("База, экипировка и коллекция")
-                }
-
-                OutlinedButton(
-                    onClick = { viewModel.navigateTo(AppDestination.SETTINGS) },
-                    modifier = Modifier.fillMaxWidth().height(48.dp)
-                ) {
-                    Text("Настройки")
-                }
-
-                OutlinedButton(
-                    onClick = { viewModel.navigateTo(AppDestination.ABOUT) },
-                    modifier = Modifier.fillMaxWidth().height(48.dp)
-                ) {
-                    Text("Об игре")
+                    OutlinedButton(
+                        onClick = { viewModel.navigateTo(AppDestination.ABOUT) },
+                        modifier = Modifier.fillMaxWidth().height(38.dp)
+                    ) {
+                        Text("Об игре и управлении", fontSize = 12.sp)
+                    }
                 }
             }
 
@@ -236,11 +308,18 @@ fun MainMenuScreen(
 @Composable
 private fun StatPill(title: String, value: String) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(text = value, color = SnowCrispText, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-        Text(text = title, color = MistMutedText, fontSize = 11.sp)
+        Text(text = value, color = SnowCrispText, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+        Text(text = title, color = MistMutedText, fontSize = 10.sp)
     }
 }
 
+/**
+ * Полноэкранный горизонтальный 3D-экран выживания:
+ * - Левый плавающий джойстик с авто-спринтом;
+ * - Правая тач-область плавного 360°-обзора;
+ * - Компактная панель жизненных показателей слева вверху + круговой мини-радар справа вверху;
+ * - Прицел с авто-определением цели в центре + 5-слотовый хотбар внизу + дуга кнопок действий справа.
+ */
 @Composable
 fun GameScreen(
     state: WinterForestUiState,
@@ -251,15 +330,25 @@ fun GameScreen(
     val activity = context as? Activity
 
     Box(modifier = Modifier.fillMaxSize().testTag("screen_game_3d")) {
-        // 1. Полноэкранная 3D-сцена OpenGL ES 2.0/3.0
+        // 1. Полноэкранная аппаратная 3D-сцена OpenGL ES 2.0/3.0 + тач-обзор камеры
         AndroidView(
             factory = { ctx ->
-                ForestGlSurfaceView(ctx).apply {
-                    forestRenderer.snapshot = RenderSceneSnapshot(run, state.baseProgress)
+                ForestGlSurfaceView(ctx, onFpsSample = viewModel::onFpsMeasured).apply {
+                    forestRenderer.snapshot = RenderSceneSnapshot(
+                        run = run,
+                        base = state.baseProgress,
+                        quality = state.settings.graphicsQuality,
+                        menuOrbitMode = false
+                    )
                 }
             },
             update = { glView ->
-                glView.forestRenderer.snapshot = RenderSceneSnapshot(run, state.baseProgress)
+                glView.forestRenderer.snapshot = RenderSceneSnapshot(
+                    run = run,
+                    base = state.baseProgress,
+                    quality = state.settings.graphicsQuality,
+                    menuOrbitMode = false
+                )
             },
             modifier = Modifier
                 .fillMaxSize()
@@ -267,193 +356,288 @@ fun GameScreen(
                     detectDragGestures { change, drag ->
                         change.consume()
                         viewModel.onSwipeLook(
-                            deltaYawDeg = drag.x * 0.22f,
-                            deltaPitchDeg = -drag.y * 0.18f
+                            deltaYawDeg = drag.x * 0.20f,
+                            deltaPitchDeg = -drag.y * 0.16f
                         )
                     }
                 }
         )
 
-        // 2. Верхний HUD (локация, сутки, компас, здоровье, голод, тепло, опыт) — БЕЗ баннеров!
+        // 2. Центральный прицел + контекстная подсказка объекта
+        CrosshairOverlay(
+            run = run,
+            modifier = Modifier.align(Alignment.Center)
+        )
+
+        // 3. Левый верхний компактный HUD показателей и текущей цели дня (не закрывает обзор!)
         Column(
             modifier = Modifier
-                .align(Alignment.TopCenter)
-                .fillMaxWidth()
-                .statusBarsPadding()
-                .padding(horizontal = 12.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
+                .align(Alignment.TopStart)
+                .displayCutoutPadding()
+                .padding(start = 12.dp, top = 8.dp)
+                .width(268.dp),
+            verticalArrangement = Arrangement.spacedBy(5.dp)
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Color(0xBA091520))
+                    .border(1.dp, Color(0x327CC6FE), RoundedCornerShape(12.dp))
+                    .padding(horizontal = 10.dp, vertical = 7.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
-                Column(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(Color(0xBA0B1722))
-                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
                         text = run.currentLocation.titleRu,
                         color = SnowCrispText,
                         fontWeight = FontWeight.Bold,
-                        fontSize = 14.sp
+                        fontSize = 13.sp
                     )
-                    val phaseLabel = if (run.isNight) "Ночь" else "День"
-                    val weatherLabel = if (run.isSnowing) "Снегопад" else "Ясно"
+                    val phaseLabel = if (run.isNight) "Полярная ночь" else "День"
+                    val weatherLabel = if (run.isSnowing) "Метель" else "Мороз"
                     Text(
-                        text = "День ${run.dayNumberDisplay} • $phaseLabel • $weatherLabel • Ур. ${run.level}",
+                        text = "Д.${run.dayNumberDisplay} • $phaseLabel • $weatherLabel",
                         color = IceCyanPrimary,
-                        fontSize = 11.sp
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.SemiBold
                     )
                 }
 
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Button(
-                        onClick = { viewModel.navigateTo(AppDestination.BASE_INVENTORY) },
-                        modifier = Modifier.height(38.dp)
-                    ) {
-                        Text("База / Рюкзак (${run.inventory.occupiedSlots}/${Inventory.MAX_SLOTS})", fontSize = 11.sp)
-                    }
-                    OutlinedButton(
-                        onClick = { viewModel.navigateTo(AppDestination.MAIN_MENU) },
-                        modifier = Modifier.height(38.dp)
-                    ) {
-                        Text("Меню", fontSize = 11.sp)
-                    }
-                }
-            }
-
-            MiniCompassBadge(
-                playerX = run.playerX,
-                playerZ = run.playerZ,
-                yawDeg = run.yawDeg,
-                isAtBaseZone = run.currentLocation == LocationId.BASE_CLEARING
-            )
-
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(Color(0xA60B1620))
-                    .padding(10.dp),
-                verticalArrangement = Arrangement.spacedBy(5.dp)
-            ) {
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     SurvivalStatBar("Здоровье", run.health, run.maxHealth, HealthBarColor, Modifier.weight(1f))
-                    SurvivalStatBar("Голод", run.hunger, 100f, HungerBarColor, Modifier.weight(1f))
+                    SurvivalStatBar("Сытость", run.hunger, 100f, HungerBarColor, Modifier.weight(1f))
                 }
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     SurvivalStatBar("Тепло", run.warmth, 100f, WarmthBarColor, Modifier.weight(1f))
-                    SurvivalStatBar(
-                        "Опыт (Ур. ${run.level})",
-                        run.xp.toFloat(),
-                        run.xpForNextLevel.toFloat(),
-                        XpBarColor,
-                        Modifier.weight(1f)
-                    )
+                    SurvivalStatBar("Силы", run.stamina, 100f, StaminaBarColor, Modifier.weight(1f))
                 }
+                SurvivalStatBar(
+                    "Опыт (Ур. ${run.level})",
+                    run.xp.toFloat(),
+                    run.xpForNextLevel.toFloat(),
+                    XpBarColor,
+                    Modifier.fillMaxWidth()
+                )
             }
 
-            // Строка статуса и опциональный компактный блок пропуска активного таймера
+            // Подсказка текущей цели выживания
             Text(
-                text = run.lastStatusMessage,
-                color = SnowCrispText,
-                fontSize = 12.sp,
+                text = "Цель: ${run.currentObjectiveTitleRu(state.baseProgress)}",
+                color = IceCyanPrimary,
+                fontSize = 10.sp,
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(8.dp))
-                    .background(Color(0xB8112231))
-                    .padding(horizontal = 10.dp, vertical = 6.dp)
+                    .background(Color(0xB4091520))
+                    .padding(horizontal = 8.dp, vertical = 4.dp)
+            )
+        }
+
+        // 4. Верхняя центральная строка живых событий + пропуск активного таймера
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .padding(top = 8.dp)
+                .width(340.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Text(
+                text = run.lastStatusMessage,
+                color = SnowCrispText,
+                fontSize = 11.sp,
+                maxLines = 2,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(9.dp))
+                    .background(Color(0xBA0C1A28))
+                    .padding(horizontal = 10.dp, vertical = 5.dp)
             )
 
             val activeTimer = run.activeSkippableTimer()
             if (activeTimer != null) {
                 Row(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(Color(0xCC182F42))
-                        .padding(horizontal = 10.dp, vertical = 6.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
+                        .clip(RoundedCornerShape(9.dp))
+                        .background(Color(0xCC162D40))
+                        .padding(horizontal = 9.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
                         text = "${activeTimer.first.titleRu}: ${activeTimer.second.roundToInt()} с",
                         color = HearthAmberAccent,
-                        fontSize = 12.sp
+                        fontSize = 10.sp
                     )
                     if (state.isSkipTimerAdButtonVisible) {
                         Button(
                             onClick = { viewModel.onRequestRewardedSkipTimer(activity) },
-                            modifier = Modifier.height(34.dp).testTag("btn_rewarded_skip")
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                            modifier = Modifier.height(28.dp).testTag("btn_rewarded_skip")
                         ) {
-                            Text(
-                                text = "Пропустить ожидание (реклама)",
-                                fontSize = 11.sp
-                            )
+                            Text("Пропустить (реклама)", fontSize = 10.sp)
                         }
                     }
                 }
             }
         }
 
-        // 3. Нижние органы управления: виртуальный джойстик + кнопки действий
+        // 5. Правый верхний узел: кнопки Лагеря / Меню + опциональный FPS + круговой 3D-радар
         Row(
+            verticalAlignment = Alignment.Top,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .displayCutoutPadding()
+                .padding(end = 12.dp, top = 8.dp)
+        ) {
+            Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Button(
+                        onClick = { viewModel.navigateTo(AppDestination.BASE_INVENTORY) },
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                        modifier = Modifier.height(34.dp)
+                    ) {
+                        Text("База / Рюкзак (${run.inventory.occupiedSlots}/${Inventory.MAX_SLOTS})", fontSize = 11.sp)
+                    }
+                    OutlinedButton(
+                        onClick = { viewModel.navigateTo(AppDestination.MAIN_MENU) },
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                        modifier = Modifier.height(34.dp)
+                    ) {
+                        Text("Меню", fontSize = 11.sp)
+                    }
+                }
+                if (state.settings.showFpsCounter) {
+                    Text(
+                        text = "${state.measuredFps} FPS • VBO",
+                        color = SpruceEmerald,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(Color(0xBA091520))
+                            .padding(horizontal = 7.dp, vertical = 2.dp)
+                    )
+                }
+                if (run.currentLocation != LocationId.BASE_CLEARING) {
+                    OutlinedButton(
+                        onClick = { viewModel.onReturnToBase() },
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                        modifier = Modifier.height(30.dp)
+                    ) {
+                        Text("← В лагерь", fontSize = 10.sp)
+                    }
+                }
+            }
+
+            MiniRadarHud(run = run)
+        }
+
+        // 6. Левый нижний плавающий джойстик
+        VirtualJoystick(
+            onJoystickChanged = { fwd, str -> viewModel.updateJoystick(fwd, str) },
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .displayCutoutPadding()
+                .padding(start = 14.dp, bottom = 10.dp)
+        )
+
+        // 7. Нижний центральный 5-слотовый хотбар быстрого выбора оружия и еды
+        QuickEquipmentHotbar(
+            run = run,
+            onSelectTool = { viewModel.onEquipTool(it) },
+            onIgniteOrEquipTorch = { viewModel.onIgniteResinTorch() },
+            onQuickEat = { viewModel.onActionQuickUse() },
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 18.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.Bottom
+                .padding(bottom = 10.dp)
+        )
+
+        // 8. Правый нижний кластер действий под большой палец правой руки
+        val targetPrompt = run.activeTargetPrompt()
+        val primaryLabel = when {
+            targetPrompt?.isSpecialRelic == true -> "Забрать находку"
+            targetPrompt != null -> targetPrompt.actionVerbRu
+            else -> "Удар (${run.equippedTool.shortLabelRu})"
+        }
+        val primaryColor = when {
+            targetPrompt?.isSpecialRelic == true -> HearthAmberAccent
+            targetPrompt?.isHostile == true -> CrimsonDanger
+            targetPrompt != null -> SpruceEmerald
+            else -> IceCyanPrimary
+        }
+
+        Column(
+            horizontalAlignment = Alignment.End,
+            verticalArrangement = Arrangement.spacedBy(7.dp),
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .displayCutoutPadding()
+                .padding(end = 14.dp, bottom = 10.dp)
         ) {
-            VirtualJoystick(
-                onJoystickChanged = { fwd, str -> viewModel.updateJoystick(fwd, str) }
-            )
-
-            Column(
-                horizontalAlignment = Alignment.End,
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                val nearest = run.nearestInteractableNode()
-                val gatherLabel = when {
-                    nearest?.specialLootId != null -> "Собрать: ${nearest.specialLootId.titleRu}"
-                    nearest?.resourceType != null -> "Собрать (${nearest.resourceType.titleRu})"
-                    else -> "Собрать"
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                OutlinedButton(
+                    onClick = { viewModel.onToggleSprint() },
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                    modifier = Modifier.height(34.dp)
+                ) {
+                    Text(
+                        text = if (run.isSprinting) "Бег: ВКЛ" else "Бег",
+                        color = if (run.isSprinting) HearthAmberAccent else SnowCrispText,
+                        fontSize = 11.sp
+                    )
                 }
+                Button(
+                    onClick = { viewModel.onPlaceFieldCampfire() },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD97724)),
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                    modifier = Modifier.height(34.dp)
+                ) {
+                    val woodQty = run.inventory.countOf(ResourceType.WOOD)
+                    Text("Костёр ($woodQty/2)", color = Color(0xFF1A0E04), fontWeight = FontWeight.SemiBold, fontSize = 11.sp)
+                }
+            }
 
-                if (run.currentLocation != LocationId.BASE_CLEARING) {
-                    OutlinedButton(onClick = { viewModel.onReturnToBase() }) {
-                        Text("На базу", fontSize = 12.sp)
-                    }
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Button(
+                    onClick = { viewModel.onActionQuickUse() },
+                    colors = ButtonDefaults.buttonColors(containerColor = HearthAmberAccent),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                    modifier = Modifier.height(42.dp)
+                ) {
+                    Text("Еда / Тепло", color = Color(0xFF1A1006), fontWeight = FontWeight.Bold, fontSize = 12.sp)
                 }
 
                 Button(
-                    onClick = { viewModel.onActionGather() },
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = if (nearest != null) SpruceEmerald else FrostedCardSurface
-                    )
+                    onClick = { viewModel.onActionStrike() },
+                    shape = CircleShape,
+                    colors = ButtonDefaults.buttonColors(containerColor = primaryColor),
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
+                    modifier = Modifier.height(54.dp)
                 ) {
-                    Text(gatherLabel, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                }
-
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(
-                        onClick = { viewModel.onActionQuickUse() },
-                        colors = ButtonDefaults.buttonColors(containerColor = HearthAmberAccent)
-                    ) {
-                        Text("Использовать", color = Color(0xFF1A1006), fontSize = 12.sp)
-                    }
-                    Button(onClick = { viewModel.onActionStrike() }) {
-                        Text("Ударить", fontSize = 12.sp)
-                    }
+                    Text(
+                        text = primaryLabel,
+                        color = Color(0xFF07131C),
+                        fontWeight = FontWeight.ExtraBold,
+                        fontSize = 12.sp
+                    )
                 }
             }
         }
     }
 }
 
+/**
+ * Горизонтальный двухпанельный экран Базы, Верстака, Рюкзака, Карты экспедиции и Коллекции находок.
+ */
 @Composable
 fun BaseInventoryScreen(
     state: WinterForestUiState,
@@ -463,259 +647,382 @@ fun BaseInventoryScreen(
     val run = state.activeRun
     val context = LocalContext.current
     val activity = context as? Activity
+    var selectedTab by remember { mutableIntStateOf(0) }
+    val tabs = listOf(
+        "Лагерь и постройки",
+        "Верстак (7 рецептов)",
+        "Рюкзак и склад",
+        "Карта 5 локаций",
+        "Реликвии и отряд"
+    )
 
-    Column(
+    Row(
         modifier = Modifier
             .fillMaxSize()
             .background(DeepPineNight)
-            .statusBarsPadding()
-            .verticalScroll(rememberScrollState())
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
+            .displayCutoutPadding()
+            .padding(14.dp),
+        horizontalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+        // Левая навигационная колонка разделов базы
+        Column(
+            modifier = Modifier
+                .width(215.dp)
+                .fillMaxHeight()
+                .clip(RoundedCornerShape(14.dp))
+                .background(FrostedCardSurface)
+                .padding(10.dp),
+            verticalArrangement = Arrangement.SpaceBetween
         ) {
-            Text("База и инвентарь", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = SnowCrispText)
-            OutlinedButton(onClick = { viewModel.navigateBack() }) {
-                Text("Назад")
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("Лагерь выжившего", fontSize = 17.sp, fontWeight = FontWeight.Bold, color = SnowCrispText)
+                tabs.forEachIndexed { idx, title ->
+                    val active = selectedTab == idx
+                    Button(
+                        onClick = { selectedTab = idx },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (active) IceCyanPrimary else Color(0x24FFFFFF)
+                        ),
+                        modifier = Modifier.fillMaxWidth().height(38.dp),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                    ) {
+                        Text(
+                            text = title,
+                            color = if (active) Color(0xFF071521) else SnowCrispText,
+                            fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
+                            fontSize = 11.5.sp
+                        )
+                    }
+                }
+            }
+
+            OutlinedButton(
+                onClick = { viewModel.navigateBack() },
+                modifier = Modifier.fillMaxWidth().height(40.dp)
+            ) {
+                Text("← Вернуться")
             }
         }
 
-        if (run != null) {
-            Text(run.lastStatusMessage, color = HearthAmberAccent, fontSize = 13.sp)
-        }
+        // Правая рабочая область выбранного раздела
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxHeight()
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            if (run != null) {
+                Text(
+                    text = run.lastStatusMessage,
+                    color = HearthAmberAccent,
+                    fontSize = 12.sp,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(FrostedCardSurface)
+                        .padding(horizontal = 12.dp, vertical = 7.dp)
+                )
+            }
 
-        // Лагерные действия на базе (отдых, готовка и rewarded-пропуск ожидания)
-        if (run != null) {
-            Card(colors = CardDefaults.cardColors(containerColor = FrostedCardSurface)) {
-                Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Очаг и укрытие", fontWeight = FontWeight.Bold, color = SnowCrispText)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(onClick = { viewModel.onStartCampfireCooking() }, modifier = Modifier.weight(1f)) {
-                            Text("Готовить паёк", fontSize = 12.sp)
-                        }
-                        Button(onClick = { viewModel.onRestInShelter() }, modifier = Modifier.weight(1f)) {
-                            Text("Отдохнуть", fontSize = 12.sp)
-                        }
+            when (selectedTab) {
+                0 -> BaseStructuresTab(run, base, state, activity, viewModel)
+                1 -> WorkbenchTab(run, base, viewModel)
+                2 -> InventoryStorageTab(run, base, viewModel)
+                3 -> ExpeditionMapTab(run, base, viewModel)
+                else -> RelicsAndLoadoutTab(run, base, viewModel)
+            }
+        }
+    }
+}
+
+@Composable
+private fun BaseStructuresTab(
+    run: com.ayaks.winterforest.domain.model.GameRunState?,
+    base: BaseProgress,
+    state: WinterForestUiState,
+    activity: Activity?,
+    viewModel: WinterForestViewModel
+) {
+    if (run != null) {
+        Card(colors = CardDefaults.cardColors(containerColor = FrostedCardSurface)) {
+            Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Очаг, отдых и склад лагеря", fontWeight = FontWeight.Bold, color = SnowCrispText)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = { viewModel.onStartCampfireCooking() }, modifier = Modifier.weight(1f)) {
+                        Text("Готовить паёк", fontSize = 12.sp)
                     }
-                    Button(onClick = { viewModel.onDepositAllToBase() }, modifier = Modifier.fillMaxWidth()) {
-                        Text("Перенести ресурсы на склад базы")
+                    Button(onClick = { viewModel.onRestInShelter() }, modifier = Modifier.weight(1f)) {
+                        Text("Отдохнуть у очага", fontSize = 12.sp)
                     }
-                    val activeTimer = run.activeSkippableTimer()
-                    if (activeTimer != null && state.isSkipTimerAdButtonVisible) {
-                        Button(
-                            onClick = { viewModel.onRequestRewardedSkipTimer(activity) },
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text(
-                                "Пропустить ожидание (реклама) • осталось ${run.remainingRewardedSkipsToday}/3"
-                            )
-                        }
+                    Button(onClick = { viewModel.onDepositAllToBase() }, modifier = Modifier.weight(1.2f)) {
+                        Text("Сложить всё на склад", fontSize = 12.sp)
+                    }
+                }
+                val activeTimer = run.activeSkippableTimer()
+                if (activeTimer != null && state.isSkipTimerAdButtonVisible) {
+                    Button(
+                        onClick = { viewModel.onRequestRewardedSkipTimer(activity) },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Пропустить ожидание (реклама) • осталось ${run.remainingRewardedSkipsToday}/3")
                     }
                 }
             }
         }
+    }
 
-        // Раздел 1: Улучшения базы
-        Card(colors = CardDefaults.cardColors(containerColor = FrostedCardSurface)) {
-            Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("Прокачка базы (сохраняется между забегами)", fontWeight = FontWeight.Bold, color = SnowCrispText)
-                for (upgrade in BaseUpgradeType.entries) {
-                    val lvl = base.levelOf(upgrade)
-                    val cost = base.upgradeCost(upgrade)
-                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    Card(colors = CardDefaults.cardColors(containerColor = FrostedCardSurface)) {
+        Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text("Капитальные постройки (сохраняются навсегда)", fontWeight = FontWeight.Bold, color = SnowCrispText)
+            for (upgrade in BaseUpgradeType.entries) {
+                val lvl = base.levelOf(upgrade)
+                val cost = base.upgradeCost(upgrade)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(Modifier.weight(1f)) {
                         Text(
-                            "${upgrade.titleRu} — Уровень $lvl/${com.ayaks.winterforest.domain.model.BaseProgress.MAX_UPGRADE_LEVEL}",
+                            "${upgrade.titleRu} — Уровень $lvl/${BaseProgress.MAX_UPGRADE_LEVEL}",
                             color = IceCyanPrimary,
                             fontWeight = FontWeight.SemiBold
                         )
-                        Text(upgrade.effectDescriptionRu, color = MistMutedText, fontSize = 12.sp)
-                        if (cost != null) {
-                            val costStr = cost.entries.joinToString(", ") { "${it.key.titleRu}: ${it.value}" }
-                            Button(onClick = { viewModel.onUpgradeBase(upgrade) }) {
-                                Text("Улучшить ($costStr)", fontSize = 12.sp)
-                            }
-                        } else {
-                            Text("Максимальный уровень достигнут", color = SpruceEmerald, fontSize = 12.sp)
+                        Text(upgrade.effectDescriptionRu, color = MistMutedText, fontSize = 11.5.sp)
+                    }
+                    Spacer(Modifier.width(10.dp))
+                    if (cost != null) {
+                        val costStr = cost.entries.joinToString(", ") { "${it.key.titleRu}: ${it.value}" }
+                        Button(onClick = { viewModel.onUpgradeBase(upgrade) }) {
+                            Text("Улучшить ($costStr)", fontSize = 11.sp)
                         }
+                    } else {
+                        Text("Максимум", color = SpruceEmerald, fontWeight = FontWeight.Bold, fontSize = 12.sp)
                     }
-                    HorizontalDivider(color = Color(0x22FFFFFF))
                 }
+                HorizontalDivider(color = Color(0x22FFFFFF))
+            }
 
-                // Постройка Термоса и экипировка Тёплой шубы
-                if (SpecialLootId.THERMOS in base.persistentSpecialLoot && !base.thermosInstalledOnBase) {
-                    Button(onClick = { viewModel.onInstallThermos() }, modifier = Modifier.fillMaxWidth()) {
-                        Text("Установить «Термос» на базе (-15% потери тепла навсегда)")
-                    }
+            if (SpecialLootId.THERMOS in base.persistentSpecialLoot && !base.thermosInstalledOnBase) {
+                Button(onClick = { viewModel.onInstallThermos() }, modifier = Modifier.fillMaxWidth()) {
+                    Text("Установить «Термос» на верстаке (-15% потери тепла навсегда)")
                 }
-                if (SpecialLootId.WARM_COAT in base.persistentSpecialLoot) {
+            }
+            if (SpecialLootId.WARM_COAT in base.persistentSpecialLoot) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Экипирована «Тёплая шуба» (-25% потери тепла)", color = SnowCrispText, fontSize = 13.sp)
+                    Switch(
+                        checked = base.warmCoatEquipped,
+                        onCheckedChange = { viewModel.onToggleWarmCoat(it) }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun WorkbenchTab(
+    run: com.ayaks.winterforest.domain.model.GameRunState?,
+    base: BaseProgress,
+    viewModel: WinterForestViewModel
+) {
+    Card(colors = CardDefaults.cardColors(containerColor = FrostedCardSurface)) {
+        Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(
+                "Рецепты верстака и костра (Уровень верстака: ${base.workbenchLevel}/5)",
+                fontWeight = FontWeight.Bold,
+                color = SnowCrispText
+            )
+            if (run == null) {
+                Text("Начните экспедицию, чтобы создавать снаряжение и горячие блюда.", color = MistMutedText)
+            } else {
+                for (recipe in WorkbenchRecipe.entries) {
+                    val costStr = recipe.cost.entries.joinToString(", ") { "${it.key.titleRu}: ${it.value}" }
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("Экипирована «Тёплая шуба» (-25% потери тепла)", color = SnowCrispText, fontSize = 13.sp)
-                        Switch(
-                            checked = base.warmCoatEquipped,
-                            onCheckedChange = { viewModel.onToggleWarmCoat(it) }
-                        )
-                    }
-                }
-            }
-        }
-
-        // Раздел 2: Верстак (рецепты крафта, включая Смоляной факел и рецепты Кирки)
-        if (run != null) {
-            Card(colors = CardDefaults.cardColors(containerColor = FrostedCardSurface)) {
-                Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Рецепты верстака", fontWeight = FontWeight.Bold, color = SnowCrispText)
-                    for (recipe in WorkbenchRecipe.entries) {
-                        val costStr = recipe.cost.entries.joinToString(", ") { "${it.key.titleRu}: ${it.value}" }
-                        Column {
-                            Text(recipe.titleRu, color = HearthAmberAccent, fontWeight = FontWeight.Medium)
-                            Text(recipe.descriptionRu, color = MistMutedText, fontSize = 12.sp)
-                            Button(onClick = { viewModel.onCraftRecipe(recipe) }) {
-                                Text("Создать ($costStr)", fontSize = 12.sp)
-                            }
+                        Column(Modifier.weight(1f)) {
+                            Text(recipe.titleRu, color = HearthAmberAccent, fontWeight = FontWeight.SemiBold)
+                            Text(recipe.descriptionRu, color = MistMutedText, fontSize = 11.5.sp)
                         }
-                    }
-                }
-            }
-        }
-
-        // Раздел 3: Стартовая экипировка
-        Card(colors = CardDefaults.cardColors(containerColor = FrostedCardSurface)) {
-            Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Выбор стартовой экипировки", fontWeight = FontWeight.Bold, color = SnowCrispText)
-                for (loadout in StarterLoadout.entries) {
-                    val selected = base.selectedLoadout == loadout
-                    OutlinedButton(
-                        onClick = { viewModel.onSelectLoadout(loadout) },
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text(
-                            (if (selected) "✓ " else "") + "${loadout.titleRu} — ${loadout.descriptionRu}",
-                            fontSize = 12.sp
-                        )
-                    }
-                }
-            }
-        }
-
-        // Раздел 4: Инвентарь и отдельная секция специальных предметов
-        Card(colors = CardDefaults.cardColors(containerColor = FrostedCardSurface)) {
-            Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                val inv = run?.inventory ?: Inventory(specialItems = base.persistentSpecialLoot.associateWith { 1 })
-                Text(
-                    "Рюкзак (${inv.occupiedSlots}/${Inventory.MAX_SLOTS} слотов) и Склад базы",
-                    fontWeight = FontWeight.Bold,
-                    color = SnowCrispText
-                )
-                if (inv.slots.isEmpty() && base.storageResources.isEmpty()) {
-                    Text("Обычные ресурсы пока не собраны.", color = MistMutedText, fontSize = 13.sp)
-                } else {
-                    for (slot in inv.slots) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text("${slot.type.titleRu}: ${slot.count}/${Inventory.MAX_STACK_SIZE}", color = SnowCrispText)
-                            if (run != null && (slot.type.isEdible || slot.type.isFuel)) {
-                                TextButton(onClick = { viewModel.onUseSpecificResource(slot.type) }) {
-                                    Text("Использовать")
-                                }
-                            }
-                        }
-                    }
-                    if (base.storageResources.isNotEmpty()) {
-                        HorizontalDivider(color = Color(0x22FFFFFF))
-                        val storageSummary = base.storageResources.entries
-                            .joinToString(" • ") { "${it.key.titleRu}: ${it.value}" }
-                        Text("На складе базы: $storageSummary", color = IceCyanPrimary, fontSize = 12.sp)
-                    }
-                }
-
-                HorizontalDivider(color = Color(0x33FFFFFF))
-                Text("Специальные предметы в инвентаре", fontWeight = FontWeight.Bold, color = HearthAmberAccent)
-                if (inv.specialItems.isEmpty()) {
-                    Text("Специальные предметы ещё не найдены.", color = MistMutedText, fontSize = 12.sp)
-                } else {
-                    for ((loot, qty) in inv.specialItems) {
-                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                            Text("${loot.titleRu} ×$qty (источник: ${loot.sourceLocationNameRu})", color = SnowCrispText, fontWeight = FontWeight.SemiBold)
-                            Text(loot.descriptionRu, color = MistMutedText, fontSize = 12.sp)
-                            if (run != null && loot == SpecialLootId.RESIN_TORCH) {
-                                Button(onClick = { viewModel.onIgniteResinTorch() }) {
-                                    Text("Зажечь Смоляной факел")
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // Раздел 5: Карта локаций («Отправиться в локацию»)
-        Card(colors = CardDefaults.cardColors(containerColor = FrostedCardSurface)) {
-            Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                val hasMap = SpecialLootId.OLD_MAP in base.persistentSpecialLoot ||
-                    (run?.inventory?.hasSpecial(SpecialLootId.OLD_MAP) == true)
-                Text(
-                    if (hasMap) "Карта экспедиции (открыта «Старой картой»)" else "Тропы из лагеря",
-                    fontWeight = FontWeight.Bold,
-                    color = SnowCrispText
-                )
-                val evalRun = run ?: SurvivalEngine.createNewRun(base)
-                for (loc in LocationId.entries) {
-                    val status = SurvivalEngine.evaluateLocationUnlock(loc, evalRun, base)
-                    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                        Text(
-                            "${loc.titleRu} — спецлут: «${loc.uniqueLoot.titleRu}»",
-                            color = if (status.isUnlocked) SpruceEmerald else MistMutedText,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        if (hasMap || status.isUnlocked || loc == LocationId.BASE_CLEARING) {
-                            Text(loc.subtitleRu, color = MistMutedText, fontSize = 12.sp)
-                            Text("Условие: ${status.conditionSummaryRu}", color = IceCyanPrimary, fontSize = 11.sp)
-                        } else {
-                            Text(
-                                "Найдите «Старую карту» на Базовой поляне, чтобы увидеть подробности маршрута.",
-                                color = MistMutedText,
-                                fontSize = 11.sp
-                            )
-                        }
-                        Button(onClick = { viewModel.onTravelToLocation(loc) }) {
-                            Text(if (status.isUnlocked) "Отправиться" else "Проверить проход")
+                        Spacer(Modifier.width(10.dp))
+                        Button(onClick = { viewModel.onCraftRecipe(recipe) }) {
+                            Text("Создать ($costStr)", fontSize = 11.sp)
                         }
                     }
                     HorizontalDivider(color = Color(0x22FFFFFF))
                 }
             }
         }
+    }
+}
 
-        // Раздел 6: Коллекция находок (N из 5)
-        Card(colors = CardDefaults.cardColors(containerColor = FrostedCardSurface)) {
-            val foundSet = base.persistentSpecialLoot +
-                (run?.inventory?.specialItems?.keys.orEmpty())
-            Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(
-                    "Коллекция находок: найдено ${foundSet.size} из ${SpecialLootId.entries.size}",
-                    fontWeight = FontWeight.Bold,
-                    color = SnowCrispText
-                )
-                for (item in SpecialLootId.entries) {
-                    val found = item in foundSet
+@Composable
+private fun InventoryStorageTab(
+    run: com.ayaks.winterforest.domain.model.GameRunState?,
+    base: BaseProgress,
+    viewModel: WinterForestViewModel
+) {
+    val inv = run?.inventory ?: Inventory(specialItems = base.persistentSpecialLoot.associateWith { 1 })
+    Card(colors = CardDefaults.cardColors(containerColor = FrostedCardSurface)) {
+        Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(
+                "Походный рюкзак (${inv.occupiedSlots}/${Inventory.MAX_SLOTS} слотов) и склад лагеря",
+                fontWeight = FontWeight.Bold,
+                color = SnowCrispText
+            )
+            if (inv.slots.isEmpty() && base.storageResources.isEmpty()) {
+                Text("Обычные ресурсы пока не собраны.", color = MistMutedText, fontSize = 13.sp)
+            } else {
+                for (slot in inv.slots) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("${slot.type.titleRu}: ${slot.count}/${Inventory.MAX_STACK_SIZE}", color = SnowCrispText)
+                        if (run != null && (slot.type.isEdible || slot.type.isFuel)) {
+                            TextButton(onClick = { viewModel.onUseSpecificResource(slot.type) }) {
+                                Text("Использовать")
+                            }
+                        }
+                    }
+                }
+                if (base.storageResources.isNotEmpty()) {
+                    HorizontalDivider(color = Color(0x22FFFFFF))
+                    val storageSummary = base.storageResources.entries
+                        .joinToString(" • ") { "${it.key.titleRu}: ${it.value}" }
+                    Text("На складе базы: $storageSummary", color = IceCyanPrimary, fontSize = 12.sp)
+                }
+            }
+
+            HorizontalDivider(color = Color(0x33FFFFFF))
+            Text("Специальные предметы", fontWeight = FontWeight.Bold, color = HearthAmberAccent)
+            if (inv.specialItems.isEmpty()) {
+                Text("Специальные предметы ещё не найдены.", color = MistMutedText, fontSize = 12.sp)
+            } else {
+                for ((loot, qty) in inv.specialItems) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text("${loot.titleRu} ×$qty (${loot.sourceLocationNameRu})", color = SnowCrispText, fontWeight = FontWeight.SemiBold)
+                            Text(loot.descriptionRu, color = MistMutedText, fontSize = 11.5.sp)
+                        }
+                        if (run != null && loot == SpecialLootId.RESIN_TORCH) {
+                            Button(onClick = { viewModel.onIgniteResinTorch() }) {
+                                Text("Зажечь", fontSize = 11.sp)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ExpeditionMapTab(
+    run: com.ayaks.winterforest.domain.model.GameRunState?,
+    base: BaseProgress,
+    viewModel: WinterForestViewModel
+) {
+    val hasMap = SpecialLootId.OLD_MAP in base.persistentSpecialLoot ||
+        (run?.inventory?.hasSpecial(SpecialLootId.OLD_MAP) == true)
+    val evalRun = run ?: SurvivalEngine.createNewRun(base)
+
+    Card(colors = CardDefaults.cardColors(containerColor = FrostedCardSurface)) {
+        Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(
+                if (hasMap) "Карта северных земель (открыта «Старой картой»)" else "Разведанные тропы из лагеря",
+                fontWeight = FontWeight.Bold,
+                color = SnowCrispText
+            )
+            for (loc in LocationId.entries) {
+                val status = SurvivalEngine.evaluateLocationUnlock(loc, evalRun, base)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            "${loc.titleRu} • реликвия: «${loc.uniqueLoot.titleRu}»",
+                            color = if (status.isUnlocked) SpruceEmerald else MistMutedText,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        if (hasMap || status.isUnlocked || loc == LocationId.BASE_CLEARING) {
+                            Text(loc.subtitleRu, color = MistMutedText, fontSize = 11.5.sp)
+                            Text("Условие: ${status.conditionSummaryRu}", color = IceCyanPrimary, fontSize = 11.sp)
+                        } else {
+                            Text(
+                                "Найдите «Старую карту» на Базовой поляне для полной разведки маршрута.",
+                                color = MistMutedText,
+                                fontSize = 11.sp
+                            )
+                        }
+                    }
+                    Spacer(Modifier.width(10.dp))
+                    Button(onClick = { viewModel.onTravelToLocation(loc) }) {
+                        Text(if (status.isUnlocked) "Отправиться" else "Проверить")
+                    }
+                }
+                HorizontalDivider(color = Color(0x22FFFFFF))
+            }
+        }
+    }
+}
+
+@Composable
+private fun RelicsAndLoadoutTab(
+    run: com.ayaks.winterforest.domain.model.GameRunState?,
+    base: BaseProgress,
+    viewModel: WinterForestViewModel
+) {
+    Card(colors = CardDefaults.cardColors(containerColor = FrostedCardSurface)) {
+        Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Выбор стартовой экипировки экспедиции", fontWeight = FontWeight.Bold, color = SnowCrispText)
+            for (loadout in StarterLoadout.entries) {
+                val selected = base.selectedLoadout == loadout
+                OutlinedButton(
+                    onClick = { viewModel.onSelectLoadout(loadout) },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
                     Text(
-                        text = (if (found) "★ " else "☆ ") +
-                            "${item.titleRu} (${item.sourceLocationNameRu}) — ${item.descriptionRu}",
-                        color = if (found) SnowCrispText else MistMutedText,
+                        (if (selected) "✓ " else "") + "${loadout.titleRu} — ${loadout.descriptionRu}",
                         fontSize = 12.sp
                     )
                 }
+            }
+        }
+    }
+
+    Card(colors = CardDefaults.cardColors(containerColor = FrostedCardSurface)) {
+        val foundSet = base.persistentSpecialLoot + (run?.inventory?.specialItems?.keys.orEmpty())
+        Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(
+                "Коллекция реликвий севера: ${foundSet.size} из ${SpecialLootId.entries.size}",
+                fontWeight = FontWeight.Bold,
+                color = SnowCrispText
+            )
+            for (item in SpecialLootId.entries) {
+                val found = item in foundSet
+                Text(
+                    text = (if (found) "★ " else "☆ ") +
+                        "${item.titleRu} (${item.sourceLocationNameRu}) — ${item.descriptionRu}",
+                    color = if (found) SnowCrispText else MistMutedText,
+                    fontSize = 12.sp
+                )
             }
         }
     }
@@ -730,60 +1037,50 @@ fun ResultsScreen(
     val context = LocalContext.current
     val activity = context as? Activity
 
-    Column(
+    Row(
         modifier = Modifier
             .fillMaxSize()
             .background(DeepPineNight)
-            .statusBarsPadding()
+            .displayCutoutPadding()
             .padding(24.dp),
-        verticalArrangement = Arrangement.SpaceBetween,
-        horizontalAlignment = Alignment.CenterHorizontally
+        horizontalArrangement = Arrangement.spacedBy(24.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(
-                text = "Экспедиция завершена",
-                fontSize = 26.sp,
-                fontWeight = FontWeight.Bold,
-                color = CrimsonDanger
-            )
-            Spacer(Modifier.height(6.dp))
-            Text(
-                text = "Холод оказался сильнее, но постройки базы и постоянные находки сохранены.",
-                color = MistMutedText,
-                fontSize = 13.sp
-            )
-        }
-
         Card(
             colors = CardDefaults.cardColors(containerColor = FrostedCardSurface),
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier.weight(1.15f)
         ) {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Статистика забега", fontWeight = FontWeight.Bold, fontSize = 18.sp, color = SnowCrispText)
-                Text("Дней выжито: ${run?.daysSurvived ?: 0}", color = SnowCrispText)
-                Text("Лучший рекорд: ${state.baseProgress.bestDaysSurvived} дн.", color = HearthAmberAccent)
-                Text("Собрано ресурсов: ${run?.totalResourcesGathered ?: 0}", color = SnowCrispText)
-                Text("Уровень персонажа: ${run?.level ?: 1}", color = SnowCrispText)
-                Text("Суммарный уровень базы: ${state.baseProgress.totalBaseLevel}", color = IceCyanPrimary)
+            Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Экспедиция завершена", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = CrimsonDanger)
+                Text(
+                    "Мороз остановил путника, но постройки лагеря и найденные реликвии сохранены.",
+                    color = MistMutedText,
+                    fontSize = 12.5.sp
+                )
+                HorizontalDivider(color = Color(0x28FFFFFF))
+                Text("Дней выжито: ${run?.daysSurvived ?: 0} (рекорд: ${state.baseProgress.bestDaysSurvived} дн.)", color = SnowCrispText)
+                Text("Добыто ресурсов: ${run?.totalResourcesGathered ?: 0} • Охотничьих трофеев: ${state.baseProgress.totalWildlifeHunted}", color = SnowCrispText)
+                Text("Уровень выжившего: ${run?.level ?: 1} • Суммарный уровень базы: ${state.baseProgress.totalBaseLevel}", color = IceCyanPrimary)
                 val visitedNames = run?.visitedLocations?.joinToString(", ") { it.titleRu }.orEmpty()
-                Text("Посещённые локации: $visitedNames", color = SnowCrispText)
+                Text("Открытые земли: $visitedNames", color = SnowCrispText, fontSize = 12.sp)
             }
         }
 
         Column(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.weight(0.85f),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             if (state.isReviveAdButtonVisible) {
                 Button(
                     onClick = { viewModel.onRequestRewardedRevive(activity) },
                     colors = ButtonDefaults.buttonColors(containerColor = SpruceEmerald),
-                    modifier = Modifier.fillMaxWidth().height(52.dp).testTag("btn_rewarded_revive")
+                    modifier = Modifier.fillMaxWidth().height(50.dp).testTag("btn_rewarded_revive")
                 ) {
                     Text(
-                        text = "Возродиться (реклама) — 50% сил на базе",
+                        text = "Возродиться у костра (реклама) — 50% сил",
                         color = Color(0xFF061B10),
-                        fontWeight = FontWeight.Bold
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 13.sp
                     )
                 }
             }
@@ -791,16 +1088,16 @@ fun ResultsScreen(
             Button(
                 onClick = { viewModel.startNewGame() },
                 colors = ButtonDefaults.buttonColors(containerColor = HearthAmberAccent),
-                modifier = Modifier.fillMaxWidth().height(50.dp)
+                modifier = Modifier.fillMaxWidth().height(48.dp)
             ) {
-                Text("Начать заново", color = Color(0xFF1A1006), fontWeight = FontWeight.Bold)
+                Text("Начать новую экспедицию", color = Color(0xFF1A1006), fontWeight = FontWeight.Bold)
             }
 
             OutlinedButton(
                 onClick = { viewModel.navigateTo(AppDestination.MAIN_MENU) },
-                modifier = Modifier.fillMaxWidth().height(48.dp)
+                modifier = Modifier.fillMaxWidth().height(46.dp)
             ) {
-                Text("В меню")
+                Text("Главное меню")
             }
         }
     }
@@ -838,63 +1135,125 @@ fun SettingsScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(DeepPineNight)
-            .statusBarsPadding()
-            .padding(20.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+            .displayCutoutPadding()
+            .verticalScroll(rememberScrollState())
+            .padding(18.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text("Настройки", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = SnowCrispText)
+            Text("Настройки графики и управления", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = SnowCrispText)
             OutlinedButton(onClick = { viewModel.navigateBack() }) {
-                Text("Назад")
+                Text("← Назад")
             }
         }
 
-        Card(colors = CardDefaults.cardColors(containerColor = FrostedCardSurface)) {
-            Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("Громкость звука: ${(state.settings.soundVolume * 100).roundToInt()}%", color = SnowCrispText)
-                Slider(
-                    value = state.settings.soundVolume,
-                    onValueChange = { viewModel.onSoundVolumeChanged(it) },
-                    valueRange = 0f..1f
-                )
-
-                Text(
-                    "Чувствительность обзора: ${"%.2f".format(state.settings.lookSensitivity)}x",
-                    color = SnowCrispText
-                )
-                Slider(
-                    value = state.settings.lookSensitivity,
-                    onValueChange = { viewModel.onLookSensitivityChanged(it) },
-                    valueRange = 0.3f..2.5f
-                )
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        Text("Согласие на персонализацию рекламы (РСЯ)", color = SnowCrispText)
-                        Text("Геолокация отключена постоянно.", color = MistMutedText, fontSize = 12.sp)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            // Левая карточка: Графика и производительность VBO
+            Card(
+                colors = CardDefaults.cardColors(containerColor = FrostedCardSurface),
+                modifier = Modifier.weight(1f)
+            ) {
+                Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("Качество 3D-графики", fontWeight = FontWeight.Bold, color = SnowCrispText)
+                    Text(state.settings.graphicsQuality.subtitleRu, color = IceCyanPrimary, fontSize = 12.sp)
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
+                        for (q in GraphicsQuality.entries) {
+                            val active = state.settings.graphicsQuality == q
+                            Button(
+                                onClick = { viewModel.onGraphicsQualityChanged(q) },
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = if (active) IceCyanPrimary else Color(0x28FFFFFF)
+                                ),
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                                modifier = Modifier.weight(1f).height(36.dp)
+                            ) {
+                                Text(
+                                    text = q.titleRu,
+                                    color = if (active) Color(0xFF071521) else SnowCrispText,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                        }
                     }
-                    Switch(
-                        checked = state.settings.gdprUserConsent,
-                        onCheckedChange = { viewModel.onGdprConsentSelected(it) }
-                    )
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Показывать счётчик FPS на экране", color = SnowCrispText, fontSize = 13.sp)
+                        Switch(
+                            checked = state.settings.showFpsCounter,
+                            onCheckedChange = { viewModel.onShowFpsChanged(it) }
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Авто-бег при полном наклоне джойстика", color = SnowCrispText, fontSize = 13.sp)
+                        Switch(
+                            checked = state.settings.autoSprintEnabled,
+                            onCheckedChange = { viewModel.onAutoSprintChanged(it) }
+                        )
+                    }
                 }
             }
-        }
 
-        Button(
-            onClick = { viewModel.requestResetProgressDialog() },
-            colors = ButtonDefaults.buttonColors(containerColor = CrimsonDanger),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Text("Сбросить прогресс")
+            // Правая карточка: Звук, чувствительность, РСЯ и сброс
+            Card(
+                colors = CardDefaults.cardColors(containerColor = FrostedCardSurface),
+                modifier = Modifier.weight(1f)
+            ) {
+                Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("Громкость звука: ${(state.settings.soundVolume * 100).roundToInt()}%", color = SnowCrispText, fontSize = 13.sp)
+                    Slider(
+                        value = state.settings.soundVolume,
+                        onValueChange = { viewModel.onSoundVolumeChanged(it) },
+                        valueRange = 0f..1f
+                    )
+
+                    Text("Чувствительность камеры: ${"%.2f".format(state.settings.lookSensitivity)}x", color = SnowCrispText, fontSize = 13.sp)
+                    Slider(
+                        value = state.settings.lookSensitivity,
+                        onValueChange = { viewModel.onLookSensitivityChanged(it) },
+                        valueRange = 0.3f..2.5f
+                    )
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Персонализация рекламы (РСЯ)", color = SnowCrispText, fontSize = 13.sp)
+                            Text("Геолокация отключена постоянно.", color = MistMutedText, fontSize = 11.sp)
+                        }
+                        Switch(
+                            checked = state.settings.gdprUserConsent,
+                            onCheckedChange = { viewModel.onGdprConsentSelected(it) }
+                        )
+                    }
+
+                    Button(
+                        onClick = { viewModel.requestResetProgressDialog() },
+                        colors = ButtonDefaults.buttonColors(containerColor = CrimsonDanger),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Сбросить весь прогресс")
+                    }
+                }
+            }
         }
     }
 }
@@ -905,7 +1264,7 @@ fun AboutScreen(viewModel: WinterForestViewModel) {
         modifier = Modifier
             .fillMaxSize()
             .background(DeepPineNight)
-            .statusBarsPadding()
+            .displayCutoutPadding()
             .verticalScroll(rememberScrollState())
             .padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
@@ -915,23 +1274,21 @@ fun AboutScreen(viewModel: WinterForestViewModel) {
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text("Об игре", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = SnowCrispText)
+            Text("Об игре Winter Forest", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = SnowCrispText)
             OutlinedButton(onClick = { viewModel.navigateBack() }) {
-                Text("Назад")
+                Text("← Назад")
             }
         }
         Card(colors = CardDefaults.cardColors(containerColor = FrostedCardSurface)) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Winter Forest", style = MaterialTheme.typography.titleLarge, color = SnowCrispText)
+                Text("Winter Forest — Горизонтальное 3D-издание", style = MaterialTheme.typography.titleLarge, color = SnowCrispText)
                 Text(
-                    "Атмосферное 3D-приключение на выживание от первого лица в северном лесу. " +
-                        "Собирайте дрова, пищу и редкие материалы, поддерживайте огонь на Базовой поляне, " +
-                        "улучшайте укрытие, костёр и верстак и открывайте пять суровых локаций с уникальными находками.",
+                    "Атмосферное 3D-приключение на выживание от первого лица с собственным аппаратным OpenGL ES VBO-движком. " +
+                        "Исследуйте 5 биомов севера, разводите походные костры, охотьтесь на зверя, отпугивайте ночных волков пламенем смоляного факела, " +
+                        "развивайте сруб, очаг и верстак и соберите все 5 реликвий арктической тайги.",
                     color = MistMutedText
                 )
-                Text("Разработчик: Ayaks", color = IceCyanPrimary)
-                Text("Контакт для обратной связи: kirillpetrov08@gmail.com", color = SnowCrispText)
-                Text("Версия: 1.0.0", color = MistMutedText)
+                Text("Разработчик: Ayaks • Контакт: kirillpetrov08@gmail.com • Версия: 2.0.0", color = IceCyanPrimary)
             }
         }
     }

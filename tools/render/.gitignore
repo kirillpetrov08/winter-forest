@@ -1,0 +1,3 @@
+# Compiled offline render helper (rebuild: g++ -O2 -std=c++17 -o raster raster.cpp)
+raster
+*.o

@@ -8,7 +8,9 @@ import com.ayaks.winterforest.data.ads.RewardedAdController
 import com.ayaks.winterforest.data.ads.RewardedAdUiState
 import com.ayaks.winterforest.domain.model.BaseProgress
 import com.ayaks.winterforest.domain.model.BaseUpgradeType
+import com.ayaks.winterforest.domain.model.EquippedTool
 import com.ayaks.winterforest.domain.model.GameRunState
+import com.ayaks.winterforest.domain.model.GraphicsQuality
 import com.ayaks.winterforest.domain.model.LocationId
 import com.ayaks.winterforest.domain.model.ResourceType
 import com.ayaks.winterforest.domain.model.RunPhase
@@ -21,6 +23,7 @@ import com.ayaks.winterforest.domain.rules.SurvivalEngine
 import com.ayaks.winterforest.presentation.navigation.AppDestination
 import com.ayaks.winterforest.presentation.navigation.BannerPlacementPolicy
 import kotlin.math.abs
+import kotlin.math.hypot
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -46,7 +49,8 @@ data class WinterForestUiState(
     val corruptedSaveMessage: String? = null,
     val showResetConfirmationDialog: Boolean = false,
     val joystickForward: Float = 0f,
-    val joystickStrafe: Float = 0f
+    val joystickStrafe: Float = 0f,
+    val measuredFps: Int = 60
 ) {
     val hasActiveSave: Boolean
         get() = activeRun != null && activeRun.phase == RunPhase.PLAYING
@@ -80,6 +84,7 @@ class WinterForestViewModel(
 
     private var gameLoopJob: Job? = null
     private var autoSaveAccumulatorSec: Float = 0f
+    private var portalCooldownSec: Float = 0f
 
     init {
         vmScope.launch {
@@ -209,10 +214,6 @@ class WinterForestViewModel(
         navigateTo(target)
     }
 
-    /**
-     * Вызывается при сворачивании приложения (onPause / onStop):
-     * гарантированно сохраняет текущее состояние игрока без потери прогресса.
-     */
     fun onAppBackgrounded() {
         stopGameLoop()
         _uiState.update { it.copy(joystickForward = 0f, joystickStrafe = 0f) }
@@ -228,11 +229,50 @@ class WinterForestViewModel(
     }
 
     fun updateJoystick(forward: Float, strafe: Float) {
-        _uiState.update {
-            it.copy(
-                joystickForward = forward.coerceIn(-1f, 1f),
-                joystickStrafe = strafe.coerceIn(-1f, 1f)
+        val clampedFwd = forward.coerceIn(-1f, 1f)
+        val clampedStr = strafe.coerceIn(-1f, 1f)
+        val mag = hypot(clampedFwd, clampedStr)
+        _uiState.update { st ->
+            val updatedRun = if (st.settings.autoSprintEnabled && st.activeRun != null) {
+                if (mag >= 0.84f && st.activeRun.stamina > 8f) {
+                    st.activeRun.copy(isSprinting = true)
+                } else if (mag < 0.35f) {
+                    st.activeRun.copy(isSprinting = false)
+                } else {
+                    st.activeRun
+                }
+            } else {
+                st.activeRun
+            }
+            st.copy(
+                joystickForward = clampedFwd,
+                joystickStrafe = clampedStr,
+                activeRun = updatedRun
             )
+        }
+    }
+
+    fun onToggleSprint() {
+        _uiState.update { st ->
+            val run = st.activeRun ?: return@update st
+            st.copy(activeRun = SurvivalEngine.setSprinting(run, !run.isSprinting))
+        }
+    }
+
+    fun onEquipTool(tool: EquippedTool) {
+        _uiState.update { st ->
+            val run = st.activeRun ?: return@update st
+            st.copy(activeRun = SurvivalEngine.equipTool(run, tool))
+        }
+    }
+
+    fun onPlaceFieldCampfire() = applyEngineAction { run, base ->
+        SurvivalEngine.placeFieldCampfire(run, base)
+    }
+
+    fun onFpsMeasured(fps: Int) {
+        if (fps > 0 && fps != _uiState.value.measuredFps) {
+            _uiState.update { it.copy(measuredFps = fps) }
         }
     }
 
@@ -249,12 +289,14 @@ class WinterForestViewModel(
     }
 
     /**
-     * Один шаг игрового цикла (доступен и напрямую для детерминированных тестов).
+     * Один шаг игрового цикла (20 Гц для отзывчивого движения без рывков).
      */
     fun stepSimulation(deltaSeconds: Float) {
         val current = _uiState.value
         val run = current.activeRun ?: return
         if (run.phase == RunPhase.DEAD) return
+
+        portalCooldownSec = (portalCooldownSec - deltaSeconds).coerceAtLeast(0f)
 
         val isMoving = abs(current.joystickForward) > 0.05f || abs(current.joystickStrafe) > 0.05f
         val movedRun = if (isMoving) {
@@ -262,10 +304,32 @@ class WinterForestViewModel(
                 run = run,
                 forwardInput = current.joystickForward,
                 strafeInput = current.joystickStrafe,
-                deltaSeconds = deltaSeconds
+                deltaSeconds = deltaSeconds,
+                base = current.baseProgress
             )
         } else {
             run
+        }
+
+        // Прямой переход через северные 3D-ворота тропы (x in -2.6..2.6, z <= -34.2)
+        if (isMoving &&
+            portalCooldownSec <= 0f &&
+            abs(movedRun.playerX) <= 2.6f &&
+            movedRun.playerZ <= -34.2f
+        ) {
+            portalCooldownSec = 3.5f
+            val nextZone = movedRun.currentLocation.neighborNext()
+            val travel = SurvivalEngine.travelToLocation(movedRun, current.baseProgress, nextZone)
+            _uiState.update {
+                it.copy(
+                    activeRun = travel.run,
+                    baseProgress = travel.base
+                )
+            }
+            if (travel.actionSucceeded) {
+                persistCheckpointAsync()
+                return
+            }
         }
 
         val outcome = SurvivalEngine.tick(
@@ -306,7 +370,7 @@ class WinterForestViewModel(
     }
 
     fun onActionStrike() = applyEngineAction { run, base ->
-        SurvivalEngine.gatherNearest(run, base, withToolStrikeBonus = true)
+        SurvivalEngine.performSmartAction(run, base, withToolStrikeBonus = true)
     }
 
     fun onActionQuickUse() = applyEngineAction { run, base ->
@@ -387,10 +451,6 @@ class WinterForestViewModel(
         persistCheckpointAsync()
     }
 
-    /**
-     * Кнопка «Возродиться (реклама)» на экране результатов.
-     * Игровая награда выдаётся ТОЛЬКО при вызове колбэка onEarnedReward (т.е. onRewarded в SDK).
-     */
     fun onRequestRewardedRevive(activity: Activity?) {
         val snapshotBefore = _uiState.value.activeRun ?: return
         if (!snapshotBefore.canReviveWithAd) return
@@ -421,10 +481,6 @@ class WinterForestViewModel(
         )
     }
 
-    /**
-     * Кнопка «Пропустить ожидание (реклама)» для активного таймера/кулдауна (не более 3 в игровой день).
-     * Награда выдаётся ТОЛЬКО в колбэке onRewarded!
-     */
     fun onRequestRewardedSkipTimer(activity: Activity?) {
         val snapshotBefore = _uiState.value.activeRun ?: return
         if (snapshotBefore.remainingRewardedSkipsToday <= 0) return
@@ -458,6 +514,18 @@ class WinterForestViewModel(
 
     fun onLookSensitivityChanged(sensitivity: Float) {
         vmScope.launch { repository.updateLookSensitivity(sensitivity) }
+    }
+
+    fun onGraphicsQualityChanged(quality: GraphicsQuality) {
+        vmScope.launch { repository.updateGraphicsQuality(quality) }
+    }
+
+    fun onShowFpsChanged(enabled: Boolean) {
+        vmScope.launch { repository.updateShowFpsCounter(enabled) }
+    }
+
+    fun onAutoSprintChanged(enabled: Boolean) {
+        vmScope.launch { repository.updateAutoSprint(enabled) }
     }
 
     fun onGdprConsentSelected(granted: Boolean) {
@@ -552,7 +620,7 @@ class WinterForestViewModel(
     }
 
     companion object {
-        private const val TICK_INTERVAL_MS = 100L // 10 Гц логики (рендерер работает отдельно на 60 Гц)
+        private const val TICK_INTERVAL_MS = 50L // 20 Гц плавной физической симуляции без рывков!
         private const val AUTO_SAVE_INTERVAL_SEC = 10f
     }
 }

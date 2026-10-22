@@ -12,7 +12,7 @@
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" tools:node="remove" />
     <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" tools:node="remove" />
 
-    <!-- OpenGL ES 2.0+ обязателен для собственного 3D-рендерера зимнего леса -->
+    <!-- OpenGL ES 2.0/3.0 используется собственным аппаратным VBO-рендерером зимнего леса -->
     <uses-feature
         android:glEsVersion="0x00020000"
         android:required="true" />
@@ -20,6 +20,7 @@
     <application
         android:name=".WinterForestApplication"
         android:allowBackup="true"
+        android:hardwareAccelerated="true"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"
@@ -34,9 +35,9 @@
 
         <activity
             android:name=".MainActivity"
-            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|uiMode"
             android:exported="true"
-            android:screenOrientation="portrait"
+            android:screenOrientation="sensorLandscape"
             android:theme="@style/Theme.WinterForest"
             tools:ignore="LockedOrientationActivity">
             <intent-filter>

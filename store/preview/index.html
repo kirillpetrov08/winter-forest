@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Winter Forest — 1920×1080 Landscape Renders</title>
+<style>
+  :root { --ice:#7CC6FE; --amber:#F6B24B; --night:#0A1420; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 28px 22px 60px;
+    background: radial-gradient(1200px 600px at 50% -10%, #14283c 0%, var(--night) 60%);
+    color: #E8F2FA; font-family: "Segoe UI", Roboto, Arial, sans-serif;
+  }
+  h1 { text-align: center; font-size: 30px; letter-spacing: 3px; margin: 0 0 6px; }
+  .sub { text-align: center; color: var(--ice); font-size: 14px; margin-bottom: 26px; }
+  .note {
+    max-width: 980px; margin: 0 auto 30px; text-align: center;
+    color: #9DB6C9; font-size: 12.5px; line-height: 1.6;
+  }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(460px, 1fr)); gap: 22px; max-width: 1500px; margin: 0 auto; }
+  figure {
+    margin: 0; background: rgba(255,255,255,0.045); border: 1px solid rgba(124,198,254,0.22);
+    border-radius: 14px; overflow: hidden; box-shadow: 0 12px 32px rgba(0,0,0,0.45);
+  }
+  figure img { width: 100%; display: block; aspect-ratio: 16/9; object-fit: cover; }
+  figcaption { padding: 11px 14px 13px; font-size: 13px; }
+  figcaption b { color: var(--amber); display: block; margin-bottom: 3px; font-size: 13.5px; }
+  figcaption span { color: #9DB6C9; font-size: 12px; }
+  footer { text-align: center; margin-top: 34px; color: #6E879B; font-size: 11.5px; }
+</style>
+</head>
+<body>
+  <h1>WINTER FOREST — V2 HORIZONTAL EDITION</h1>
+  <div class="sub">7 аутентичных рендеров 1920×1080 • собственный OpenGL-движок VBO • 10 процедурных материалов</div>
+  <div class="note">
+    Кадры сняты оффлайн-раннером <b>tools/render/</b> с полным паритетом геометрии и шейдеров игры
+    (MeshBuilder + WORLD_FRAGMENT_SHADER + купол неба с горами, звёздами и северным сиянием).
+    Детали в папке <b>store/screenshots/</b>.
+  </div>
+  <div class="grid">
+    <figure>
+      <img src="../screenshots/01-base-clearing-campfire.png" alt="Базовая поляна">
+      <figcaption><b>01 • Базовая поляна — очаг лагеря</b><span>Сруб с тёплыми окнами, котелок на треноге, верстак, метель и топор в руках</span></figcaption>
+    </figure>
+    <figure>
+      <img src="../screenshots/02-base-clearing-day.png" alt="Дневная панорама">
+      <figcaption><b>02 • Панорама лагеря</b><span>Полевые костры, северный олень, вековые ели и деревянные ворота тропы</span></figcaption>
+    </figure>
+    <figure>
+      <img src="../screenshots/03-dense-spruce-blizzard.png" alt="Густой ельник">
+      <figcaption><b>03 • Густой ельник в метель</b><span>Многолучевые заснеженные лапы, растущая изморозь, копьё следопыта</span></figcaption>
+    </figure>
+    <figure>
+      <img src="../screenshots/04-frozen-lake-ice.png" alt="Замёрзшее озеро">
+      <figcaption><b>04 • Замёрзшее озеро</b><span>Бирюзовый лёд с трещинами, рыбацкий причал, лунки и дичь на берегу</span></figcaption>
+    </figure>
+    <figure>
+      <img src="../screenshots/05-abandoned-mine-night.png" alt="Заброшенная шахта">
+      <figcaption><b>05 • Заброшенная шахта</b><span>Бревенчатые крепи, рельсы узкоколейки, свет смоляного факела</span></figcaption>
+    </figure>
+    <figure>
+      <img src="../screenshots/06-hunters-cabin-sunset.png" alt="Охотничий домик">
+      <figcaption><b>06 • Охотничий домик на закате</b><span>Сруб в два ряда брёвен, сушка шкур, северный олень, тёплый горизонт</span></figcaption>
+    </figure>
+    <figure>
+      <img src="../screenshots/07-aurora-night.png" alt="Северное сияние">
+      <figcaption><b>07 • Полярная ночь с сиянием</b><span>Aurora Borealis, звёздное поле, горные хребты, горящий факел</span></figcaption>
+    </figure>
+  </div>
+  <footer>Developer: Ayaks • kirillpetrov08@gmail.com • sensorLandscape immersive build • VBO zero-allocation renderer</footer>
+</body>
+</html>

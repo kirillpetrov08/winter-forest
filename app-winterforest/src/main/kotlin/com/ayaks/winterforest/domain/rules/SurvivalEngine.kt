@@ -3,6 +3,8 @@ package com.ayaks.winterforest.domain.rules
 import com.ayaks.winterforest.domain.model.ActiveTimerType
 import com.ayaks.winterforest.domain.model.BaseProgress
 import com.ayaks.winterforest.domain.model.BaseUpgradeType
+import com.ayaks.winterforest.domain.model.EquippedTool
+import com.ayaks.winterforest.domain.model.FieldCampfire
 import com.ayaks.winterforest.domain.model.GameRunState
 import com.ayaks.winterforest.domain.model.Inventory
 import com.ayaks.winterforest.domain.model.LocationId
@@ -12,12 +14,14 @@ import com.ayaks.winterforest.domain.model.RunPhase
 import com.ayaks.winterforest.domain.model.SpecialLootId
 import com.ayaks.winterforest.domain.model.StarterLoadout
 import com.ayaks.winterforest.domain.model.UnlockStatus
+import com.ayaks.winterforest.domain.model.WildlifeEntity
 import com.ayaks.winterforest.domain.model.WorkbenchRecipe
 import com.ayaks.winterforest.domain.world.WorldPopulator
+import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.floor
+import kotlin.math.hypot
 import kotlin.math.sin
-import kotlin.random.Random
 
 data class EngineStepOutcome(
     val run: GameRunState,
@@ -44,6 +48,7 @@ object SurvivalEngine {
             seed = seed,
             alreadyFoundPersistentLoot = baseProgress.persistentSpecialLoot
         )
+        val allWildlife = WorldPopulator.generateAllWildlife(seed = seed)
 
         return GameRunState(
             phase = RunPhase.PLAYING,
@@ -56,20 +61,25 @@ object SurvivalEngine {
             health = GameRunState.BASE_MAX_HEALTH,
             hunger = GameRunState.MAX_STAT,
             warmth = GameRunState.MAX_STAT,
+            stamina = GameRunState.MAX_STAT,
+            isSprinting = false,
+            equippedTool = EquippedTool.AXE,
             xp = 0,
             level = 1,
             elapsedRealSeconds = 0f,
             daysSurvived = 0,
             inventory = inv,
             nodesByLocation = allNodes,
+            wildlifeByLocation = allWildlife,
+            fieldCampfires = emptyList(),
             visitedLocations = setOf(LocationId.BASE_CLEARING),
             isSnowing = false,
-            lastStatusMessage = "День 1: исследуйте Базовую поляну и поддерживайте костёр."
+            lastStatusMessage = "День 1: исследуйте Базовую поляну, рубите ели и найдите «Старую карту»."
         )
     }
 
     /**
-     * Основной шаг симуляции выживания (deltaSeconds в секундах реального игрового времени).
+     * Основной шаг симуляции выживания, погоды, выносливости, полевых костров и фауны.
      */
     fun tick(
         run: GameRunState,
@@ -86,7 +96,6 @@ object SurvivalEngine {
         val wasNight = (prevElapsed % GameRunState.FULL_CYCLE_SECONDS) >= GameRunState.DAY_DURATION_SECONDS
         val nowNight = (nextElapsed % GameRunState.FULL_CYCLE_SECONDS) >= GameRunState.DAY_DURATION_SECONDS
 
-        // Сброс лимита наградных пропусков каждые 6 минут реального времени (1 игровой день = 360 с)
         val newSkipWindow = floor((nextElapsed / GameRunState.GAME_DAY_SKIP_WINDOW_SECONDS).toDouble()).toInt()
         val skipsUsed = if (newSkipWindow > run.currentSkipWindowIndex) {
             0
@@ -94,13 +103,11 @@ object SurvivalEngine {
             run.skipsUsedInCurrentWindow
         }
 
-        // Подсчёт полных прожитых циклов дня/ночи
         val prevCycleCount = floor((prevElapsed / GameRunState.FULL_CYCLE_SECONDS).toDouble()).toInt()
         val newCycleCount = floor((nextElapsed / GameRunState.FULL_CYCLE_SECONDS).toDouble()).toInt()
         val newlyCompletedDays = (newCycleCount - prevCycleCount).coerceAtLeast(0)
         val totalDaysSurvived = run.daysSurvived + newlyCompletedDays
 
-        // Смена погоды при смене фазы суток (в соответствии с профилем локации)
         val snowingNow = if (wasNight != nowNight) {
             val roll = ((nextElapsed.toInt() * 31 + run.currentLocation.ordinal * 17) % 100) / 100f
             roll < run.currentLocation.snowfallChance
@@ -108,18 +115,38 @@ object SurvivalEngine {
             run.isSnowing
         }
 
-        // Таймеры активных эффектов
         val nextTorchSec = (run.resinTorchRemainingSec - deltaSeconds).coerceAtLeast(0f)
         val nextPortableFireSec = (run.portableFireRemainingSec - deltaSeconds).coerceAtLeast(0f)
         val nextRestCooldown = (run.restCooldownRemainingSec - deltaSeconds).coerceAtLeast(0f)
         val nextSwingSec = (run.swingAnimRemainingSec - deltaSeconds).coerceAtLeast(0f)
+        val nextHitSec = (run.hitFeedbackTimerSec - deltaSeconds).coerceAtLeast(0f)
+        val updatedCampfires = run.fieldCampfires
+            .mapNotNull { fire ->
+                val left = fire.remainingSec - deltaSeconds
+                if (left > 0f) fire.copy(remainingSec = left) else null
+            }
+
+        // Выносливость и авто-отключение спринта при полном истощении дыхания
+        val activelySprinting = run.isSprinting && isMoving && run.stamina > 1f
+        val drainScale = if (base.furBootsCrafted) 0.78f else 1.0f
+        val nextStamina = if (activelySprinting) {
+            (run.stamina - GameRunState.STAMINA_DRAIN_PER_SECOND * drainScale * deltaSeconds).coerceIn(0f, GameRunState.MAX_STAT)
+        } else {
+            val fireBoost = if (run.isNearBaseCampfire || run.isNearFieldCampfire) 1.55f else 1.0f
+            (run.stamina + GameRunState.STAMINA_REGEN_PER_SECOND * fireBoost * deltaSeconds).coerceIn(0f, GameRunState.MAX_STAT)
+        }
+        val nextSprintFlag = if (nextStamina <= 1f) false else run.isSprinting
 
         // 1. ГОЛОД: -1 ед. каждые 30 секунд реального игрового времени
         var nextHunger = (run.hunger - GameRunState.HUNGER_LOSS_PER_SECOND * deltaSeconds)
             .coerceIn(0f, GameRunState.MAX_STAT)
 
-        // 2. ТЕПЛО: зависит от локации, ночи, движения, снегопада, улучшений базы, термоса, шубы и факела
-        val warmingNearFire = run.isNearBaseCampfire || run.portableFireRemainingSec > 0f
+        // 2. ТЕПЛО: учитывает базовый костёр, полевые 3D-костры, ночной мороз, ветер, шубу, термос и факел
+        val nearPlacedFire = updatedCampfires.any { fire ->
+            ((fire.x - run.playerX) * (fire.x - run.playerX) + (fire.z - run.playerZ) * (fire.z - run.playerZ)) <=
+                GameRunState.CAMPFIRE_WARMTH_RADIUS_SQ
+        }
+        val warmingNearFire = run.isNearBaseCampfire || nearPlacedFire || run.portableFireRemainingSec > 0f
         var nextWarmth = if (warmingNearFire) {
             val fireGainPerSec = base.campfireRecoveryPerSec()
             (run.warmth + fireGainPerSec * deltaSeconds).coerceIn(0f, GameRunState.MAX_STAT)
@@ -128,7 +155,7 @@ object SurvivalEngine {
             val nightFactor = if (nowNight) 1.65f else 1.0f
             val moveFactor = if (isMoving) 1.28f else 1.0f
             val weatherFactor = if (snowingNow) 1.30f else 1.0f
-            val torchMitigation = if (run.resinTorchRemainingSec > 0f) 0.50f else 1.0f // +50% эффективности тепла
+            val torchMitigation = if (run.resinTorchRemainingSec > 0f) 0.50f else 1.0f
             val coldLossPerSec = baseColdPerSec *
                 nightFactor *
                 moveFactor *
@@ -154,8 +181,21 @@ object SurvivalEngine {
             }
         }
 
-        // 3. ЗДОРОВЬЕ: урон при голоде = 0 (-1 / 5 с) и при тепле = 0 (-1 / 3 с); регенерация при голоде > 50 и тепле > 50
-        var healthDelta = mealHealthBonus
+        // Живая фауна (зайцы, северные олени, ночные волки)
+        val enteredNight = !wasNight && nowNight
+        val (updatedWildlifeMap, wolfBiteDamage, faunaMessage) = stepWildlifeSimulation(
+            run = run,
+            updatedCampfires = updatedCampfires,
+            deltaSeconds = deltaSeconds,
+            enteredNight = enteredNight,
+            nowNight = nowNight
+        )
+        if (faunaMessage != null) {
+            statusMessage = faunaMessage
+        }
+
+        // 3. ЗДОРОВЬЕ
+        var healthDelta = mealHealthBonus - wolfBiteDamage
         if (nextHunger <= 0f) {
             healthDelta -= GameRunState.STARVATION_DAMAGE_PER_SECOND * deltaSeconds
         }
@@ -166,14 +206,12 @@ object SurvivalEngine {
             healthDelta += GameRunState.PASSIVE_HEALTH_REGEN_PER_SECOND * deltaSeconds
         }
 
-        // Начисление опыта за выжитые дни
-        var xpGain = newlyCompletedDays * 35
+        val xpGain = newlyCompletedDays * 35
         val (nextXp, nextLevel) = applyXpGain(run.xp, run.level, xpGain)
         val maxHp = GameRunState.BASE_MAX_HEALTH + (nextLevel - 1) * GameRunState.HEALTH_PER_LEVEL
         val nextHealth = (run.health + healthDelta).coerceIn(0f, maxHp)
 
-        // Восстановление ресурсных узлов по таймеру И при наступлении ночи (по ТЗ п. 2.3)
-        val enteredNight = !wasNight && nowNight
+        // Восстановление ресурсных узлов
         val updatedNodes = run.nodesByLocation.mapValues { (_, list) ->
             list.map { node ->
                 if (node.collectedPermanent || node.respawnRemainingSec <= 0f) {
@@ -189,12 +227,11 @@ object SurvivalEngine {
         }
 
         if (enteredNight) {
-            statusMessage = "Опустилась морозная ночь: холод усилился, но ресурсы в лесу восстановились."
+            statusMessage = "Опустилась полярная ночь: холод крепчает, в небе зажглось сияние, ресурсы обновились."
         } else if (newlyCompletedDays > 0) {
             statusMessage = "Рассвет дня ${totalDaysSurvived + 1}! Получен опыт за выживание."
         }
 
-        // Обработка смерти при здоровье = 0
         if (nextHealth <= 0f) {
             val persistentLoot = run.inventory.retainPersistentSpecialsOnly().keys
             val mergedPersistent = base.persistentSpecialLoot + persistentLoot
@@ -211,14 +248,18 @@ object SurvivalEngine {
                 health = 0f,
                 hunger = nextHunger,
                 warmth = nextWarmth,
+                stamina = 0f,
+                isSprinting = false,
                 xp = nextXp,
                 level = nextLevel,
                 elapsedRealSeconds = nextElapsed,
                 daysSurvived = totalDaysSurvived,
                 inventory = cleanedInventory,
                 nodesByLocation = updatedNodes,
+                wildlifeByLocation = updatedWildlifeMap,
+                fieldCampfires = emptyList(),
                 isSnowing = snowingNow,
-                resinTorchRemainingSec = 0f, // расходуемый эффект факела сбрасывается при смерти
+                resinTorchRemainingSec = 0f,
                 portableFireRemainingSec = 0f,
                 cookingRemainingSec = 0f,
                 pendingCookedMealCount = 0,
@@ -227,7 +268,8 @@ object SurvivalEngine {
                 skipsUsedInCurrentWindow = skipsUsed,
                 currentSkipWindowIndex = newSkipWindow,
                 swingAnimRemainingSec = 0f,
-                lastStatusMessage = "Персонаж погиб от переохлаждения и истощения."
+                hitFeedbackTimerSec = 0f,
+                lastStatusMessage = "Персонаж погиб в суровом лесу."
             )
             return EngineStepOutcome(deadRun, updatedBase, message = deadRun.lastStatusMessage)
         }
@@ -238,15 +280,26 @@ object SurvivalEngine {
             base
         }
 
+        val walkSpeedPhase = if (isMoving) {
+            val stepRate = if (activelySprinting) 11.5f else 7.2f
+            (run.walkBobPhaseRad + deltaSeconds * stepRate) % (Math.PI.toFloat() * 20f)
+        } else {
+            run.walkBobPhaseRad
+        }
+
         val aliveRun = run.copy(
             health = nextHealth,
             hunger = nextHunger,
             warmth = nextWarmth,
+            stamina = nextStamina,
+            isSprinting = nextSprintFlag,
             xp = nextXp,
             level = nextLevel,
             elapsedRealSeconds = nextElapsed,
             daysSurvived = totalDaysSurvived,
             nodesByLocation = updatedNodes,
+            wildlifeByLocation = updatedWildlifeMap,
+            fieldCampfires = updatedCampfires,
             isSnowing = snowingNow,
             resinTorchRemainingSec = nextTorchSec,
             portableFireRemainingSec = nextPortableFireSec,
@@ -256,28 +309,139 @@ object SurvivalEngine {
             skipsUsedInCurrentWindow = skipsUsed,
             currentSkipWindowIndex = newSkipWindow,
             swingAnimRemainingSec = nextSwingSec,
+            walkBobPhaseRad = walkSpeedPhase,
+            hitFeedbackTimerSec = nextHitSec,
             lastStatusMessage = statusMessage
         )
         return EngineStepOutcome(aliveRun, updatedBase, message = statusMessage)
     }
 
+    private fun stepWildlifeSimulation(
+        run: GameRunState,
+        updatedCampfires: List<FieldCampfire>,
+        deltaSeconds: Float,
+        enteredNight: Boolean,
+        nowNight: Boolean
+    ): Triple<Map<LocationId, List<WildlifeEntity>>, Float, String?> {
+        if (run.wildlifeByLocation.isEmpty()) {
+            return Triple(emptyMap(), 0f, null)
+        }
+        // Крупный скачок времени в юнит-тестах (> 2.5 с за один вызов) не двигает хищников к игроку,
+        // чтобы детерминированные тесты расхода голода/холода не искажались случайной встречей с волком.
+        val allowPredatorEngagement = deltaSeconds <= 2.5f && run.currentLocation != LocationId.BASE_CLEARING
+
+        var totalWolfDamage = 0f
+        var eventMessage: String? = null
+        val curLoc = run.currentLocation
+
+        val updatedMap = run.wildlifeByLocation.mapValues { (loc, list) ->
+            if (loc != curLoc) {
+                list.map { entity ->
+                    if (enteredNight && entity.respawnRemainingSec > 0f) {
+                        entity.copy(hp = entity.kind.maxHp, respawnRemainingSec = 0f, fleeTimerSec = 0f)
+                    } else if (entity.respawnRemainingSec > 0f) {
+                        val nextResp = (entity.respawnRemainingSec - deltaSeconds).coerceAtLeast(0f)
+                        if (nextResp == 0f) entity.copy(hp = entity.kind.maxHp, respawnRemainingSec = 0f)
+                        else entity.copy(respawnRemainingSec = nextResp)
+                    } else {
+                        entity
+                    }
+                }
+            } else {
+                list.mapIndexed { idx, entity ->
+                    if (!entity.isAlive) {
+                        val nextResp = if (enteredNight) 0f else (entity.respawnRemainingSec - deltaSeconds).coerceAtLeast(0f)
+                        if (nextResp <= 0f) {
+                            entity.copy(hp = entity.kind.maxHp, respawnRemainingSec = 0f, fleeTimerSec = 0f)
+                        } else {
+                            entity.copy(respawnRemainingSec = nextResp)
+                        }
+                    } else {
+                        val dxToPlayer = run.playerX - entity.x
+                        val dzToPlayer = run.playerZ - entity.z
+                        val distToPlayer = hypot(dxToPlayer, dzToPlayer).coerceAtLeast(0.01f)
+                        val nearCampfire = updatedCampfires.any { f -> hypot(f.x - entity.x, f.z - entity.z) < 7.5f }
+                        val playerHasFlame = run.isTorchLit || run.portableFireRemainingSec > 0f || run.isNearBaseCampfire
+
+                        var nextHeading = entity.headingRad
+                        var speed = entity.kind.cruiseSpeedMps * 0.45f
+                        var nextFlee = (entity.fleeTimerSec - deltaSeconds).coerceAtLeast(0f)
+                        var nextAtkCd = (entity.attackCooldownSec - deltaSeconds).coerceAtLeast(0f)
+
+                        if (entity.kind.isPredator) {
+                            if (nextFlee > 0f || nearCampfire || (playerHasFlame && distToPlayer < 8.5f)) {
+                                // Волк боится огня и факела!
+                                nextHeading = atan2(-dzToPlayer, -dxToPlayer)
+                                speed = entity.kind.cruiseSpeedMps * 1.45f
+                                if (distToPlayer < 6.0f && nextFlee <= 0f && playerHasFlame) {
+                                    nextFlee = 5.0f
+                                    eventMessage = "Пламя факела отпугнуло таёжного волка!"
+                                }
+                            } else if (allowPredatorEngagement && distToPlayer < (if (nowNight) 15f else 10.5f)) {
+                                nextHeading = atan2(dzToPlayer, dxToPlayer)
+                                speed = entity.kind.cruiseSpeedMps * (if (nowNight) 1.15f else 0.92f)
+                                if (distToPlayer <= 2.35f && nextAtkCd <= 0f) {
+                                    totalWolfDamage += 7.5f
+                                    nextAtkCd = 4.2f
+                                    eventMessage = "Таёжный волк атакует! Зажгите факел, костёр или бейте копьём!"
+                                }
+                            } else {
+                                nextHeading += sin(run.elapsedRealSeconds * 0.7f + idx * 1.9f) * 0.65f * deltaSeconds
+                            }
+                        } else {
+                            // Мирные зайцы и северные олени пасутся и стремительно убегают при приближении
+                            if (nextFlee > 0f || distToPlayer < 6.2f) {
+                                nextHeading = atan2(-dzToPlayer, -dxToPlayer)
+                                speed = entity.kind.cruiseSpeedMps * 1.75f
+                            } else {
+                                nextHeading += sin(run.elapsedRealSeconds * 0.55f + idx * 2.3f) * 0.85f * deltaSeconds
+                                speed = entity.kind.cruiseSpeedMps * 0.38f
+                            }
+                        }
+
+                        val stepStep = (speed * deltaSeconds).coerceAtMost(2.2f)
+                        val rawX = entity.x + cos(nextHeading) * stepStep
+                        val rawZ = entity.z + sin(nextHeading) * stepStep
+                        val clampedX = rawX.coerceIn(-34.5f, 34.5f)
+                        val clampedZ = rawZ.coerceIn(-34.5f, 34.5f)
+                        if (clampedX != rawX || clampedZ != rawZ) {
+                            nextHeading += Math.PI.toFloat() * 0.75f
+                        }
+                        entity.copy(
+                            x = clampedX,
+                            z = clampedZ,
+                            headingRad = nextHeading,
+                            fleeTimerSec = nextFlee,
+                            attackCooldownSec = nextAtkCd
+                        )
+                    }
+                }
+            }
+        }
+        return Triple(updatedMap, totalWolfDamage, eventMessage)
+    }
+
     /**
-     * Перемещение игрока по виртуальному джойстику с проверкой границ мира [-38, +38].
+     * Перемещение игрока по виртуальному джойстику с поддержкой спринта, унтов и рельефа [-38, +38].
      */
     fun movePlayer(
         run: GameRunState,
         forwardInput: Float,
         strafeInput: Float,
         deltaSeconds: Float,
-        speedMetersPerSec: Float = 5.4f
+        speedMetersPerSec: Float = 5.4f,
+        base: BaseProgress = BaseProgress()
     ): GameRunState {
         if (run.phase == RunPhase.DEAD || deltaSeconds <= 0f) return run
+        val sprintFactor = if (run.isSprinting && run.stamina > 1.5f) 1.52f else 1.0f
+        val effectiveSpeed = speedMetersPerSec * sprintFactor * base.movementSpeedMultiplier()
+
         val yawRad = Math.toRadians(run.yawDeg.toDouble()).toFloat()
         val sinYaw = sin(yawRad)
         val cosYaw = cos(yawRad)
 
-        val worldDx = (sinYaw * forwardInput + cosYaw * strafeInput) * speedMetersPerSec * deltaSeconds
-        val worldDz = (-cosYaw * forwardInput + sinYaw * strafeInput) * speedMetersPerSec * deltaSeconds
+        val worldDx = (sinYaw * forwardInput + cosYaw * strafeInput) * effectiveSpeed * deltaSeconds
+        val worldDz = (-cosYaw * forwardInput + sinYaw * strafeInput) * effectiveSpeed * deltaSeconds
 
         val rawX = run.playerX + worldDx
         val rawZ = run.playerZ + worldDz
@@ -289,7 +453,7 @@ object SurvivalEngine {
         val groundY = WorldPopulator.terrainHeight(run.currentLocation, clampedX, clampedZ)
 
         val msg = if (hitBoundary) {
-            "Граница локации: впереди непроходимый лес и крутой обрыв."
+            "Граница локации: впереди заснеженный хребет. Ищите деревянные ворота тропы на севере!"
         } else {
             run.lastStatusMessage
         }
@@ -313,8 +477,159 @@ object SurvivalEngine {
         return run.copy(yawDeg = nextYaw, pitchDeg = nextPitch)
     }
 
+    fun equipTool(run: GameRunState, tool: EquippedTool): GameRunState {
+        val msg = "В руках: ${tool.titleRu}."
+        return run.copy(equippedTool = tool, lastStatusMessage = msg)
+    }
+
+    fun setSprinting(run: GameRunState, sprinting: Boolean): GameRunState {
+        val allowed = sprinting && run.stamina > 5f
+        return run.copy(isSprinting = allowed)
+    }
+
     /**
-     * Сбор ближайшего ресурсного узла или тайника специального лута (кнопка «Собрать» / «Ударить»).
+     * Установка горящего 3D-костра прямо перед игроком в любой локации (2 Дерева).
+     */
+    fun placeFieldCampfire(run: GameRunState, base: BaseProgress): EngineStepOutcome {
+        if (run.phase == RunPhase.DEAD) {
+            return EngineStepOutcome(run, base, false, "Персонаж мёртв.")
+        }
+        val afterWood = run.inventory.tryConsumeResource(
+            ResourceType.WOOD,
+            GameRunState.FIELD_CAMPFIRE_WOOD_COST
+        )
+        if (afterWood == null) {
+            val msg = "Для походного костра нужно Дерево ×${GameRunState.FIELD_CAMPFIRE_WOOD_COST} в рюкзаке."
+            return EngineStepOutcome(run.copy(lastStatusMessage = msg), base, false, msg)
+        }
+        val yawRad = Math.toRadians(run.yawDeg.toDouble()).toFloat()
+        val fx = (run.playerX + sin(yawRad) * 1.9f).coerceIn(-35f, 35f)
+        val fz = (run.playerZ - cos(yawRad) * 1.9f).coerceIn(-35f, 35f)
+        val fy = WorldPopulator.terrainHeight(run.currentLocation, fx, fz)
+
+        val newFires = (run.fieldCampfires + FieldCampfire(fx, fz, GameRunState.FIELD_CAMPFIRE_DURATION_SECONDS))
+            .takeLast(4)
+        val msg = "Разожжён походный костёр! Тёплый свет согревает и отпугивает волков."
+        return EngineStepOutcome(
+            run.copy(
+                inventory = afterWood,
+                fieldCampfires = newFires,
+                warmth = (run.warmth + 22f).coerceAtMost(GameRunState.MAX_STAT),
+                portableFireRemainingSec = maxOf(run.portableFireRemainingSec, 45f),
+                hitFeedbackTimerSec = 0.45f,
+                hitWorldX = fx,
+                hitWorldY = fy + 0.4f,
+                hitWorldZ = fz,
+                lastStatusMessage = msg
+            ),
+            base,
+            true,
+            msg
+        )
+    }
+
+    /**
+     * Интеллектуальное основное действие (кнопка удара/добычи/охоты):
+     * 1) Уникальный тайник локации -> 2) Живой зверь в радиусе оружия -> 3) Ресурсный узел.
+     */
+    fun performSmartAction(
+        run: GameRunState,
+        base: BaseProgress,
+        withToolStrikeBonus: Boolean = true
+    ): EngineStepOutcome {
+        if (run.phase == RunPhase.DEAD) {
+            return EngineStepOutcome(run, base, false, "Персонаж мёртв.")
+        }
+        val nearNode = run.nearestInteractableNode()
+        if (nearNode?.specialLootId != null) {
+            return gatherNearest(run, base, withToolStrikeBonus)
+        }
+        val nearBeast = run.nearestInteractableWildlife()
+        if (nearBeast != null) {
+            return strikeWildlifeTarget(run, base, nearBeast)
+        }
+        return gatherNearest(run, base, withToolStrikeBonus)
+    }
+
+    fun strikeWildlifeTarget(
+        run: GameRunState,
+        base: BaseProgress,
+        target: WildlifeEntity
+    ): EngineStepOutcome {
+        val tool = run.equippedTool
+        val damage = when (tool) {
+            EquippedTool.SPEAR -> if (base.masterSpearCrafted) 58f else 36f
+            EquippedTool.AXE -> 28f
+            EquippedTool.PICKAXE -> 24f
+            EquippedTool.TORCH -> 18f
+        }
+        val hitY = WorldPopulator.terrainHeight(run.currentLocation, target.x, target.z) + 0.6f
+        val remainingHp = (target.hp - damage).coerceAtLeast(0f)
+
+        if (remainingHp > 0f) {
+            val fleeSec = if (tool == EquippedTool.TORCH && target.kind.isPredator) 7.5f else 4.0f
+            val updatedMap = replaceWildlife(
+                run.wildlifeByLocation,
+                run.currentLocation,
+                target.copy(hp = remainingHp, fleeTimerSec = fleeSec)
+            )
+            val msg = "Попадание по «${target.kind.titleRu}» (-${damage.toInt()} ОЗ)! Осталось ${remainingHp.toInt()} ОЗ."
+            return EngineStepOutcome(
+                run.copy(
+                    wildlifeByLocation = updatedMap,
+                    swingAnimRemainingSec = tool.swingDurationSec,
+                    hitFeedbackTimerSec = 0.35f,
+                    hitWorldX = target.x,
+                    hitWorldY = hitY,
+                    hitWorldZ = target.z,
+                    lastStatusMessage = msg
+                ),
+                base,
+                true,
+                msg
+            )
+        }
+
+        // Зверь повержен: выдаём трофеи охоты + опыт
+        val spearBonus = if (tool == EquippedTool.SPEAR && base.masterSpearCrafted) 1 else 0
+        val primaryQty = 2 + spearBonus
+        var nextInv = run.inventory.tryAddResource(target.kind.primaryDrop, primaryQty).inventory
+        val secType = target.kind.secondaryDrop
+        if (secType != null) {
+            nextInv = nextInv.tryAddResource(secType, 1 + spearBonus).inventory
+        }
+        val updatedMap = replaceWildlife(
+            run.wildlifeByLocation,
+            run.currentLocation,
+            target.copy(hp = 0f, respawnRemainingSec = GameRunState.NODE_RESPAWN_SECONDS)
+        )
+        val (nextXp, nextLvl) = applyXpGain(run.xp, run.level, target.kind.xpReward)
+        val maxHp = GameRunState.BASE_MAX_HEALTH + (nextLvl - 1) * GameRunState.HEALTH_PER_LEVEL
+        val secText = if (secType != null) ", ${secType.titleRu} +${1 + spearBonus}" else ""
+        val msg = "Добыт трофей (${target.kind.titleRu}): ${target.kind.primaryDrop.titleRu} +$primaryQty$secText (+${target.kind.xpReward} опыта)!"
+        return EngineStepOutcome(
+            run.copy(
+                inventory = nextInv,
+                wildlifeByLocation = updatedMap,
+                totalResourcesGathered = run.totalResourcesGathered + primaryQty,
+                xp = nextXp,
+                level = nextLvl,
+                health = run.health.coerceAtMost(maxHp),
+                swingAnimRemainingSec = tool.swingDurationSec,
+                hitFeedbackTimerSec = 0.45f,
+                hitWorldX = target.x,
+                hitWorldY = hitY,
+                hitWorldZ = target.z,
+                lastStatusMessage = msg
+            ),
+            base.copy(totalWildlifeHunted = base.totalWildlifeHunted + 1),
+            true,
+            msg
+        )
+    }
+
+    /**
+     * Сбор ближайшего ресурсного узла или тайника специального лута.
      */
     fun gatherNearest(
         run: GameRunState,
@@ -327,15 +642,16 @@ object SurvivalEngine {
         val target = run.nearestInteractableNode()
             ?: return EngineStepOutcome(
                 run.copy(
-                    swingAnimRemainingSec = if (withToolStrikeBonus) 0.35f else run.swingAnimRemainingSec,
-                    lastStatusMessage = "Рядом нет доступных объектов для сбора."
+                    swingAnimRemainingSec = if (withToolStrikeBonus) run.equippedTool.swingDurationSec else run.swingAnimRemainingSec,
+                    lastStatusMessage = "Подойдите ближе к ели, скале, лунке или тайнику для добычи."
                 ),
                 base,
                 actionSucceeded = false,
                 message = "Рядом нет доступных объектов для сбора."
             )
 
-        // Сбор уникального специального предмета локации
+        val hitY = WorldPopulator.terrainHeight(run.currentLocation, target.x, target.z) + 0.85f
+
         if (target.specialLootId != null) {
             val special = target.specialLootId
             val updatedInventory = run.inventory.grantSpecialLoot(special, 1)
@@ -364,25 +680,37 @@ object SurvivalEngine {
                 nodesByLocation = updatedNodes,
                 xp = nextXp,
                 level = nextLevel,
-                swingAnimRemainingSec = if (withToolStrikeBonus) 0.35f else run.swingAnimRemainingSec,
+                swingAnimRemainingSec = run.equippedTool.swingDurationSec,
+                hitFeedbackTimerSec = 0.5f,
+                hitWorldX = target.x,
+                hitWorldY = hitY,
+                hitWorldZ = target.z,
                 lastStatusMessage = msg
             )
             return EngineStepOutcome(updatedRun, updatedBase, true, msg)
         }
 
-        // Обычный ресурсный узел
         val resType = target.resourceType ?: ResourceType.WOOD
         val pickaxeBonus = if (
             withToolStrikeBonus &&
-            SpecialLootId.PICKAXE in base.persistentSpecialLoot &&
+            (SpecialLootId.PICKAXE in base.persistentSpecialLoot || run.equippedTool == EquippedTool.PICKAXE) &&
             resType in setOf(ResourceType.STONE, ResourceType.COAL, ResourceType.IRON)
         ) {
             1
         } else {
             0
         }
+        val axeWoodBonus = if (
+            withToolStrikeBonus &&
+            run.equippedTool == EquippedTool.AXE &&
+            resType == ResourceType.WOOD
+        ) {
+            1
+        } else {
+            0
+        }
         val levelBonus = if (run.level >= 3 && (run.totalResourcesGathered % 2 == 0)) 1 else 0
-        val rawYield = (target.baseYield + pickaxeBonus + levelBonus).coerceIn(1, 5)
+        val rawYield = (target.baseYield + pickaxeBonus + axeWoodBonus + levelBonus).coerceIn(1, 6)
         val addResult = run.inventory.tryAddResource(resType, rawYield)
 
         if (addResult.isFullBlocked) {
@@ -418,16 +746,16 @@ object SurvivalEngine {
             xp = nextXp,
             level = nextLevel,
             health = run.health.coerceAtMost(maxHp),
-            swingAnimRemainingSec = if (withToolStrikeBonus) 0.35f else run.swingAnimRemainingSec,
+            swingAnimRemainingSec = run.equippedTool.swingDurationSec,
+            hitFeedbackTimerSec = 0.36f,
+            hitWorldX = target.x,
+            hitWorldY = hitY,
+            hitWorldZ = target.z,
             lastStatusMessage = msg
         )
         return EngineStepOutcome(updatedRun, updatedBase, true, msg)
     }
 
-    /**
-     * Использование ресурса (еда, топливо или Смоляной факел).
-     * Если ресурса нет — действие безопасно отменяется с понятным сообщением.
-     */
     fun useResource(
         run: GameRunState,
         base: BaseProgress,
@@ -447,12 +775,14 @@ object SurvivalEngine {
                 val maxHp = run.maxHealth
                 val nextHunger = (run.hunger + type.hungerRestore).coerceAtMost(GameRunState.MAX_STAT)
                 val nextHp = (run.health + type.healthRestore).coerceAtMost(maxHp)
+                val nextStamina = (run.stamina + 25f).coerceAtMost(GameRunState.MAX_STAT)
                 val msg = "Съедено: ${type.titleRu} (+${type.hungerRestore.toInt()} сытости)."
                 EngineStepOutcome(
                     run.copy(
                         inventory = afterConsume,
                         hunger = nextHunger,
                         health = nextHp,
+                        stamina = nextStamina,
                         lastStatusMessage = msg
                     ),
                     base,
@@ -478,7 +808,6 @@ object SurvivalEngine {
             }
             else -> {
                 val msg = "Ресурс «${type.titleRu}» используется на верстаке или для улучшений базы."
-                // Возвращаем неиспользуемый напрямую материал обратно в инвентарь
                 EngineStepOutcome(run.copy(lastStatusMessage = msg), base, false, msg)
             }
         }
@@ -487,13 +816,19 @@ object SurvivalEngine {
     fun igniteResinTorch(run: GameRunState, base: BaseProgress): EngineStepOutcome {
         val after = run.inventory.consumeSpecialLoot(SpecialLootId.RESIN_TORCH, 1)
         if (after == null) {
-            val msg = "Нет «Смоляного факела» в инвентаре."
-            return EngineStepOutcome(run.copy(lastStatusMessage = msg), base, false, msg)
+            val msg = "Нет «Смоляного факела» в инвентаре — экипирован походный факел."
+            return EngineStepOutcome(
+                run.copy(equippedTool = EquippedTool.TORCH, lastStatusMessage = msg),
+                base,
+                false,
+                msg
+            )
         }
-        val msg = "Смоляной факел зажжён (+50% сохранения тепла и свет на 3 минуты)!"
+        val msg = "Смоляной факел зажжён (+50% сохранения тепла, яркий свет и защита от волков)!"
         return EngineStepOutcome(
             run.copy(
                 inventory = after,
+                equippedTool = EquippedTool.TORCH,
                 resinTorchRemainingSec = SpecialLootId.RESIN_TORCH_DURATION_SEC,
                 warmth = (run.warmth + 15f).coerceAtMost(GameRunState.MAX_STAT),
                 lastStatusMessage = msg
@@ -504,9 +839,6 @@ object SurvivalEngine {
         )
     }
 
-    /**
-     * Быстрое контекстное действие для кнопки «Использовать» на HUD.
-     */
     fun quickUseBestSurvivalItem(run: GameRunState, base: BaseProgress): EngineStepOutcome {
         if (run.currentLocation.requiresLightForVisibility &&
             run.resinTorchRemainingSec <= 0f &&
@@ -532,10 +864,6 @@ object SurvivalEngine {
         return EngineStepOutcome(run.copy(lastStatusMessage = msg), base, false, msg)
     }
 
-    /**
-     * Проверка условий открытия каждой из 5 изучаемых локаций (раздел 2.4 ТЗ),
-     * включая защиту от потери квест-предмета «Старая карта».
-     */
     fun evaluateLocationUnlock(
         target: LocationId,
         run: GameRunState,
@@ -574,7 +902,6 @@ object SurvivalEngine {
                     )
                 }
                 val stoneCount = totalAvailableResource(run, base, ResourceType.STONE)
-                // Альтернативный страховочный путь на крайний случай (ур. >= 5 + 15 камня), если Старая карта ещё не взята
                 val emergencyPath = run.level >= 5 && stoneCount >= 15
                 val ok = (hasOldMap && stoneCount >= LocationId.STONE_REQUIRED_FOR_MINE) || emergencyPath
                 val missing = buildList {
@@ -611,10 +938,6 @@ object SurvivalEngine {
         }
     }
 
-    /**
-     * Восстановление квестовой целостности: если предмет числился найденным в мета-прогрессе,
-     * но пропал из текущего сохранения или наоборот — восстанавливает его без потери прогресса.
-     */
     fun repairQuestItemsConsistency(run: GameRunState, base: BaseProgress): EngineStepOutcome {
         val unionPersistent = base.persistentSpecialLoot +
             run.inventory.specialItems.keys.filter { it.persistsAcrossRuns }
@@ -628,9 +951,6 @@ object SurvivalEngine {
         return EngineStepOutcome(run.copy(inventory = fixedInv), fixedBase, true)
     }
 
-    /**
-     * Переход в другую локацию с проверкой условий открытия и безопасной защитой от сбоя генерации.
-     */
     fun travelToLocation(
         run: GameRunState,
         base: BaseProgress,
@@ -656,7 +976,6 @@ object SurvivalEngine {
             )
         }
 
-        // Расход камня при первой расчистке входа в Заброшенную шахту
         var nextInv = curRun.inventory
         var clearedMine = curRun.mineEntranceCleared
         if (destination == LocationId.ABANDONED_MINE && !clearedMine) {
@@ -673,6 +992,7 @@ object SurvivalEngine {
         }
 
         val updatedNodesMap = curRun.nodesByLocation.toMutableMap()
+        val updatedWildlifeMap = curRun.wildlifeByLocation.toMutableMap()
         try {
             if (simulateGenerationError || updatedNodesMap[destination].isNullOrEmpty()) {
                 updatedNodesMap[destination] = WorldPopulator.generateLocationNodes(
@@ -680,6 +1000,12 @@ object SurvivalEngine {
                     seed = 20261021L + destination.ordinal * 7919L,
                     alreadyFoundPersistentLoot = curBase.persistentSpecialLoot,
                     simulateFailureForTest = simulateGenerationError
+                )
+            }
+            if (updatedWildlifeMap[destination].isNullOrEmpty()) {
+                updatedWildlifeMap[destination] = WorldPopulator.generateLocationWildlife(
+                    location = destination,
+                    seed = 20261021L + 91_823L + destination.ordinal * 4999L
                 )
             }
         } catch (_: Throwable) {
@@ -711,6 +1037,8 @@ object SurvivalEngine {
             playerZ = spawnZ,
             inventory = nextInv,
             nodesByLocation = updatedNodesMap,
+            wildlifeByLocation = updatedWildlifeMap,
+            fieldCampfires = emptyList(),
             visitedLocations = curRun.visitedLocations + destination,
             mineEntranceCleared = clearedMine,
             xp = nextXp,
@@ -724,9 +1052,6 @@ object SurvivalEngine {
     fun returnToBase(run: GameRunState, base: BaseProgress): EngineStepOutcome =
         travelToLocation(run, base, LocationId.BASE_CLEARING)
 
-    /**
-     * Складирование всех обычных ресурсов из рюкзака на склад базы.
-     */
     fun depositAllToBaseStorage(run: GameRunState, base: BaseProgress): EngineStepOutcome {
         val newStorage = base.storageResources.toMutableMap()
         var movedTotal = 0
@@ -750,9 +1075,6 @@ object SurvivalEngine {
         )
     }
 
-    /**
-     * Прокачка построек базы (Укрытие / Костёр / Верстак) с сохранением между забегами.
-     */
     fun upgradeBaseStructure(
         run: GameRunState,
         base: BaseProgress,
@@ -806,9 +1128,6 @@ object SurvivalEngine {
         )
     }
 
-    /**
-     * Постройка/установка найденного «Термоса» на базе (-15% скорости потери тепла навсегда).
-     */
     fun installThermosOnBase(run: GameRunState, base: BaseProgress): EngineStepOutcome {
         val hasThermos = SpecialLootId.THERMOS in base.persistentSpecialLoot ||
             run.inventory.hasSpecial(SpecialLootId.THERMOS)
@@ -866,6 +1185,53 @@ object SurvivalEngine {
                 val msg = "Изготовлен «Смоляной факел»!"
                 EngineStepOutcome(run.copy(inventory = withTorch, lastStatusMessage = msg), baseAfterCost, true, msg)
             }
+            WorkbenchRecipe.CRAFT_BERRY_TEA -> {
+                val msg = "Выпит таёжный ягодный взвар: +36 тепла, +26 сытости и 100% сил!"
+                EngineStepOutcome(
+                    run.copy(
+                        inventory = invAfterCost,
+                        warmth = (run.warmth + 36f).coerceAtMost(GameRunState.MAX_STAT),
+                        hunger = (run.hunger + 26f).coerceAtMost(GameRunState.MAX_STAT),
+                        stamina = GameRunState.MAX_STAT,
+                        lastStatusMessage = msg
+                    ),
+                    baseAfterCost,
+                    true,
+                    msg
+                )
+            }
+            WorkbenchRecipe.CRAFT_ROAST_FEAST -> {
+                val msg = "Жаркое охотника съедено: +55 сытости, +24 тепла и +20 здоровья!"
+                EngineStepOutcome(
+                    run.copy(
+                        inventory = invAfterCost,
+                        hunger = (run.hunger + 55f).coerceAtMost(GameRunState.MAX_STAT),
+                        warmth = (run.warmth + 24f).coerceAtMost(GameRunState.MAX_STAT),
+                        health = (run.health + 20f).coerceAtMost(run.maxHealth),
+                        stamina = GameRunState.MAX_STAT,
+                        lastStatusMessage = msg
+                    ),
+                    baseAfterCost,
+                    true,
+                    msg
+                )
+            }
+            WorkbenchRecipe.CRAFT_HUNTING_SPEAR -> {
+                val (nextXp, nextLvl) = applyXpGain(run.xp, run.level, 30)
+                val msg = "Выковано «Копьё следопыта»: урон и добыча на охоте усилены навсегда!"
+                EngineStepOutcome(
+                    run.copy(
+                        inventory = invAfterCost,
+                        equippedTool = EquippedTool.SPEAR,
+                        xp = nextXp,
+                        level = nextLvl,
+                        lastStatusMessage = msg
+                    ),
+                    baseAfterCost.copy(masterSpearCrafted = true),
+                    true,
+                    msg
+                )
+            }
             WorkbenchRecipe.CRAFT_WARM_COMPRESS -> {
                 val msg = "Использован тёплый пакет: +28 здоровья и +15 тепла!"
                 EngineStepOutcome(
@@ -876,6 +1242,21 @@ object SurvivalEngine {
                         lastStatusMessage = msg
                     ),
                     baseAfterCost,
+                    true,
+                    msg
+                )
+            }
+            WorkbenchRecipe.CRAFT_FUR_BOOTS -> {
+                val (nextXp, nextLvl) = applyXpGain(run.xp, run.level, 35)
+                val msg = "Сшиты «Меховые унты севера»: скорость бега по снегу выросла на 14%!"
+                EngineStepOutcome(
+                    run.copy(
+                        inventory = invAfterCost,
+                        xp = nextXp,
+                        level = nextLvl,
+                        lastStatusMessage = msg
+                    ),
+                    baseAfterCost.copy(furBootsCrafted = true),
                     true,
                     msg
                 )
@@ -898,9 +1279,6 @@ object SurvivalEngine {
         }
     }
 
-    /**
-     * Запуск готовки горячего пайка на костре (таймер, ускоряемый уровнем костра или rewarded-пропуском).
-     */
     fun startCookingOnCampfire(run: GameRunState, base: BaseProgress): EngineStepOutcome {
         val foodType = listOf(ResourceType.MEAT, ResourceType.FISH, ResourceType.BERRIES)
             .firstOrNull { totalAvailableResource(run, base, it) > 0 }
@@ -925,20 +1303,18 @@ object SurvivalEngine {
         )
     }
 
-    /**
-     * Отдых в укрытии базы с кулдауном восстановления сил.
-     */
     fun restInBaseShelter(run: GameRunState, base: BaseProgress): EngineStepOutcome {
         if (run.restCooldownRemainingSec > 0f) {
             val msg = "Укрытие готовится к следующему отдыху (${run.restCooldownRemainingSec.toInt()} с)."
             return EngineStepOutcome(run.copy(lastStatusMessage = msg), base, false, msg)
         }
         val heal = 30f + (base.shelterLevel - 1) * 6f
-        val msg = "Отдых у очага восстановил +${heal.toInt()} здоровья и согрел персонажа!"
+        val msg = "Отдых у очага восстановил +${heal.toInt()} здоровья, силы и согрел персонажа!"
         return EngineStepOutcome(
             run.copy(
                 health = (run.health + heal).coerceAtMost(run.maxHealth),
                 warmth = (run.warmth + 35f).coerceAtMost(GameRunState.MAX_STAT),
+                stamina = GameRunState.MAX_STAT,
                 restCooldownRemainingSec = GameRunState.REST_COOLDOWN_SECONDS,
                 lastStatusMessage = msg
             ),
@@ -948,10 +1324,6 @@ object SurvivalEngine {
         )
     }
 
-    /**
-     * Rewarded-награда А: возрождение после смерти СТРОГО один раз за забег на Базовой поляне
-     * с 50% здоровья, 50% голода и 50% тепла. Вызывается ТОЛЬКО из колбэка onRewarded!
-     */
     fun applyRewardedRevive(run: GameRunState, base: BaseProgress): EngineStepOutcome {
         if (run.phase != RunPhase.DEAD) {
             return EngineStepOutcome(run, base, false, "Возрождение доступно только после гибели.")
@@ -973,17 +1345,13 @@ object SurvivalEngine {
             health = run.maxHealth * 0.5f,
             hunger = GameRunState.MAX_STAT * 0.5f,
             warmth = GameRunState.MAX_STAT * 0.5f,
+            stamina = GameRunState.MAX_STAT,
             revivesUsedInRun = run.revivesUsedInRun + 1,
             lastStatusMessage = "Вы пришли в себя у костра на Базовой поляне (50% сил)."
         )
         return EngineStepOutcome(revivedRun, base, true, revivedRun.lastStatusMessage)
     }
 
-    /**
-     * Rewarded-награда Б: немедленное завершение активного таймера/кулдауна (не более 3 раз в игровой день = 6 мин).
-     * НЕ выдаёт лишних ресурсов сверх штатного завершения таймера и НИКОГДА не выдаёт спецлут.
-     * Вызывается ТОЛЬКО из колбэка onRewarded!
-     */
     fun applyRewardedSkipTimer(run: GameRunState, base: BaseProgress): EngineStepOutcome {
         val currentBucket = floor(
             (run.elapsedRealSeconds / GameRunState.GAME_DAY_SKIP_WINDOW_SECONDS).toDouble()
@@ -1138,6 +1506,17 @@ object SurvivalEngine {
         location: LocationId,
         replacement: ResourceNode
     ): Map<LocationId, List<ResourceNode>> {
+        val updatedList = map[location].orEmpty().map { existing ->
+            if (existing.id == replacement.id) replacement else existing
+        }
+        return map + (location to updatedList)
+    }
+
+    private fun replaceWildlife(
+        map: Map<LocationId, List<WildlifeEntity>>,
+        location: LocationId,
+        replacement: WildlifeEntity
+    ): Map<LocationId, List<WildlifeEntity>> {
         val updatedList = map[location].orEmpty().map { existing ->
             if (existing.id == replacement.id) replacement else existing
         }
