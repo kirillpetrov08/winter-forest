@@ -15,8 +15,8 @@ enum class GraphicsQuality(
     LOW(
         titleRu = "Низкое",
         subtitleRu = "Максимум FPS для бюджетных устройств",
-        textureSize = 128,
-        terrainSteps = 38,
+        textureSize = 256,
+        terrainSteps = 56,
         perimeterTrees = 20,
         snowParticles = 45,
         fogDistanceScale = 0.85f
@@ -24,26 +24,26 @@ enum class GraphicsQuality(
     MEDIUM(
         titleRu = "Среднее",
         subtitleRu = "Плавные 60 FPS и сбалансированная дальность",
-        textureSize = 192,
-        terrainSteps = 54,
+        textureSize = 512,
+        terrainSteps = 84,
         perimeterTrees = 30,
         snowParticles = 100,
         fogDistanceScale = 0.96f
     ),
     HIGH(
         titleRu = "Высокое",
-        subtitleRu = "Чёткие текстуры 256px, тени АО, сияние и густой лес",
-        textureSize = 256,
-        terrainSteps = 68,
+        subtitleRu = "Детальные текстуры 1024px, тени АО, сияние и густой лес",
+        textureSize = 1024,
+        terrainSteps = 120,
         perimeterTrees = 42,
         snowParticles = 185,
         fogDistanceScale = 1.05f
     ),
     ULTRA(
         titleRu = "Ультра",
-        subtitleRu = "Текстуры 512px, плотный рельеф, дальний лес и буря",
-        textureSize = 512,
-        terrainSteps = 84,
+        subtitleRu = "Полные 2048px-текстуры каждого материала, плотный рельеф и буря",
+        textureSize = 2048,
+        terrainSteps = 160,
         perimeterTrees = 54,
         snowParticles = 290,
         fogDistanceScale = 1.18f

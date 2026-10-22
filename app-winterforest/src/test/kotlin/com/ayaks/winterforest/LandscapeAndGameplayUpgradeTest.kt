@@ -140,4 +140,42 @@ class LandscapeAndGameplayUpgradeTest {
             }
         }
     }
+
+    @Test
+    fun `rounded chamfered boxes smooth ellipsoids and lathes remove the blocky look everywhere`() {
+        val mb = MeshBuilder()
+        mb.addBox(0f, 0f, 0f, 1.2f, 0.8f, 0.6f) // шамференный брус
+        mb.addEllipsoid(2f, 1f, 0f, 0.5f, 0.7f, 0.4f, yawRad = 0.3f)
+        mb.addLathe(
+            -2f, 0f, 0f,
+            floatArrayOf(0.22f, 0f, 0.30f, 0.16f, 0.24f, 0.34f, 0.12f, 0.42f)
+        )
+        val mesh = mb.build()
+        assertTrue(
+            "Шамфер + эллипсоид + тело вращения должны давать заметно больше вершин, чем коробки (сейчас ${mesh.vertexCount})",
+            mesh.vertexCount >= 800
+        )
+        for (v in 0 until mesh.vertexCount) {
+            val o = v * GlMesh.FLOATS_PER_VERTEX
+            for (k in 0 until GlMesh.FLOATS_PER_VERTEX) {
+                val value = mesh.vertexBuffer.get(o + k)
+                assertTrue("Координаты/нормали конечны", value == value && value > -1e6f && value < 1e6f)
+            }
+            val nx = mesh.vertexBuffer.get(o + 3)
+            val ny = mesh.vertexBuffer.get(o + 4)
+            val nz = mesh.vertexBuffer.get(o + 5)
+            val len = sqrt(nx * nx + ny * ny + nz * nz)
+            if (len > 0.2f) {
+                assertEquals("Нормаль вершины должна быть единичной", 1f, len, 0.03f)
+            }
+        }
+
+        // Даже 4 сегмента поднимаются до гладких 12 — никаких «квадратных» стволов
+        val cyl = MeshBuilder()
+        cyl.addTaperedCylinder(0f, 0f, 0f, 0f, 1f, 0f, 0.2f, 0.15f, segments = 4)
+        val cone = MeshBuilder()
+        cone.addCone(0f, 0f, 0f, 0.5f, 1f, segments = 3)
+        assertTrue("Цилиндр должен иметь минимум 12 граней", cyl.build().vertexCount >= 12 * 6)
+        assertTrue("Конус должен иметь минимум 12 граней", cone.build().vertexCount >= 12 * 3)
+    }
 }

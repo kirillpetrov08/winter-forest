@@ -104,4 +104,39 @@ class StoreListingComplianceAuditTest {
             assertTrue("Размер скриншота ${shot.name} должен быть непустым и <= 5 МБ", shot.length() in 20_000L..5_000_000L)
         }
     }
+
+    @Test
+    fun `baked 2048px asset textures deliver 200+ mb of fully detailed item and location graphics`() {
+        val root = resolveRepoRoot()
+        val texDir = File(root, "app-winterforest/src/main/assets/textures")
+        assertTrue("Каталог assets/textures должен существовать", texDir.isDirectory)
+        val pngs = texDir.listFiles { f -> f.isFile && f.extension.equals("png", ignoreCase = true) } ?: emptyArray()
+        assertTrue(
+            "Должно быть не меньше 30 текстур (каждый материал, предмет и локация), сейчас ${pngs.size}",
+            pngs.size >= 30
+        )
+        val totalBytes = pngs.sumOf { it.length() }
+        val totalMb = totalBytes / (1024L * 1024L)
+        assertTrue("Графика в приложении должна весить не менее 200 МБ, сейчас $totalMb МБ", totalBytes >= 200L * 1024L * 1024L)
+
+        // Каждая текстура — полноценные 2048×2048 RGB (деталь каждого материала/локации)
+        for (png in pngs) {
+            val (w, h, color) = readPngDimensionsAndColorType(png)
+            assertTrue("Текстура ${png.name} должна быть не меньше 2048px, сейчас ${w}x$h", w >= 2048 && h >= 2048)
+            assertEquals("Текстура ${png.name} должна быть RGB/RGBA", true, color == 2 || color == 6)
+        }
+
+        // Обязательный набор материалов и локаций
+        for (required in listOf(
+            "snow_soft", "snow_crust", "ice_cracked", "bark_pine", "bark_birch", "pine_needles",
+            "stone_granite", "stone_mossy", "wood_plank", "wood_log_end", "wood_carved",
+            "metal_worn", "metal_rust", "fur_wolf", "fur_deer", "cloth_canvas", "cloth_wool",
+            "ember_coal", "ember_glow", "flame_streak", "leather_tanned", "meat_raw", "resin_amber", "crystal_ice", "herb_leaf",
+            "dirt_frozen", "grass_dry", "bone_old",
+            "item_ore_raw", "item_meal_stew", "item_rope_coil", "item_torch_wrap", "item_map_paper", "item_herbs_bundle",
+            "loc_sos_clearing", "loc_frozen_lake", "loc_pine_forest", "loc_abandoned_mine", "loc_cliff_path", "loc_winter_valley"
+        )) {
+            assertTrue("Текстура $required.png обязательна", File(texDir, "$required.png").isFile)
+        }
+    }
 }

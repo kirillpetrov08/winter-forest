@@ -111,7 +111,39 @@ def pack_argb(a, r, g, b):
     ib = int(max(0.0, min(1.0, b)) * 255.0) & 0xFF
     return (ia << 24) | (ir << 16) | (ig << 8) | ib
 
+_ASSET_TEX_DIR = os.path.join(HERE, "..", "..", "app-winterforest", "src", "main", "assets", "textures")
+_ASSET_MAP = {
+    "SNOW": "snow_soft", "WOOD_BARK": "bark_pine", "PINE_FOLIAGE": "pine_needles",
+    "STONE": "stone_granite", "CLOTH": "cloth_canvas", "ICE": "ice_cracked",
+    "TIMBER": "wood_plank", "FIRE_EMBER": "flame_streak", "METAL_STEEL": "metal_worn",
+    "FUR_HIDE": "fur_deer",
+}
+_BAKED_CACHE = {}
+
+
 def generate_texture_rgb(tex_id, palette, size=256, seed=1337):
+    """2048px baked material textures from assets (same as in the APK), fallback procedural."""
+    name = _ASSET_MAP.get(tex_id)
+    path = os.path.join(_ASSET_TEX_DIR, name + ".png") if name else None
+    if path and os.path.isfile(path):
+        snow_hex = palette["snowTintHex"]
+        key = (tex_id, size, snow_hex)
+        if key not in _BAKED_CACHE:
+            img = Image.open(path).convert("RGB")
+            if img.width != size:
+                img = img.resize((size, size), Image.LANCZOS)
+            arr = np.asarray(img, dtype=np.uint8).astype(np.float32)
+            if tex_id in ("SNOW", "ICE"):
+                tint = np.array([((snow_hex >> 16) & 0xFF) / 255.0,
+                                 ((snow_hex >> 8) & 0xFF) / 255.0,
+                                 (snow_hex & 0xFF) / 255.0], dtype=np.float32)
+                arr *= tint[None, None, :]
+            _BAKED_CACHE[key] = np.clip(arr, 0, 255).astype(np.uint8)
+        return _BAKED_CACHE[key]
+    return _generate_texture_rgb_procedural(tex_id, palette, size, seed)
+
+
+def _generate_texture_rgb_procedural(tex_id, palette, size=256, seed=1337):
     """Returns uint8 array (size, size, 3) RGB (alpha dropped for opaque samplers)."""
     snow_hex = palette["snowTintHex"]
     st_r = ((snow_hex >> 16) & 0xFF) / 255.0
@@ -286,25 +318,70 @@ class Mesh:
                     cy + ax_y * lx + ay_y * ly + az_y * lz,
                     cz + ax_z * lx + ay_z * ly + az_z * lz)
 
+        ch = max(0.006, min(sx, sy, sz) * 0.17)
+        ch = min(ch, 0.075)
         uf = max(sx * uv_density, 0.35)
         vsd = max(sy * uv_density, 0.35)
         ur = max(sz * uv_density, 0.35)
+        hxc, hyc, hzc = hx - ch, hy - ch, hz - ch
 
-        p = [P(-hx, -hy, hz), P(hx, -hy, hz), P(hx, hy, hz), P(-hx, hy, hz)]
-        self.quad_shaded(*p[0], *p[1], *p[2], *p[3], az_x, az_y, az_z, uf, vsd, 0.80, r, g, b, a)
-        p = [P(hx, -hy, -hz), P(-hx, -hy, -hz), P(-hx, hy, -hz), P(hx, hy, -hz)]
-        self.quad_shaded(*p[0], *p[1], *p[2], *p[3], -az_x, -az_y, -az_z, uf, vsd, 0.80, r, g, b, a)
-        p = [P(hx, -hy, hz), P(hx, -hy, -hz), P(hx, hy, -hz), P(hx, hy, hz)]
-        self.quad_shaded(*p[0], *p[1], *p[2], *p[3], ax_x, ax_y, ax_z, ur, vsd, 0.80, r, g, b, a)
-        p = [P(-hx, -hy, -hz), P(-hx, -hy, hz), P(-hx, hy, hz), P(-hx, hy, -hz)]
-        self.quad_shaded(*p[0], *p[1], *p[2], *p[3], -ax_x, -ax_y, -ax_z, ur, vsd, 0.80, r, g, b, a)
-        p = [P(-hx, hy, hz), P(hx, hy, hz), P(hx, hy, -hz), P(-hx, hy, -hz)]
-        self.quad(*p[0], *p[1], *p[2], *p[3], ay_x, ay_y, ay_z, uf, ur, r * 1.04, g * 1.04, b * 1.05, a)
-        p = [P(-hx, -hy, -hz), P(hx, -hy, -hz), P(hx, -hy, hz), P(-hx, -hy, hz)]
-        self.quad(*p[0], *p[1], *p[2], *p[3], -ay_x, -ay_y, -ay_z, uf, ur, r * 0.62, g * 0.62, b * 0.66, a)
+        def emit_quad(p0, p1, p2, p3, nx, ny, nz, us, vs, ao):
+            self.quad(*p0, *p1, *p2, *p3, nx, ny, nz, us, vs, r * ao, g * ao, min(b * ao, 1.08), a)
+
+        # 6 утопленных граней
+        emit_quad(P(-hxc, -hyc, hz), P(hxc, -hyc, hz), P(hxc, hyc, hz), P(-hxc, hyc, hz), az_x, az_y, az_z, uf, vsd, 0.86)
+        emit_quad(P(hxc, -hyc, -hz), P(-hxc, -hyc, -hz), P(-hxc, hyc, -hz), P(hxc, hyc, -hz), -az_x, -az_y, -az_z, uf, vsd, 0.86)
+        emit_quad(P(hx, -hyc, -hzc), P(hx, -hyc, hzc), P(hx, hyc, hzc), P(hx, hyc, -hzc), ax_x, ax_y, ax_z, ur, vsd, 0.86)
+        emit_quad(P(-hx, -hyc, hzc), P(-hx, -hyc, -hzc), P(-hx, hyc, -hzc), P(-hx, hyc, hzc), -ax_x, -ax_y, -ax_z, ur, vsd, 0.86)
+        emit_quad(P(-hxc, hy, hzc), P(hxc, hy, hzc), P(hxc, hy, -hzc), P(-hxc, hy, -hzc), ay_x, ay_y, ay_z, uf, ur, 1.02)
+        emit_quad(P(-hxc, -hy, -hzc), P(hxc, -hy, -hzc), P(hxc, -hy, hzc), P(-hxc, -hy, hzc), -ay_x, -ay_y, -ay_z, uf, ur, 0.62)
+
+        def inv_len(x, y, z):
+            l = math.sqrt(x * x + y * y + z * z)
+            return 1.0 / l if l > 1e-5 else 0.0
+
+        # 12 срезанных рёбер
+        for sz2 in (1.0, -1.0):
+            for sx2 in (1.0, -1.0):
+                k = inv_len(az_x * sz2 + ax_x * sx2, az_y * sz2 + ax_y * sx2, az_z * sz2 + ax_z * sx2)
+                emit_quad(P(hxc * sx2, -hyc, hz * sz2), P(hx * sx2, -hyc, hzc * sz2),
+                          P(hx * sx2, hyc, hzc * sz2), P(hxc * sx2, hyc, hz * sz2),
+                          (az_x * sz2 + ax_x * sx2) * k, (az_y * sz2 + ax_y * sx2) * k, (az_z * sz2 + ax_z * sx2) * k,
+                          uf, vsd, 0.92)
+        for sy2 in (1.0, -1.0):
+            for sx2 in (1.0, -1.0):
+                k = inv_len(ay_x * sy2 + ax_x * sx2, ay_y * sy2 + ax_y * sx2, ay_z * sy2 + ax_z * sx2)
+                emit_quad(P(hx * sx2, hy * sy2, -hzc), P(hx * sx2, hy * sy2, hzc),
+                          P(hxc * sx2, hy * sy2, hz), P(hxc * sx2, hy * sy2, -hz),
+                          (ay_x * sy2 + ax_x * sx2) * k, (ay_y * sy2 + ax_y * sx2) * k, (ay_z * sy2 + ax_z * sx2) * k,
+                          ur, uf, 0.92)
+        for sy2 in (1.0, -1.0):
+            for sz2 in (1.0, -1.0):
+                k = inv_len(ay_x * sy2 + az_x * sz2, ay_y * sy2 + az_y * sz2, ay_z * sy2 + az_z * sz2)
+                emit_quad(P(-hxc, hy * sy2, hz * sz2), P(hxc, hy * sy2, hz * sz2),
+                          P(hx, hy * sy2, hzc * sz2), P(-hx, hy * sy2, hzc * sz2),
+                          (ay_x * sy2 + az_x * sz2) * k, (ay_y * sy2 + az_y * sz2) * k, (ay_z * sy2 + az_z * sz2) * k,
+                          uf, ur, 0.92)
+
+        # 8 сглаженных углов
+        for sx2 in (1.0, -1.0):
+            for sy2 in (1.0, -1.0):
+                for sz2 in (1.0, -1.0):
+                    k = inv_len(ax_x * sx2 + ay_x * sy2 + az_x * sz2, ax_y * sx2 + ay_y * sy2 + az_y * sz2, ax_z * sx2 + ay_z * sy2 + az_z * sz2)
+                    nx = (ax_x * sx2 + ay_x * sy2 + az_x * sz2) * k
+                    ny = (ax_y * sx2 + ay_y * sy2 + az_y * sz2) * k
+                    nz = (ax_z * sx2 + ay_z * sy2 + az_z * sz2) * k
+                    ao = 0.95
+                    p0 = P(hxc * sx2, hy * sy2, hzc * sz2)
+                    p1 = P(hx * sx2, hyc * sy2, hzc * sz2)
+                    p2 = P(hxc * sx2, hyc * sy2, hz * sz2)
+                    self.vert(*p0, nx, ny, nz, 0.0, 0.0, r * ao, g * ao, b * ao, a)
+                    self.vert(*p1, nx, ny, nz, 0.5, 0.5, r * ao, g * ao, b * ao, a)
+                    self.vert(*p2, nx, ny, nz, 1.0, 0.0, r * ao, g * ao, b * ao, a)
 
     def add_tapered_cylinder(self, x0, y0, z0, x1, y1, z1, r0, r1, segments=8,
                              r=1.0, g=1.0, b=1.0, a=1.0, cap_ends=True):
+        segments = max(int(segments), 12)
         dx, dy, dz = x1 - x0, y1 - y0, z1 - z0
         ln = math.sqrt(dx * dx + dy * dy + dz * dz)
         if ln < 1e-4:
@@ -344,7 +421,7 @@ class Mesh:
 
     def add_spruce_bough_tier(self, cx, base_y, cz, radius, height, tips=9,
                               twist=0.0, sway_x=0.0, r=1.0, g=1.0, b=1.0):
-        total = tips * 2
+        total = max(int(tips), 12) * 2
         step = TWO_PI / total
         hyp = math.hypot(radius, height)
         slope_y = radius / hyp
@@ -369,9 +446,79 @@ class Mesh:
             self.vert(x1, base_y + drop1, z1, 0.0, -1.0, 0.0, 1.0, 1.0, r * 0.36, g * 0.40, b * 0.44, 1.0)
             self.vert(x0, base_y + drop0, z0, 0.0, -1.0, 0.0, 0.0, 1.0, r * 0.36, g * 0.40, b * 0.44, 1.0)
 
+    def add_ellipsoid(self, cx, cy, cz, rx, ry, rz, lat_bands=8, lon_segs=12,
+                      yaw=0.0, r=1.0, g=1.0, b=1.0, a=1.0, uv_scale=1.0):
+        bands = max(int(lat_bands), 6)
+        lons = max(int(lon_segs), 10)
+        cyaw, syaw = math.cos(yaw), math.sin(yaw)
+
+        def dir_at(li, lo):
+            v = li / bands
+            phi = (v - 0.5) * math.pi
+            theta = (lo % lons) / lons * TWO_PI
+            cphi = math.cos(phi)
+            dx = cphi * math.cos(theta)
+            dy = math.sin(phi)
+            dz = cphi * math.sin(theta)
+            return (dx * cyaw + dz * syaw, dy, -dx * syaw + dz * cyaw)
+
+        for i in range(bands):
+            for j in range(lons):
+                d00 = dir_at(i, j)
+                d10 = dir_at(i, j + 1)
+                d11 = dir_at(i + 1, j + 1)
+                d01 = dir_at(i + 1, j)
+                u0 = j / lons * uv_scale
+                u1 = (j + 1) / lons * uv_scale
+                v0 = i / bands * uv_scale
+                v1 = (i + 1) / bands * uv_scale
+                self.vert(cx + d00[0] * rx, cy + d00[1] * ry, cz + d00[2] * rz, d00[0], d00[1], d00[2], u0, v0, r, g, b, a)
+                self.vert(cx + d10[0] * rx, cy + d10[1] * ry, cz + d10[2] * rz, d10[0], d10[1], d10[2], u1, v0, r, g, b, a)
+                self.vert(cx + d11[0] * rx, cy + d11[1] * ry, cz + d11[2] * rz, d11[0], d11[1], d11[2], u1, v1, r, g, b, a)
+                self.vert(cx + d00[0] * rx, cy + d00[1] * ry, cz + d00[2] * rz, d00[0], d00[1], d00[2], u0, v0, r, g, b, a)
+                self.vert(cx + d11[0] * rx, cy + d11[1] * ry, cz + d11[2] * rz, d11[0], d11[1], d11[2], u1, v1, r, g, b, a)
+                self.vert(cx + d01[0] * rx, cy + d01[1] * ry, cz + d01[2] * rz, d01[0], d01[1], d01[2], u0, v1, r, g, b, a)
+
+    def add_lathe(self, cx, base_y, cz, profile, segments=12, r=1.0, g=1.0, b=1.0, a=1.0):
+        rings = len(profile) // 2
+        if rings < 2:
+            return
+        segs = max(int(segments), 12)
+        step = TWO_PI / segs
+        for k in range(rings - 1):
+            r0, y0 = profile[k * 2], profile[k * 2 + 1]
+            r1, y1 = profile[k * 2 + 2], profile[k * 2 + 3]
+            dr, dy = r1 - r0, y1 - y0
+            slope = math.hypot(dr, dy)
+            slope = slope if slope > 1e-5 else 1e-5
+            nr, ny = dy / slope, dr / slope
+            for i in range(segs):
+                a0 = i * step
+                a1 = (i + 1) * step
+                c0, s0 = math.cos(a0), math.sin(a0)
+                c1, s1 = math.cos(a1), math.sin(a1)
+                n0x, n0z = nr * c0, nr * s0
+                n1x, n1z = nr * c1, nr * s1
+                v_top = 1.0 - k / (rings - 1)
+                v_bot = 1.0 - (k + 1) / (rings - 1)
+                self.vert(cx + r0 * c0, base_y + y0, cz + r0 * s0, n0x, ny, n0z, i / segs * 2.0, v_top, r * 0.88, g * 0.88, b * 0.92, a)
+                self.vert(cx + r0 * c1, base_y + y0, cz + r0 * s1, n1x, ny, n1z, (i + 1) / segs * 2.0, v_top, r * 0.88, g * 0.88, b * 0.92, a)
+                self.vert(cx + r1 * c1, base_y + y1, cz + r1 * s1, n1x, ny, n1z, (i + 1) / segs * 2.0, v_bot, r, g, b, a)
+                self.vert(cx + r0 * c0, base_y + y0, cz + r0 * s0, n0x, ny, n0z, i / segs * 2.0, v_top, r * 0.88, g * 0.88, b * 0.92, a)
+                self.vert(cx + r1 * c1, base_y + y1, cz + r1 * s1, n1x, ny, n1z, (i + 1) / segs * 2.0, v_bot, r, g, b, a)
+                self.vert(cx + r1 * c0, base_y + y1, cz + r1 * s0, n0x, ny, n0z, i / segs * 2.0, v_bot, r, g, b, a)
+        r_b, y_b = profile[0], profile[1]
+        if r_b > 0.01:
+            for i in range(segs):
+                a0 = i * step
+                a1 = (i + 1) * step
+                self.vert(cx, base_y + y_b, cz, 0.0, -1.0, 0.0, 0.5, 0.5, r * 0.55, g * 0.55, b * 0.58, a)
+                self.vert(cx + r_b * math.cos(a1), base_y + y_b, cz + r_b * math.sin(a1), 0.0, -1.0, 0.0, 1.0, 0.0, r * 0.55, g * 0.55, b * 0.58, a)
+                self.vert(cx + r_b * math.cos(a0), base_y + y_b, cz + r_b * math.sin(a0), 0.0, -1.0, 0.0, 0.0, 0.0, r * 0.55, g * 0.55, b * 0.58, a)
+
     def add_sculpted_boulder(self, cx, base_y, cz, rx, ry, rz, seed,
                              r=1.0, g=1.0, b=1.0, snow_cap=True):
-        lat_bands, lon_segs = 5, 8
+        lat_bands, lon_segs = 8, 12
 
         def disp(lat_i, lon_i):
             v_ = lat_i / lat_bands
@@ -426,6 +573,7 @@ class Mesh:
             self.vert(cx + math.cos(a1) * radius, y + 0.035, cz + math.sin(a1) * radius, 0.0, 1.0, 0.0, 0.0, 1.0, 0.04, 0.07, 0.13, 0.0)
 
     def add_cone(self, cx, base_y, cz, radius, height, segments=8, r=1.0, g=1.0, b=1.0, a=1.0):
+        segments = max(int(segments), 12)
         step = TWO_PI / segments
         hyp = math.hypot(radius, height)
         slope_y = radius / hyp
@@ -451,47 +599,70 @@ def add_wildlife(fur, bark, glow, kind, x, ground_y, z, heading, anim_phase):
         hop = abs(math.sin(anim_phase * 0.85)) * 0.14
         by = ground_y + 0.24 + hop
         fur.add_shadow_disc(x, ground_y, z, 0.42, 0.30)
-        fur.add_oriented_box(x, by, z, 0.26, 0.24, 0.42, yaw, -0.10, 0.0, 0.98, 0.98, 1.0)
+        fur.add_ellipsoid(x, by, z, 0.15, 0.15, 0.24, yaw=yaw, r=1.85, g=1.82, b=1.78, uv_scale=1.6)
         hx, hz = x + fwd_x * 0.24, z + fwd_z * 0.24
-        fur.add_oriented_box(hx, by + 0.12, hz, 0.19, 0.18, 0.20, yaw, 0.0, 0.0, 0.99, 0.99, 1.0)
-        fur.add_oriented_box(hx + right_x * 0.055, by + 0.31, hz + right_z * 0.055, 0.045, 0.22, 0.06, yaw, -0.22, 0.10, 0.94, 0.95, 0.98)
-        fur.add_oriented_box(hx - right_x * 0.055, by + 0.31, hz - right_z * 0.055, 0.045, 0.22, 0.06, yaw, -0.22, -0.10, 0.94, 0.95, 0.98)
-        fur.add_oriented_box(x - fwd_x * 0.24, by + 0.04, z - fwd_z * 0.24, 0.12, 0.12, 0.12, yaw, 0.0, 0.0, 1.0, 1.0, 1.0)
+        fur.add_ellipsoid(hx, by + 0.12, hz, 0.11, 0.11, 0.12, yaw=yaw, r=1.88, g=1.85, b=1.80, uv_scale=1.2)
+        for side in (1.0, -1.0):
+            ear_bx = hx + right_x * 0.05 * side
+            ear_bz = hz + right_z * 0.05 * side
+            ear_tx = hx + right_x * 0.07 * side - fwd_x * 0.03
+            ear_tz = hz + right_z * 0.07 * side - fwd_z * 0.03
+            fur.add_tapered_cylinder(ear_bx, by + 0.18, ear_bz, ear_tx, by + 0.40, ear_tz, 0.030, 0.016, 12, 1.80, 1.78, 1.75)
+            fur.add_tapered_cylinder(ear_tx, by + 0.38, ear_tz,
+                                     hx + right_x * 0.075 * side - fwd_x * 0.05, by + 0.44,
+                                     hz + right_z * 0.075 * side - fwd_z * 0.05, 0.016, 0.008, 12, 0.22, 0.22, 0.26)
+        fur.add_ellipsoid(x - fwd_x * 0.24, by + 0.05, z - fwd_z * 0.24, 0.07, 0.07, 0.07, r=1.9, g=1.88, b=1.82)
     elif kind == "NORTHERN_DEER":
         torso_y = ground_y + 1.02
         fur.add_shadow_disc(x, ground_y, z, 1.05, 0.36)
-        fur.add_oriented_box(x, torso_y, z, 0.56, 0.58, 1.38, yaw, 0.0, 0.0, 0.68, 0.53, 0.40)
-        fur.add_oriented_box(x + fwd_x * 0.56, torso_y + 0.36, z + fwd_z * 0.56, 0.30, 0.66, 0.32, yaw, 0.26, 0.0, 0.84, 0.78, 0.72)
+        fur.add_ellipsoid(x, torso_y, z, 0.32, 0.33, 0.72, yaw=yaw, r=0.68, g=0.53, b=0.40, uv_scale=2.2)
+        nx, nz = x + fwd_x * 0.56, z + fwd_z * 0.56
+        fur.add_tapered_cylinder(x + fwd_x * 0.34, torso_y + 0.10, z + fwd_z * 0.34,
+                                 nx, torso_y + 0.52, nz, 0.22, 0.15, 12, 0.84, 0.78, 0.72)
         hx, hz, hy = x + fwd_x * 0.78, z + fwd_z * 0.78, torso_y + 0.66
-        fur.add_oriented_box(hx, hy, hz, 0.26, 0.26, 0.48, yaw, -0.12, 0.0, 0.66, 0.52, 0.40)
+        fur.add_ellipsoid(hx, hy, hz, 0.14, 0.14, 0.26, yaw=yaw, r=0.66, g=0.52, b=0.40, uv_scale=1.4)
         for side in (-1.0, 1.0):
             rx, rz = hx + right_x * 0.11 * side, hz + right_z * 0.11 * side
             bark.add_tapered_cylinder(rx, hy + 0.10, rz,
                                       rx + right_x * 0.26 * side - fwd_x * 0.12, hy + 0.58,
-                                      rz + right_z * 0.26 * side - fwd_z * 0.12, 0.032, 0.016, 6, 0.90, 0.84, 0.74)
+                                      rz + right_z * 0.26 * side - fwd_z * 0.12, 0.032, 0.016, 12, 0.90, 0.84, 0.74)
             bark.add_tapered_cylinder(rx + right_x * 0.14 * side, hy + 0.34, rz + right_z * 0.14 * side,
                                       rx + right_x * 0.24 * side + fwd_x * 0.22, hy + 0.54,
-                                      rz + right_z * 0.24 * side + fwd_z * 0.22, 0.022, 0.012, 5, 0.92, 0.86, 0.76)
+                                      rz + right_z * 0.24 * side + fwd_z * 0.22, 0.022, 0.012, 12, 0.92, 0.86, 0.76)
+            bark.add_tapered_cylinder(rx + right_x * 0.06 * side, hy + 0.22, rz + right_z * 0.06 * side,
+                                      rx + right_x * 0.30 * side + fwd_x * 0.05, hy + 0.38,
+                                      rz + right_z * 0.30 * side + fwd_z * 0.05, 0.020, 0.010, 12, 0.90, 0.84, 0.74)
         for lx, lz, swing in ((0.20, 0.46, stride), (-0.20, 0.46, -stride), (0.20, -0.46, -stride), (-0.20, -0.46, stride)):
             px, pz = x + right_x * lx + fwd_x * lz, z + right_z * lx + fwd_z * lz
-            fur.add_oriented_box(px, ground_y + 0.44, pz, 0.11, 0.88, 0.12, yaw, swing, 0.0, 0.56, 0.43, 0.33)
+            knee_x, knee_z = px + math.sin(swing) * 0.06, pz + math.cos(swing) * 0.02
+            fur.add_tapered_cylinder(px, ground_y + 0.86, pz, knee_x, ground_y + 0.46, knee_z, 0.075, 0.052, 12, 0.56, 0.43, 0.33)
+            fur.add_tapered_cylinder(knee_x, ground_y + 0.46, knee_z,
+                                     knee_x + math.sin(swing) * 0.10, ground_y + 0.02,
+                                     knee_z + math.cos(swing) * 0.04, 0.050, 0.030, 12, 0.50, 0.38, 0.29)
     else:  # TIMBER_WOLF
         torso_y = ground_y + 0.60
         fur.add_shadow_disc(x, ground_y, z, 0.88, 0.38)
-        fur.add_oriented_box(x, torso_y, z, 0.42, 0.42, 1.08, yaw, 0.0, 0.0, 0.46, 0.48, 0.53)
-        fur.add_oriented_box(x + fwd_x * 0.24, torso_y + 0.06, z + fwd_z * 0.24, 0.46, 0.46, 0.44, yaw, 0.0, 0.0, 0.54, 0.56, 0.60)
+        fur.add_ellipsoid(x, torso_y, z, 0.24, 0.24, 0.58, yaw=yaw, r=0.46, g=0.48, b=0.53, uv_scale=2.0)
+        fur.add_ellipsoid(x + fwd_x * 0.24, torso_y + 0.06, z + fwd_z * 0.24, 0.25, 0.25, 0.24, yaw=yaw, r=0.54, g=0.56, b=0.60, uv_scale=1.3)
         hx, hz, hy = x + fwd_x * 0.64, z + fwd_z * 0.64, torso_y + 0.14
-        fur.add_oriented_box(hx, hy, hz, 0.28, 0.26, 0.40, yaw, -0.08, 0.0, 0.50, 0.52, 0.57)
-        fur.add_oriented_box(hx + right_x * 0.09, hy + 0.19, hz + right_z * 0.09, 0.07, 0.13, 0.07, yaw, 0.0, 0.0, 0.36, 0.38, 0.42)
-        fur.add_oriented_box(hx - right_x * 0.09, hy + 0.19, hz - right_z * 0.09, 0.07, 0.13, 0.07, yaw, 0.0, 0.0, 0.36, 0.38, 0.42)
-        fur.add_oriented_box(x - fwd_x * 0.66, torso_y - 0.06, z - fwd_z * 0.66, 0.14, 0.15, 0.46, yaw, -0.45, 0.0, 0.40, 0.42, 0.47)
+        fur.add_ellipsoid(hx, hy, hz, 0.15, 0.14, 0.21, yaw=yaw, r=0.50, g=0.52, b=0.57, uv_scale=1.2)
+        fur.add_ellipsoid(hx + fwd_x * 0.17, hy - 0.03, hz + fwd_z * 0.17, 0.08, 0.065, 0.11, yaw=yaw, r=0.42, g=0.44, b=0.49)
+        for side in (1.0, -1.0):
+            fur.add_tapered_cylinder(hx + right_x * 0.08 * side, hy + 0.10, hz + right_z * 0.08 * side,
+                                     hx + right_x * 0.115 * side - fwd_x * 0.015, hy + 0.27,
+                                     hz + right_z * 0.115 * side - fwd_z * 0.015, 0.048, 0.010, 12, 0.36, 0.38, 0.42)
+        fur.add_tapered_cylinder(x - fwd_x * 0.52, torso_y + 0.02, z - fwd_z * 0.52,
+                                 x - fwd_x * 0.92, torso_y - 0.14, z - fwd_z * 0.92, 0.085, 0.042, 12, 0.40, 0.42, 0.47)
+        fur.add_ellipsoid(x - fwd_x * 0.95, torso_y - 0.16, z - fwd_z * 0.95, 0.05, 0.05, 0.08, yaw=yaw, r=0.36, g=0.38, b=0.43)
         ex, ez = hx + fwd_x * 0.19, hz + fwd_z * 0.19
-        glow.add_box(ex + right_x * 0.065, hy + 0.03, ez + right_z * 0.065, 0.04, 0.04, 0.04, 1.0, 0.72, 0.15, 1.0)
-        glow.add_box(ex - right_x * 0.065, hy + 0.03, ez - right_z * 0.065, 0.04, 0.04, 0.04, 1.0, 0.72, 0.15, 1.0)
+        glow.add_ellipsoid(ex + right_x * 0.065, hy + 0.03, ez + right_z * 0.065, 0.022, 0.022, 0.016, lat_bands=6, lon_segs=10, r=1.0, g=0.72, b=0.15)
+        glow.add_ellipsoid(ex - right_x * 0.065, hy + 0.03, ez - right_z * 0.065, 0.022, 0.022, 0.016, lat_bands=6, lon_segs=10, r=1.0, g=0.72, b=0.15)
         for lx, lz, swing in ((0.15, 0.36, stride * 1.2), (-0.15, 0.36, -stride * 1.2),
                               (0.15, -0.36, -stride * 1.2), (-0.15, -0.36, stride * 1.2)):
             px, pz = x + right_x * lx + fwd_x * lz, z + right_z * lx + fwd_z * lz
-            fur.add_oriented_box(px, ground_y + 0.26, pz, 0.095, 0.52, 0.10, yaw, swing, 0.0, 0.42, 0.44, 0.49)
+            fur.add_tapered_cylinder(px, ground_y + 0.50, pz,
+                                     px + math.sin(swing) * 0.07, ground_y + 0.02,
+                                     pz + math.cos(swing) * 0.03, 0.062, 0.032, 12, 0.42, 0.44, 0.49)
 
 
 def add_fp_tool(timber, metal, cloth, fire, tool, torch_lit, cam_x, cam_y, cam_z,
@@ -1161,7 +1332,7 @@ def build_shot(shot):
 
     # Textures (biome palette, seed offset by location as in renderer) — cached per location
     tex_seed = 2026 + list(LOCATIONS).index(loc) * 37
-    tex_size = shot.get("tex_size", 256)
+    tex_size = shot.get("tex_size", 1024)
     tkey = (loc, tex_size, tex_seed)
     if tkey not in _TEX_CACHE:
         _TEX_CACHE[tkey] = [generate_texture_rgb(t, pal, tex_size, tex_seed) for t in MATERIALS]
@@ -1364,7 +1535,7 @@ SHOTS = [
                 dict(kind="PINE_TREE", x=6.5, z=-7.0, available=True),
                 dict(kind="BERRY_BUSH", x=2.2, z=-2.6, available=True),
                 dict(kind="SPECIAL_CACHE", x=4.2, z=-3.6, available=True)],
-         terrain_steps=68, perimeter=42, snow_particles=185, tex_size=256),
+         terrain_steps=96, perimeter=42, snow_particles=185, tex_size=1024),
     dict(name="02-base-clearing-day.png", location="BASE_CLEARING",
          pos=(0.5, 0.0, 15.0), yaw=math.atan2(-2.5, 17.0), pitch=-0.05,
          elapsed=205.0, is_snowing=False, fp_tool="AXE", campfire_level=3,
@@ -1374,7 +1545,7 @@ SHOTS = [
                 dict(kind="PINE_TREE", x=5.5, z=-1.0, available=True),
                 dict(kind="STONE_OUTCROP", x=-2.2, z=-6.2, available=True),
                 dict(kind="SUPPLY_CRATE", x=2.8, z=-4.4, available=True)],
-         terrain_steps=68, perimeter=42, snow_particles=185, tex_size=256),
+         terrain_steps=96, perimeter=42, snow_particles=185, tex_size=1024),
     dict(name="03-dense-spruce-blizzard.png", location="DENSE_SPRUCE",
          pos=(7.5, 0.0, 10.0), yaw=math.atan2(-11.5, 16.0), pitch=-0.03,
          elapsed=145.0, is_snowing=True, fp_tool="SPEAR",
@@ -1387,7 +1558,7 @@ SHOTS = [
                 dict(kind="PINE_TREE", x=2.8, z=-6.5, available=True),
                 dict(kind="RESIN_STUMP", x=-1.2, z=-3.8, available=True),
                 dict(kind="SPECIAL_CACHE", x=-9.5, z=-11.0, available=True)],
-         terrain_steps=68, perimeter=42, snow_particles=220, tex_size=256),
+         terrain_steps=96, perimeter=42, snow_particles=220, tex_size=1024),
     dict(name="04-frozen-lake-ice.png", location="FROZEN_LAKE",
          pos=(-1.5, 0.0, 24.0), yaw=math.atan2(1.5, 24.0), pitch=-0.10,
          elapsed=95.0, is_snowing=False, fp_tool="SPEAR",
@@ -1396,7 +1567,7 @@ SHOTS = [
          nodes=[dict(kind="ICE_HOLE", x=2.5, z=4.5, available=True),
                 dict(kind="ICE_HOLE", x=-7.5, z=-3.5, available=True),
                 dict(kind="SPECIAL_CACHE", x=10.5, z=-8.5, available=True)],
-         terrain_steps=68, perimeter=36, snow_particles=120, tex_size=256),
+         terrain_steps=96, perimeter=36, snow_particles=120, tex_size=1024),
     dict(name="05-abandoned-mine-night.png", location="ABANDONED_MINE",
          pos=(0.3, 0.0, 10.0), yaw=math.atan2(-0.3, 30.0), pitch=-0.04,
          elapsed=430.0, is_snowing=False, fp_tool="TORCH", torch_lit=True,
@@ -1404,7 +1575,7 @@ SHOTS = [
          nodes=[dict(kind="COAL_SEAM", x=-2.4, z=-4.0, available=True),
                 dict(kind="IRON_VEIN", x=2.6, z=-7.5, available=True),
                 dict(kind="SPECIAL_CACHE", x=-8.0, z=10.0, available=True)],
-         terrain_steps=68, perimeter=32, snow_particles=60, tex_size=256),
+         terrain_steps=96, perimeter=32, snow_particles=60, tex_size=1024),
     dict(name="06-hunters-cabin-sunset.png", location="HUNTERS_CABIN",
          pos=(0.8, 0.0, 1.2), yaw=math.atan2(6.4, -7.6), pitch=-0.02,
          elapsed=335.0, is_snowing=True, fp_tool="AXE",
@@ -1414,7 +1585,7 @@ SHOTS = [
                 dict(kind="PINE_TREE", x=-1.5, z=9.5, available=True),
                 dict(kind="GAME_CARCASS", x=2.8, z=11.2, available=True),
                 dict(kind="SPECIAL_CACHE", x=9.0, z=9.5, available=True)],
-         terrain_steps=68, perimeter=42, snow_particles=185, tex_size=256),
+         terrain_steps=96, perimeter=42, snow_particles=185, tex_size=1024),
     dict(name="07-aurora-night.png", location="BASE_CLEARING",
          pos=(3.5, 0.0, 4.0), yaw=math.atan2(-3.5, 26.0), pitch=0.30,
          elapsed=455.0, is_snowing=True, fp_tool="TORCH", torch_lit=True, campfire_level=2,
@@ -1422,12 +1593,14 @@ SHOTS = [
          nodes=[dict(kind="PINE_TREE", x=-3.5, z=-9.0, available=True),
                 dict(kind="PINE_TREE", x=4.8, z=-8.2, available=True),
                 dict(kind="SPECIAL_CACHE", x=4.2, z=-3.6, available=True)],
-         terrain_steps=68, perimeter=42, snow_particles=185, tex_size=256),
+         terrain_steps=96, perimeter=42, snow_particles=185, tex_size=1024),
 ]
 
 
 def main():
     print("Building raster binary:", RASTER)
+    if not os.path.exists(RASTER):
+        subprocess.run(["g++", "-O2", "-std=c++17", "-o", RASTER, os.path.join(HERE, "raster.cpp")], check=True)
     for shot in SHOTS:
         print("== Render", shot["name"], "==")
         vp, cam, uniforms, tex_list, batches, sky = build_shot(shot)

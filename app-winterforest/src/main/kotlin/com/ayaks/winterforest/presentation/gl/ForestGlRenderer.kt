@@ -37,7 +37,8 @@ data class RenderSceneSnapshot(
  * - до 3 тёплых динамических источников света + блики на льду и металле + частицы удара и метели.
  */
 class ForestGlRenderer(
-    private val onFpsSample: ((Int) -> Unit)? = null
+    private val onFpsSample: ((Int) -> Unit)? = null,
+    private val appContext: Context? = null
 ) : GLSurfaceView.Renderer {
 
     @Volatile
@@ -367,6 +368,9 @@ class ForestGlRenderer(
             }
             textures.clear()
             val texRes = quality.textureSize
+            val snowTintR = ((loc.palette.snowTintHex ushr 16) and 0xFF) / 255f
+            val snowTintG = ((loc.palette.snowTintHex ushr 8) and 0xFF) / 255f
+            val snowTintB = (loc.palette.snowTintHex and 0xFF) / 255f
             for (kind in ProceduralTextureId.entries) {
                 val texHandle = IntArray(1)
                 GLES20.glGenTextures(1, texHandle, 0)
@@ -376,7 +380,19 @@ class ForestGlRenderer(
                 GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_REPEAT)
                 GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_REPEAT)
 
-                val buf = ProceduralTextures.generateRgbaBuffer(
+                // Полные 2048px-текстуры каждого материала из assets/textures (упакованы в APK);
+                // процедурная генерация остаётся резервом, если ассет недоступен.
+                val snowy = kind == ProceduralTextureId.SNOW || kind == ProceduralTextureId.ICE
+                val buf = appContext?.let { ctx ->
+                    AssetTextureLibrary.loadRgba(
+                        context = ctx,
+                        name = AssetTextureLibrary.assetNameFor(kind),
+                        outSize = texRes,
+                        tintR = if (snowy) snowTintR else 1f,
+                        tintG = if (snowy) snowTintG else 1f,
+                        tintB = if (snowy) snowTintB else 1f
+                    )
+                } ?: ProceduralTextures.generateRgbaBuffer(
                     id = kind,
                     palette = loc.palette,
                     size = texRes,
@@ -1213,7 +1229,7 @@ class ForestGlRenderer(
 class ForestGlSurfaceView(
     context: Context,
     onFpsSample: ((Int) -> Unit)? = null,
-    val forestRenderer: ForestGlRenderer = ForestGlRenderer(onFpsSample)
+    val forestRenderer: ForestGlRenderer = ForestGlRenderer(onFpsSample, context.applicationContext)
 ) : GLSurfaceView(context) {
     init {
         setEGLContextClientVersion(2)

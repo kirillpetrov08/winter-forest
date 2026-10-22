@@ -232,58 +232,124 @@ class MeshBuilder(initialFloatsCapacity: Int = 16384) {
         fun py(lx: Float, ly: Float, lz: Float) = cy + axY * lx + ayY * ly + azY * lz
         fun pz(lx: Float, ly: Float, lz: Float) = cz + axZ * lx + ayZ * ly + azZ * lz
 
+        // Шамференное скругление рёбер: любой «квадратный» брус/ящик/обух
+        // получает срезанные рёбра и сглаженные углы — меньше «квадратности».
+        val ch = (minOf(sx, sy, sz) * 0.17f).coerceIn(0.006f, 0.075f)
         val uFront = max(sx * uvDensity, 0.35f)
         val vSide = max(sy * uvDensity, 0.35f)
         val uRight = max(sz * uvDensity, 0.35f)
 
-        // +Z
-        addQuadShaded(
-            px(-hx, -hy, hz), py(-hx, -hy, hz), pz(-hx, -hy, hz),
-            px(hx, -hy, hz), py(hx, -hy, hz), pz(hx, -hy, hz),
-            px(hx, hy, hz), py(hx, hy, hz), pz(hx, hy, hz),
-            px(-hx, hy, hz), py(-hx, hy, hz), pz(-hx, hy, hz),
-            azX, azY, azZ, uFront, vSide, 0.80f, r, g, b, a
-        )
-        // -Z
-        addQuadShaded(
-            px(hx, -hy, -hz), py(hx, -hy, -hz), pz(hx, -hy, -hz),
-            px(-hx, -hy, -hz), py(-hx, -hy, -hz), pz(-hx, -hy, -hz),
-            px(-hx, hy, -hz), py(-hx, hy, -hz), pz(-hx, hy, -hz),
-            px(hx, hy, -hz), py(hx, hy, -hz), pz(hx, hy, -hz),
-            -azX, -azY, -azZ, uFront, vSide, 0.80f, r, g, b, a
-        )
-        // +X
-        addQuadShaded(
-            px(hx, -hy, hz), py(hx, -hy, hz), pz(hx, -hy, hz),
-            px(hx, -hy, -hz), py(hx, -hy, -hz), pz(hx, -hy, -hz),
-            px(hx, hy, -hz), py(hx, hy, -hz), pz(hx, hy, -hz),
-            px(hx, hy, hz), py(hx, hy, hz), pz(hx, hy, hz),
-            axX, axY, axZ, uRight, vSide, 0.80f, r, g, b, a
-        )
-        // -X
-        addQuadShaded(
-            px(-hx, -hy, -hz), py(-hx, -hy, -hz), pz(-hx, -hy, -hz),
-            px(-hx, -hy, hz), py(-hx, -hy, hz), pz(-hx, -hy, hz),
-            px(-hx, hy, hz), py(-hx, hy, hz), pz(-hx, hy, hz),
-            px(-hx, hy, -hz), py(-hx, hy, -hz), pz(-hx, hy, -hz),
-            -axX, -axY, -axZ, uRight, vSide, 0.80f, r, g, b, a
-        )
-        // +Y (top)
-        addQuad(
-            px(-hx, hy, hz), py(-hx, hy, hz), pz(-hx, hy, hz),
-            px(hx, hy, hz), py(hx, hy, hz), pz(hx, hy, hz),
-            px(hx, hy, -hz), py(hx, hy, -hz), pz(hx, hy, -hz),
-            px(-hx, hy, -hz), py(-hx, hy, -hz), pz(-hx, hy, -hz),
-            ayX, ayY, ayZ, uFront, uRight, r * 1.04f, g * 1.04f, b * 1.05f, a
-        )
-        // -Y (bottom)
-        addQuad(
-            px(-hx, -hy, -hz), py(-hx, -hy, -hz), pz(-hx, -hy, -hz),
-            px(hx, -hy, -hz), py(hx, -hy, -hz), pz(hx, -hy, -hz),
-            px(hx, -hy, hz), py(hx, -hy, hz), pz(hx, -hy, hz),
-            px(-hx, -hy, hz), py(-hx, -hy, hz), pz(-hx, -hy, hz),
-            -ayX, -ayY, -ayZ, uFront, uRight, r * 0.62f, g * 0.62f, b * 0.66f, a
-        )
+        fun emitQuad(
+            ax: Float, ay: Float, az: Float,
+            bx: Float, by: Float, bz: Float,
+            cx2: Float, cy2: Float, cz2: Float,
+            dx2: Float, dy2: Float, dz2: Float,
+            nx: Float, ny: Float, nz: Float,
+            uS: Float, vS: Float,
+            ao: Float
+        ) {
+            addQuad(
+                px(ax, ay, az), py(ax, ay, az), pz(ax, ay, az),
+                px(bx, by, bz), py(bx, by, bz), pz(bx, by, bz),
+                px(cx2, cy2, cz2), py(cx2, cy2, cz2), pz(cx2, cy2, cz2),
+                px(dx2, dy2, dz2), py(dx2, dy2, dz2), pz(dx2, dy2, dz2),
+                nx, ny, nz, uS, vS, r * ao, g * ao, (b * ao).coerceAtMost(1.08f), a
+            )
+        }
+
+        fun emitTri(
+            ax: Float, ay: Float, az: Float,
+            bx: Float, by: Float, bz: Float,
+            cx2: Float, cy2: Float, cz2: Float,
+            nx: Float, ny: Float, nz: Float,
+            ao: Float
+        ) {
+            addVertex(px(ax, ay, az), py(ax, ay, az), pz(ax, ay, az), nx, ny, nz, 0f, 0f, r * ao, g * ao, b * ao, a)
+            addVertex(px(bx, by, bz), py(bx, by, bz), pz(bx, by, bz), nx, ny, nz, 0.5f, 0.5f, r * ao, g * ao, b * ao, a)
+            addVertex(px(cx2, cy2, cz2), py(cx2, cy2, cz2), pz(cx2, cy2, cz2), nx, ny, nz, 1f, 0f, r * ao, g * ao, b * ao, a)
+        }
+
+        val hxc = hx - ch; val hyc = hy - ch; val hzc = hz - ch
+
+        // 6 плоских граней (утоплены на величину шамфера)
+        emitQuad(-hxc, -hyc, hz, hxc, -hyc, hz, hxc, hyc, hz, -hxc, hyc, hz, azX, azY, azZ, uFront, vSide, 0.86f)
+        emitQuad(hxc, -hyc, -hz, -hxc, -hyc, -hz, -hxc, hyc, -hz, hxc, hyc, -hz, -azX, -azY, -azZ, uFront, vSide, 0.86f)
+        emitQuad(hx, -hyc, -hzc, hx, -hyc, hzc, hx, hyc, hzc, hx, hyc, -hzc, axX, axY, axZ, uRight, vSide, 0.86f)
+        emitQuad(-hx, -hyc, hzc, -hx, -hyc, -hzc, -hx, hyc, -hzc, -hx, hyc, hzc, -axX, -axY, -axZ, uRight, vSide, 0.86f)
+        emitQuad(-hxc, hy, hzc, hxc, hy, hzc, hxc, hy, -hzc, -hxc, hy, -hzc, ayX, ayY, ayZ, uFront, uRight, 1.02f)
+        emitQuad(-hxc, -hy, -hzc, hxc, -hy, -hzc, hxc, -hy, hzc, -hxc, -hy, hzc, -ayX, -ayY, -ayZ, uFront, uRight, 0.62f)
+
+        // 12 срезанных рёбер (нормали — усреднённые диагонали граней)
+        fun invLen(x: Float, y: Float, z: Float): Float {
+            val l = sqrt(x * x + y * y + z * z).coerceAtLeast(1e-5f)
+            return 1f / l
+        }
+        // рёбра Z± с X±
+        for (sz2 in floatArrayOf(1f, -1f)) {
+            for (sx2 in floatArrayOf(1f, -1f)) {
+                val k = invLen(azX * sz2 + axX * sx2, azY * sz2 + axY * sx2, azZ * sz2 + axZ * sx2)
+                val nX = (azX * sz2 + axX * sx2) * k
+                val nY = (azY * sz2 + axY * sx2) * k
+                val nZ = (azZ * sz2 + axZ * sx2) * k
+                emitQuad(
+                    hxc * sx2, -hyc, hz * sz2,
+                    hx * sx2, -hyc, hzc * sz2,
+                    hx * sx2, hyc, hzc * sz2,
+                    hxc * sx2, hyc, hz * sz2,
+                    nX, nY, nZ, uFront, vSide, 0.92f
+                )
+            }
+        }
+        // рёбра Y± с X±
+        for (sy2 in floatArrayOf(1f, -1f)) {
+            for (sx2 in floatArrayOf(1f, -1f)) {
+                val k = invLen(ayX * sy2 + axX * sx2, ayY * sy2 + axY * sx2, ayZ * sy2 + axZ * sx2)
+                val nX = (ayX * sy2 + axX * sx2) * k
+                val nY = (ayY * sy2 + axY * sx2) * k
+                val nZ = (ayZ * sy2 + axZ * sx2) * k
+                emitQuad(
+                    hx * sx2, hy * sy2, -hzc,
+                    hx * sx2, hy * sy2, hzc,
+                    hxc * sx2, hy * sy2, hz,
+                    hxc * sx2, hy * sy2, -hz,
+                    nX, nY, nZ, uRight, uFront, 0.92f
+                )
+            }
+        }
+        // рёбра Y± с Z±
+        for (sy2 in floatArrayOf(1f, -1f)) {
+            for (sz2 in floatArrayOf(1f, -1f)) {
+                val k = invLen(ayX * sy2 + azX * sz2, ayY * sy2 + azY * sz2, ayZ * sy2 + azZ * sz2)
+                val nX = (ayX * sy2 + azX * sz2) * k
+                val nY = (ayY * sy2 + azY * sz2) * k
+                val nZ = (ayZ * sy2 + azZ * sz2) * k
+                emitQuad(
+                    -hxc, hy * sy2, hz * sz2,
+                    hxc, hy * sy2, hz * sz2,
+                    hx, hy * sy2, hzc * sz2,
+                    -hx, hy * sy2, hzc * sz2,
+                    nX, nY, nZ, uFront, uRight, 0.92f
+                )
+            }
+        }
+
+        // 8 сглаженных угловых треугольников
+        for (sx2 in floatArrayOf(1f, -1f)) {
+            for (sy2 in floatArrayOf(1f, -1f)) {
+                for (sz2 in floatArrayOf(1f, -1f)) {
+                    val k = invLen(axX * sx2 + ayX * sy2 + azX * sz2, axY * sx2 + ayY * sy2 + azY * sz2, axZ * sx2 + ayZ * sy2 + azZ * sz2)
+                    val nX = (axX * sx2 + ayX * sy2 + azX * sz2) * k
+                    val nY = (axY * sx2 + ayY * sy2 + azY * sz2) * k
+                    val nZ = (axZ * sx2 + ayZ * sy2 + azZ * sz2) * k
+                    emitTri(
+                        hxc * sx2, hy * sy2, hzc * sz2,
+                        hx * sx2, hyc * sy2, hzc * sz2,
+                        hxc * sx2, hyc * sy2, hz * sz2,
+                        nX, nY, nZ, 0.95f
+                    )
+                }
+            }
+        }
     }
 
     /**
@@ -313,9 +379,10 @@ class MeshBuilder(initialFloatsCapacity: Int = 16384) {
         val ty = uz * bx - ux * bz
         val tz = ux * by - uy * bx
 
-        val step = (Math.PI * 2.0 / segments).toFloat()
+        val step = (Math.PI * 2.0 / max(segments, 12)).toFloat()
+        val segs = max(segments, 12)
         val vTile = max(len * 0.45f, 0.5f)
-        for (i in 0 until segments) {
+        for (i in 0 until segs) {
             val a0 = i * step
             val a1 = (i + 1) * step
             val c0 = cos(a0); val s0 = sin(a0)
@@ -329,8 +396,8 @@ class MeshBuilder(initialFloatsCapacity: Int = 16384) {
             val p11x = x1 + n1x * r1; val p11y = y1 + n1y * r1; val p11z = z1 + n1z * r1
             val p01x = x1 + n0x * r1; val p01y = y1 + n0y * r1; val p01z = z1 + n0z * r1
 
-            val u0 = i.toFloat() / segments * 2f
-            val u1 = (i + 1).toFloat() / segments * 2f
+            val u0 = i.toFloat() / segs * 2f
+            val u1 = (i + 1).toFloat() / segs * 2f
 
             addVertex(p00x, p00y, p00z, n0x, n0y, n0z, u0, vTile, r * 0.78f, g * 0.78f, b * 0.80f, a)
             addVertex(p10x, p10y, p10z, n1x, n1y, n1z, u1, vTile, r * 0.78f, g * 0.78f, b * 0.80f, a)
@@ -362,7 +429,7 @@ class MeshBuilder(initialFloatsCapacity: Int = 16384) {
         swayX: Float = 0f,
         r: Float = 1f, g: Float = 1f, b: Float = 1f
     ) {
-        val totalSegs = tips * 2
+        val totalSegs = max(tips, 12) * 2
         val step = (Math.PI * 2.0 / totalSegs).toFloat()
         val slopeY = radius / hypot(radius, height)
         val slopeXZ = height / hypot(radius, height)
@@ -409,8 +476,8 @@ class MeshBuilder(initialFloatsCapacity: Int = 16384) {
         r: Float = 1f, g: Float = 1f, b: Float = 1f,
         snowCapTint: Boolean = true
     ) {
-        val latBands = 5
-        val lonSegs = 8
+        val latBands = 8
+        val lonSegs = 12
         fun displacedPoint(latIdx: Int, lonIdx: Int): FloatArray {
             val v = latIdx.toFloat() / latBands.toFloat()
             val phi = (v - 0.5f) * Math.PI.toFloat()
@@ -469,6 +536,127 @@ class MeshBuilder(initialFloatsCapacity: Int = 16384) {
         }
     }
 
+    /**
+     * Сглаженный эллипсоид (тело животного, сугроб, котёл, мешок) с плавными нормалями.
+     */
+    fun addEllipsoid(
+        cx: Float,
+        cy: Float,
+        cz: Float,
+        rx: Float,
+        ry: Float,
+        rz: Float,
+        latBands: Int = 8,
+        lonSegs: Int = 12,
+        yawRad: Float = 0f,
+        r: Float = 1f,
+        g: Float = 1f,
+        b: Float = 1f,
+        a: Float = 1f,
+        uvScale: Float = 1f
+    ) {
+        val bands = max(latBands, 6)
+        val lons = max(lonSegs, 10)
+        val cyaw = cos(yawRad)
+        val syaw = sin(yawRad)
+
+        fun dirAt(li: Int, lo: Int): FloatArray {
+            val v = li.toFloat() / bands
+            val phi = (v - 0.5f) * Math.PI.toFloat()
+            val theta = (lo % lons).toFloat() / lons * (Math.PI.toFloat() * 2f)
+            val cPhi = cos(phi)
+            val dx = cPhi * cos(theta)
+            val dy = sin(phi)
+            val dz = cPhi * sin(theta)
+            return floatArrayOf(dx * cyaw + dz * syaw, dy, -dx * syaw + dz * cyaw)
+        }
+
+        for (i in 0 until bands) {
+            for (j in 0 until lons) {
+                val d00 = dirAt(i, j)
+                val d10 = dirAt(i, j + 1)
+                val d11 = dirAt(i + 1, j + 1)
+                val d01 = dirAt(i + 1, j)
+                val u0 = j.toFloat() / lons * uvScale
+                val u1 = (j + 1).toFloat() / lons * uvScale
+                val v0 = i.toFloat() / bands * uvScale
+                val v1 = (i + 1).toFloat() / bands * uvScale
+
+                addVertex(cx + d00[0] * rx, cy + d00[1] * ry, cz + d00[2] * rz, d00[0], d00[1], d00[2], u0, v0, r, g, b, a)
+                addVertex(cx + d10[0] * rx, cy + d10[1] * ry, cz + d10[2] * rz, d10[0], d10[1], d10[2], u1, v0, r, g, b, a)
+                addVertex(cx + d11[0] * rx, cy + d11[1] * ry, cz + d11[2] * rz, d11[0], d11[1], d11[2], u1, v1, r, g, b, a)
+
+                addVertex(cx + d00[0] * rx, cy + d00[1] * ry, cz + d00[2] * rz, d00[0], d00[1], d00[2], u0, v0, r, g, b, a)
+                addVertex(cx + d11[0] * rx, cy + d11[1] * ry, cz + d11[2] * rz, d11[0], d11[1], d11[2], u1, v1, r, g, b, a)
+                addVertex(cx + d01[0] * rx, cy + d01[1] * ry, cz + d01[2] * rz, d01[0], d01[1], d01[2], u0, v1, r, g, b, a)
+            }
+        }
+    }
+
+    /**
+     * Тело вращения по профилю (радиус, высота): котёл, ведро, фонарь, бутылка, гриб.
+     * profile — пары (radius, yRelative) снизу вверх, минимум 2 пары.
+     */
+    fun addLathe(
+        cx: Float,
+        baseY: Float,
+        cz: Float,
+        profile: FloatArray,
+        segments: Int = 12,
+        r: Float = 1f,
+        g: Float = 1f,
+        b: Float = 1f,
+        a: Float = 1f
+    ) {
+        val rings = profile.size / 2
+        if (rings < 2) return
+        val segs = max(segments, 12)
+        val step = (Math.PI * 2.0 / segs).toFloat()
+
+        for (k in 0 until rings - 1) {
+            val r0 = profile[k * 2]
+            val y0 = profile[k * 2 + 1]
+            val r1 = profile[k * 2 + 2]
+            val y1 = profile[k * 2 + 3]
+            // Нормаль по наклону образующей
+            val dr = r1 - r0
+            val dy = y1 - y0
+            val slopeLen = hypot(dr, dy).coerceAtLeast(1e-5f)
+            val nr = dy / slopeLen
+            val ny = dr / slopeLen
+            for (i in 0 until segs) {
+                val a0 = i * step
+                val a1 = (i + 1) * step
+                val c0 = cos(a0); val s0 = sin(a0)
+                val c1 = cos(a1); val s1 = sin(a1)
+                val n0x = nr * c0; val n0z = nr * s0
+                val n1x = nr * c1; val n1z = nr * s1
+                val vTop = 1f - k.toFloat() / (rings - 1)
+                val vBot = 1f - (k + 1).toFloat() / (rings - 1)
+
+                addVertex(cx + r0 * c0, baseY + y0, cz + r0 * s0, n0x, ny, n0z, i.toFloat() / segs * 2f, vTop, r * 0.88f, g * 0.88f, b * 0.92f, a)
+                addVertex(cx + r0 * c1, baseY + y0, cz + r0 * s1, n1x, ny, n1z, (i + 1).toFloat() / segs * 2f, vTop, r * 0.88f, g * 0.88f, b * 0.92f, a)
+                addVertex(cx + r1 * c1, baseY + y1, cz + r1 * s1, n1x, ny, n1z, (i + 1).toFloat() / segs * 2f, vBot, r, g, b, a)
+
+                addVertex(cx + r0 * c0, baseY + y0, cz + r0 * s0, n0x, ny, n0z, i.toFloat() / segs * 2f, vTop, r * 0.88f, g * 0.88f, b * 0.92f, a)
+                addVertex(cx + r1 * c1, baseY + y1, cz + r1 * s1, n1x, ny, n1z, (i + 1).toFloat() / segs * 2f, vBot, r, g, b, a)
+                addVertex(cx + r1 * c0, baseY + y1, cz + r1 * s0, n0x, ny, n0z, i.toFloat() / segs * 2f, vBot, r, g, b, a)
+            }
+        }
+        // Нижнее дно
+        val rB = profile[0]
+        val yB = profile[1]
+        if (rB > 0.01f) {
+            for (i in 0 until segs) {
+                val a0 = i * step
+                val a1 = (i + 1) * step
+                addVertex(cx, baseY + yB, cz, 0f, -1f, 0f, 0.5f, 0.5f, r * 0.55f, g * 0.55f, b * 0.58f, a)
+                addVertex(cx + rB * cos(a1), baseY + yB, cz + rB * sin(a1), 0f, -1f, 0f, 1f, 0f, r * 0.55f, g * 0.55f, b * 0.58f, a)
+                addVertex(cx + rB * cos(a0), baseY + yB, cz + rB * sin(a0), 0f, -1f, 0f, 0f, 0f, r * 0.55f, g * 0.55f, b * 0.58f, a)
+            }
+        }
+    }
+
     fun addCone(
         cx: Float,
         baseY: Float,
@@ -481,10 +669,11 @@ class MeshBuilder(initialFloatsCapacity: Int = 16384) {
         b: Float = 1f,
         a: Float = 1f
     ) {
-        val step = (Math.PI * 2.0 / segments).toFloat()
+        val segs = max(segments, 12)
+        val step = (Math.PI * 2.0 / segs).toFloat()
         val slopeY = radius / hypot(radius, height)
         val slopeXZ = height / hypot(radius, height)
-        for (i in 0 until segments) {
+        for (i in 0 until segs) {
             val a0 = i * step
             val a1 = (i + 1) * step
             val x0 = cx + cos(a0) * radius
@@ -530,7 +719,7 @@ class MeshBuilder(initialFloatsCapacity: Int = 16384) {
     }
 
     fun addShadowDisc(cx: Float, y: Float, cz: Float, radius: Float, alpha: Float = 0.38f) {
-        val segs = 12
+        val segs = 18
         val step = (Math.PI * 2.0 / segs).toFloat()
         for (i in 0 until segs) {
             val a0 = i * step
@@ -583,23 +772,39 @@ class MeshBuilder(initialFloatsCapacity: Int = 16384) {
                 val hop = abs(sin(animPhase * 0.85f)) * 0.14f
                 val by = groundY + 0.24f + hop
                 furBuilder.addShadowDisc(x, groundY, z, 0.42f, 0.30f)
-                furBuilder.addOrientedBox(x, by, z, 0.26f, 0.24f, 0.42f, yaw, -0.10f, 0f, 0.98f, 0.98f, 1.0f)
+                // Пушистое скруглённое тело и голова зайца (снежно-белые)
+                furBuilder.addEllipsoid(x, by, z, 0.15f, 0.15f, 0.24f, yawRad = yaw, r = 1.85f, g = 1.82f, b = 1.78f, uvScale = 1.6f)
                 val hx = x + fwdX * 0.24f; val hz = z + fwdZ * 0.24f
-                furBuilder.addOrientedBox(hx, by + 0.12f, hz, 0.19f, 0.18f, 0.20f, yaw, 0f, 0f, 0.99f, 0.99f, 1.0f)
-                // Длинные заячьи уши с чёрными кончиками
-                furBuilder.addOrientedBox(hx + rightX * 0.055f, by + 0.31f, hz + rightZ * 0.055f, 0.045f, 0.22f, 0.06f, yaw, -0.22f, 0.10f, 0.94f, 0.95f, 0.98f)
-                furBuilder.addOrientedBox(hx - rightX * 0.055f, by + 0.31f, hz - rightZ * 0.055f, 0.045f, 0.22f, 0.06f, yaw, -0.22f, -0.10f, 0.94f, 0.95f, 0.98f)
-                furBuilder.addOrientedBox(x - fwdX * 0.24f, by + 0.04f, z - fwdZ * 0.24f, 0.12f, 0.12f, 0.12f, yaw, 0f, 0f, 1f, 1f, 1f)
+                furBuilder.addEllipsoid(hx, by + 0.12f, hz, 0.11f, 0.11f, 0.12f, yawRad = yaw, r = 1.88f, g = 1.85f, b = 1.80f, uvScale = 1.2f)
+                // Длинные скруглённые заячьи уши с чёрными кончиками
+                for (side in floatArrayOf(1f, -1f)) {
+                    furBuilder.addTaperedCylinder(
+                        hx + rightX * 0.05f * side, by + 0.18f, hz + rightZ * 0.05f * side,
+                        hx + rightX * 0.07f * side - fwdX * 0.03f, by + 0.40f, hz + rightZ * 0.07f * side - fwdZ * 0.03f,
+                        0.030f, 0.016f, 12, 1.80f, 1.78f, 1.75f
+                    )
+                    furBuilder.addTaperedCylinder(
+                        hx + rightX * 0.07f * side - fwdX * 0.03f, by + 0.38f, hz + rightZ * 0.07f * side - fwdZ * 0.03f,
+                        hx + rightX * 0.075f * side - fwdX * 0.05f, by + 0.44f, hz + rightZ * 0.075f * side - fwdZ * 0.05f,
+                        0.016f, 0.008f, 12, 0.22f, 0.22f, 0.26f
+                    )
+                }
+                furBuilder.addEllipsoid(x - fwdX * 0.24f, by + 0.05f, z - fwdZ * 0.24f, 0.07f, 0.07f, 0.07f, r = 1.9f, g = 1.88f, b = 1.82f)
             }
 
             WildlifeKind.NORTHERN_DEER -> {
                 val torsoY = groundY + 1.02f
                 furBuilder.addShadowDisc(x, groundY, z, 1.05f, 0.36f)
-                // Туловище северного оленя со светлой шеей и грудью
-                furBuilder.addOrientedBox(x, torsoY, z, 0.56f, 0.58f, 1.38f, yaw, 0f, 0f, 0.68f, 0.53f, 0.40f)
-                furBuilder.addOrientedBox(x + fwdX * 0.56f, torsoY + 0.36f, z + fwdZ * 0.56f, 0.30f, 0.66f, 0.32f, yaw, 0.26f, 0f, 0.84f, 0.78f, 0.72f)
+                // Плавное туловище северного оленя (эллипсоиды вместо коробок)
+                furBuilder.addEllipsoid(x, torsoY, z, 0.32f, 0.33f, 0.72f, yawRad = yaw, r = 0.68f, g = 0.53f, b = 0.40f, uvScale = 2.2f)
+                val nx = x + fwdX * 0.56f; val nz = z + fwdZ * 0.56f
+                furBuilder.addTaperedCylinder(
+                    x + fwdX * 0.34f, torsoY + 0.10f, z + fwdZ * 0.34f,
+                    nx, torsoY + 0.52f, nz,
+                    0.22f, 0.15f, 12, 0.84f, 0.78f, 0.72f
+                )
                 val hx = x + fwdX * 0.78f; val hz = z + fwdZ * 0.78f; val hy = torsoY + 0.66f
-                furBuilder.addOrientedBox(hx, hy, hz, 0.26f, 0.26f, 0.48f, yaw, -0.12f, 0f, 0.66f, 0.52f, 0.40f)
+                furBuilder.addEllipsoid(hx, hy, hz, 0.14f, 0.14f, 0.26f, yawRad = yaw, r = 0.66f, g = 0.52f, b = 0.40f, uvScale = 1.4f)
                 // Ветвистые рога оленя
                 for (side in listOf(-1f, 1f)) {
                     val rx = hx + rightX * 0.11f * side
@@ -607,15 +812,20 @@ class MeshBuilder(initialFloatsCapacity: Int = 16384) {
                     barkHornBuilder.addTaperedCylinder(
                         rx, hy + 0.10f, rz,
                         rx + rightX * 0.26f * side - fwdX * 0.12f, hy + 0.58f, rz + rightZ * 0.26f * side - fwdZ * 0.12f,
-                        0.032f, 0.016f, 6, 0.90f, 0.84f, 0.74f
+                        0.032f, 0.016f, 12, 0.90f, 0.84f, 0.74f
                     )
                     barkHornBuilder.addTaperedCylinder(
                         rx + rightX * 0.14f * side, hy + 0.34f, rz + rightZ * 0.14f * side,
                         rx + rightX * 0.24f * side + fwdX * 0.22f, hy + 0.54f, rz + rightZ * 0.24f * side + fwdZ * 0.22f,
-                        0.022f, 0.012f, 5, 0.92f, 0.86f, 0.76f
+                        0.022f, 0.012f, 12, 0.92f, 0.86f, 0.76f
+                    )
+                    barkHornBuilder.addTaperedCylinder(
+                        rx + rightX * 0.06f * side, hy + 0.22f, rz + rightZ * 0.06f * side,
+                        rx + rightX * 0.30f * side + fwdX * 0.05f, hy + 0.38f, rz + rightZ * 0.30f * side + fwdZ * 0.05f,
+                        0.020f, 0.010f, 12, 0.90f, 0.84f, 0.74f
                     )
                 }
-                // 4 стройные ноги с противофазным шагом
+                // 4 стройные скруглённые ноги с противофазным шагом
                 val legs = listOf(
                     Triple(0.20f, 0.46f, stride),
                     Triple(-0.20f, 0.46f, -stride),
@@ -623,27 +833,38 @@ class MeshBuilder(initialFloatsCapacity: Int = 16384) {
                     Triple(-0.20f, -0.46f, stride)
                 )
                 for ((lx, lz, swing) in legs) {
-                    val px = x + rightX * lx + fwdX * lz
-                    val pz = z + rightZ * lx + fwdZ * lz
-                    furBuilder.addOrientedBox(px, groundY + 0.44f, pz, 0.11f, 0.88f, 0.12f, yaw, swing, 0f, 0.56f, 0.43f, 0.33f)
+                    val px2 = x + rightX * lx + fwdX * lz
+                    val pz2 = z + rightZ * lx + fwdZ * lz
+                    val kneeX = px2 + sin(swing) * 0.06f
+                    val kneeZ = pz2 + cos(swing) * 0.02f
+                    furBuilder.addTaperedCylinder(px2, groundY + 0.86f, pz2, kneeX, groundY + 0.46f, kneeZ, 0.075f, 0.052f, 12, 0.56f, 0.43f, 0.33f)
+                    furBuilder.addTaperedCylinder(kneeX, groundY + 0.46f, kneeZ, kneeX + sin(swing) * 0.10f, groundY + 0.02f, kneeZ + cos(swing) * 0.04f, 0.050f, 0.030f, 12, 0.50f, 0.38f, 0.29f)
                 }
             }
 
             WildlifeKind.TIMBER_WOLF -> {
                 val torsoY = groundY + 0.60f
                 furBuilder.addShadowDisc(x, groundY, z, 0.88f, 0.38f)
-                furBuilder.addOrientedBox(x, torsoY, z, 0.42f, 0.42f, 1.08f, yaw, 0f, 0f, 0.46f, 0.48f, 0.53f)
-                furBuilder.addOrientedBox(x + fwdX * 0.24f, torsoY + 0.06f, z + fwdZ * 0.24f, 0.46f, 0.46f, 0.44f, yaw, 0f, 0f, 0.54f, 0.56f, 0.60f)
+                furBuilder.addEllipsoid(x, torsoY, z, 0.24f, 0.24f, 0.58f, yawRad = yaw, r = 0.46f, g = 0.48f, b = 0.53f, uvScale = 2.0f)
+                furBuilder.addEllipsoid(x + fwdX * 0.24f, torsoY + 0.06f, z + fwdZ * 0.24f, 0.25f, 0.25f, 0.24f, yawRad = yaw, r = 0.54f, g = 0.56f, b = 0.60f, uvScale = 1.3f)
                 val hx = x + fwdX * 0.64f; val hz = z + fwdZ * 0.64f; val hy = torsoY + 0.14f
-                furBuilder.addOrientedBox(hx, hy, hz, 0.28f, 0.26f, 0.40f, yaw, -0.08f, 0f, 0.50f, 0.52f, 0.57f)
-                // Острые уши и пушистый хвост волка
-                furBuilder.addOrientedBox(hx + rightX * 0.09f, hy + 0.19f, hz + rightZ * 0.09f, 0.07f, 0.13f, 0.07f, yaw, 0f, 0f, 0.36f, 0.38f, 0.42f)
-                furBuilder.addOrientedBox(hx - rightX * 0.09f, hy + 0.19f, hz - rightZ * 0.09f, 0.07f, 0.13f, 0.07f, yaw, 0f, 0f, 0.36f, 0.38f, 0.42f)
-                furBuilder.addOrientedBox(x - fwdX * 0.66f, torsoY - 0.06f, z - fwdZ * 0.66f, 0.14f, 0.15f, 0.46f, yaw, -0.45f, 0f, 0.40f, 0.42f, 0.47f)
+                furBuilder.addEllipsoid(hx, hy, hz, 0.15f, 0.14f, 0.21f, yawRad = yaw, r = 0.50f, g = 0.52f, b = 0.57f, uvScale = 1.2f)
+                furBuilder.addEllipsoid(hx + fwdX * 0.17f, hy - 0.03f, hz + fwdZ * 0.17f, 0.08f, 0.065f, 0.11f, yawRad = yaw, r = 0.42f, g = 0.44f, b = 0.49f)
+                // Острые скруглённые уши
+                for (side in floatArrayOf(1f, -1f)) {
+                    furBuilder.addTaperedCylinder(
+                        hx + rightX * 0.08f * side, hy + 0.10f, hz + rightZ * 0.08f * side,
+                        hx + rightX * 0.115f * side - fwdX * 0.015f, hy + 0.27f, hz + rightZ * 0.115f * side - fwdZ * 0.015f,
+                        0.048f, 0.010f, 12, 0.36f, 0.38f, 0.42f
+                    )
+                }
+                // Пушистый изогнутый хвост волка
+                furBuilder.addTaperedCylinder(x - fwdX * 0.52f, torsoY + 0.02f, z - fwdZ * 0.52f, x - fwdX * 0.92f, torsoY - 0.14f, z - fwdZ * 0.92f, 0.085f, 0.042f, 12, 0.40f, 0.42f, 0.47f)
+                furBuilder.addEllipsoid(x - fwdX * 0.95f, torsoY - 0.16f, z - fwdZ * 0.95f, 0.05f, 0.05f, 0.08f, yawRad = yaw, r = 0.36f, g = 0.38f, b = 0.43f)
                 // Светящиеся янтарные глаза хищника в темноте
                 val ex = hx + fwdX * 0.19f; val ez = hz + fwdZ * 0.19f
-                glowBuilder.addBox(ex + rightX * 0.065f, hy + 0.03f, ez + rightZ * 0.065f, 0.04f, 0.04f, 0.04f, 1f, 0.72f, 0.15f, 1f)
-                glowBuilder.addBox(ex - rightX * 0.065f, hy + 0.03f, ez - rightZ * 0.065f, 0.04f, 0.04f, 0.04f, 1f, 0.72f, 0.15f, 1f)
+                glowBuilder.addEllipsoid(ex + rightX * 0.065f, hy + 0.03f, ez + rightZ * 0.065f, 0.022f, 0.022f, 0.016f, latBands = 6, lonSegs = 10, r = 1f, g = 0.72f, b = 0.15f)
+                glowBuilder.addEllipsoid(ex - rightX * 0.065f, hy + 0.03f, ez - rightZ * 0.065f, 0.022f, 0.022f, 0.016f, latBands = 6, lonSegs = 10, r = 1f, g = 0.72f, b = 0.15f)
                 val legs = listOf(
                     Triple(0.15f, 0.36f, stride * 1.2f),
                     Triple(-0.15f, 0.36f, -stride * 1.2f),
@@ -651,9 +872,9 @@ class MeshBuilder(initialFloatsCapacity: Int = 16384) {
                     Triple(-0.15f, -0.36f, stride * 1.2f)
                 )
                 for ((lx, lz, swing) in legs) {
-                    val px = x + rightX * lx + fwdX * lz
-                    val pz = z + rightZ * lx + fwdZ * lz
-                    furBuilder.addOrientedBox(px, groundY + 0.26f, pz, 0.095f, 0.52f, 0.10f, yaw, swing, 0f, 0.42f, 0.44f, 0.49f)
+                    val px2 = x + rightX * lx + fwdX * lz
+                    val pz2 = z + rightZ * lx + fwdZ * lz
+                    furBuilder.addTaperedCylinder(px2, groundY + 0.50f, pz2, px2 + sin(swing) * 0.07f, groundY + 0.02f, pz2 + cos(swing) * 0.03f, 0.062f, 0.032f, 12, 0.42f, 0.44f, 0.49f)
                 }
             }
         }
