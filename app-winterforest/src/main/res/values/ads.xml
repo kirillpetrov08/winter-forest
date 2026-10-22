@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Резервная точка интеграции рекламных ID РСЯ (если не используется local.properties).
+         Приоритет имеет BuildConfig (local.properties -> yandex.banner.id / yandex.rewarded.id).
+         Пустая строка по умолчанию = реклама отключена, игра полностью работает без рекламы.
+         НЕ вставляйте сюда demo-banner-yandex / demo-rewarded-yandex перед release! -->
+    <string name="yandex_banner_ad_unit_id" translatable="false"></string>
+    <string name="yandex_rewarded_ad_unit_id" translatable="false"></string>
+</resources>

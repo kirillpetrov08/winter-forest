@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Северная звезда / луна -->
+    <path
+        android:fillColor="#E9F5FF"
+        android:pathData="M74,26a7,7 0,1 0,0.01 0z" />
+    <!-- Заснеженная ель слева -->
+    <path
+        android:fillColor="#1E4D3B"
+        android:pathData="M34,30L20,54L27,54L17,74L51,74L41,54L48,54Z" />
+    <path
+        android:fillColor="#EEF8FF"
+        android:pathData="M34,30L25,46L43,46Z" />
+    <!-- Заснеженная ель справа -->
+    <path
+        android:fillColor="#163C2E"
+        android:pathData="M74,38L62,58L68,58L60,75L88,75L80,58L86,58Z" />
+    <!-- Пламя костра в центре -->
+    <path
+        android:fillColor="#F4A261"
+        android:pathData="M54,48C48,57 46,64 54,73C62,64 60,57 54,48Z" />
+    <path
+        android:fillColor="#FFE66D"
+        android:pathData="M54,55C50.5,61 50,65 54,71C58,65 57.5,61 54,55Z" />
+    <!-- Поленья костра -->
+    <path
+        android:fillColor="#6D4C3D"
+        android:pathData="M43,75L65,70L67,74L45,79Z" />
+    <path
+        android:fillColor="#54382C"
+        android:pathData="M45,70L67,75L65,79L43,74Z" />
+</vector>

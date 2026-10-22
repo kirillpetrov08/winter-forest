@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Winter Forest</string>
+    <string name="app_subtitle">3D-выживание в заснеженном лесу</string>
+    <string name="developer_name">Ayaks</string>
+    <string name="developer_email">kirillpetrov08@gmail.com</string>
+</resources>
