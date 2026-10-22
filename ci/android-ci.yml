@@ -13,7 +13,7 @@ permissions:
 jobs:
   build-and-verify:
     name: Unit Tests, Debug APK, Release APK & Release AAB
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 35
 
     steps:
@@ -27,50 +27,30 @@ jobs:
           java-version: "21"
           cache: gradle
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Decode upload keystore from CI secret (if configured by repository owner)
+      - name: Run unit tests, debug APK, release APK & release AAB
         env:
+          FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          YANDEX_BANNER_AD_UNIT_ID: ${{ secrets.YANDEX_BANNER_AD_UNIT_ID }}
+          YANDEX_REWARDED_AD_UNIT_ID: ${{ secrets.YANDEX_REWARDED_AD_UNIT_ID }}
         run: |
-          if [ -n "$KEYSTORE_BASE64" ]; then
-            echo "$KEYSTORE_BASE64" | base64 --decode > "${GITHUB_WORKSPACE}/upload-keystore.jks"
-            echo "KEYSTORE_PATH=${GITHUB_WORKSPACE}/upload-keystore.jks" >> "$GITHUB_ENV"
+          if [ -f scripts/ci-build-and-verify.sh ]; then
+            bash scripts/ci-build-and-verify.sh
           else
-            echo "No KEYSTORE_BASE64 secret configured yet; building unsigned release artifacts."
+            export ANDROID_HOME="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+            export ANDROID_SDK_ROOT="$ANDROID_HOME"
+            yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null 2>&1 || true
+            if [ -n "$KEYSTORE_BASE64" ]; then
+              echo "$KEYSTORE_BASE64" | base64 --decode > "${GITHUB_WORKSPACE}/upload-keystore.jks"
+              export KEYSTORE_PATH="${GITHUB_WORKSPACE}/upload-keystore.jks"
+            fi
+            chmod +x gradlew
+            ./gradlew test assembleDebug assembleRelease bundleRelease --stacktrace --no-daemon
+            rm -f "${GITHUB_WORKSPACE}/upload-keystore.jks"
           fi
-
-      - name: Run unit tests (./gradlew test)
-        run: ./gradlew test --stacktrace
-
-      - name: Assemble Debug APK (./gradlew assembleDebug)
-        env:
-          YANDEX_BANNER_AD_UNIT_ID: ${{ secrets.YANDEX_BANNER_AD_UNIT_ID }}
-          YANDEX_REWARDED_AD_UNIT_ID: ${{ secrets.YANDEX_REWARDED_AD_UNIT_ID }}
-        run: ./gradlew assembleDebug --stacktrace
-
-      - name: Assemble Release APK (./gradlew assembleRelease)
-        env:
-          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-          YANDEX_BANNER_AD_UNIT_ID: ${{ secrets.YANDEX_BANNER_AD_UNIT_ID }}
-          YANDEX_REWARDED_AD_UNIT_ID: ${{ secrets.YANDEX_REWARDED_AD_UNIT_ID }}
-        run: ./gradlew assembleRelease --stacktrace
-
-      - name: Bundle Release AAB (./gradlew bundleRelease)
-        env:
-          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-          YANDEX_BANNER_AD_UNIT_ID: ${{ secrets.YANDEX_BANNER_AD_UNIT_ID }}
-          YANDEX_REWARDED_AD_UNIT_ID: ${{ secrets.YANDEX_REWARDED_AD_UNIT_ID }}
-        run: ./gradlew bundleRelease --stacktrace
-
-      - name: Remove temporary decoded keystore
-        if: always()
-        run: rm -f "${GITHUB_WORKSPACE}/upload-keystore.jks"
 
       - name: Upload APK, AAB, Merged Manifest & JUnit Reports
         if: always()
