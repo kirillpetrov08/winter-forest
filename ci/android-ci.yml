@@ -27,9 +27,8 @@ jobs:
           java-version: "21"
           cache: gradle
 
-      - name: Run unit tests, debug APK, release APK & release AAB
+      - name: Build & Verify (test, assembleDebug, assembleRelease, bundleRelease)
         env:
-          FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
@@ -40,15 +39,31 @@ jobs:
           if [ -f scripts/ci-build-and-verify.sh ]; then
             bash scripts/ci-build-and-verify.sh
           else
-            export ANDROID_HOME="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+            export ANDROID_HOME="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
             export ANDROID_SDK_ROOT="$ANDROID_HOME"
-            yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null 2>&1 || true
-            if [ -n "$KEYSTORE_BASE64" ]; then
+            for sm in "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "$ANDROID_HOME/tools/bin/sdkmanager"; do
+              [ -x "$sm" ] && { yes | "$sm" --licenses >/dev/null 2>&1 || true; break; }
+            done
+            if [ -n "${KEYSTORE_BASE64:-}" ]; then
               echo "$KEYSTORE_BASE64" | base64 --decode > "${GITHUB_WORKSPACE}/upload-keystore.jks"
               export KEYSTORE_PATH="${GITHUB_WORKSPACE}/upload-keystore.jks"
             fi
             chmod +x gradlew
-            ./gradlew test assembleDebug assembleRelease bundleRelease --stacktrace --no-daemon
+            run_step() {
+              local label="$1"; shift
+              "$@" > /tmp/ci_step.log 2>&1
+              local rc=$?
+              cat /tmp/ci_step.log
+              if [ "$rc" -ne 0 ]; then
+                python3 -c 'import pathlib,sys; lines=pathlib.Path(sys.argv[2]).read_text(errors="replace").splitlines(); sel=[l for l in lines if any(k in l for k in ("e: ","FAILURE:","What went wrong:","> ","Exception","Error","FAILED","Unresolved","Cannot"))]; s="\n".join(sel[-45:]+["--- TAIL ---"]+lines[-55:])[-6500:].replace("%","%25").replace("\r","%0D").replace("\n","%0A"); print(f"::error title=GRADLE FAILED ({sys.argv[1]})::{s}")' "$label" /tmp/ci_step.log
+                rm -f "${GITHUB_WORKSPACE}/upload-keystore.jks"
+                exit "$rc"
+              fi
+            }
+            run_step "Unit Tests" ./gradlew test --stacktrace --no-daemon
+            run_step "Assemble Debug APK" ./gradlew assembleDebug --stacktrace --no-daemon
+            run_step "Assemble Release APK" ./gradlew assembleRelease --stacktrace --no-daemon
+            run_step "Bundle Release AAB" ./gradlew bundleRelease --stacktrace --no-daemon
             rm -f "${GITHUB_WORKSPACE}/upload-keystore.jks"
           fi
 
