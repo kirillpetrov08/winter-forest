@@ -1,0 +1,87 @@
+name: Android CI — Winter Forest
+
+on:
+  push:
+    branches: [ "**" ]
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-verify:
+    name: Unit Tests, Debug APK, Release APK & Release AAB
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21 (Temurin)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: gradle
+
+      - name: Build & Verify (test, assembleDebug, assembleRelease, bundleRelease)
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          YANDEX_BANNER_AD_UNIT_ID: ${{ secrets.YANDEX_BANNER_AD_UNIT_ID }}
+          YANDEX_REWARDED_AD_UNIT_ID: ${{ secrets.YANDEX_REWARDED_AD_UNIT_ID }}
+        run: |
+          if [ -f scripts/ci-build-and-verify.sh ]; then
+            bash scripts/ci-build-and-verify.sh
+          else
+            export ANDROID_HOME="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+            if [ ! -d "$ANDROID_HOME" ]; then
+              mkdir -p "$HOME/android-sdk/cmdline-tools"
+              curl -fsSL https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -o /tmp/cmdtools.zip
+              unzip -q /tmp/cmdtools.zip -d "$HOME/android-sdk/cmdline-tools"
+              mv "$HOME/android-sdk/cmdline-tools/cmdline-tools" "$HOME/android-sdk/cmdline-tools/latest"
+              export ANDROID_HOME="$HOME/android-sdk"
+            fi
+            export ANDROID_SDK_ROOT="$ANDROID_HOME"
+            for sm in "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "$ANDROID_HOME/tools/bin/sdkmanager"; do
+              [ -x "$sm" ] && { yes | "$sm" --licenses >/dev/null 2>&1 || true; break; }
+            done
+            if [ -n "${KEYSTORE_BASE64:-}" ]; then
+              echo "$KEYSTORE_BASE64" | base64 --decode > "${GITHUB_WORKSPACE}/upload-keystore.jks"
+              export KEYSTORE_PATH="${GITHUB_WORKSPACE}/upload-keystore.jks"
+            fi
+            chmod +x gradlew
+            run_step() {
+              local label="$1"; shift
+              "$@" > /tmp/ci_step.log 2>&1
+              local rc=$?
+              cat /tmp/ci_step.log
+              if [ "$rc" -ne 0 ]; then
+                python3 -c 'import pathlib,sys; lines=pathlib.Path(sys.argv[2]).read_text(errors="replace").splitlines(); sel=[l for l in lines if any(k in l for k in ("e: ","FAILURE:","What went wrong:","> ","Exception","Error","FAILED","Unresolved","Cannot"))]; s="\n".join(sel[-45:]+["--- TAIL ---"]+lines[-55:])[-6500:].replace("%","%25").replace("\r","%0D").replace("\n","%0A"); print(f"::error title=GRADLE FAILED ({sys.argv[1]})::{s}")' "$label" /tmp/ci_step.log
+                rm -f "${GITHUB_WORKSPACE}/upload-keystore.jks"
+                exit "$rc"
+              fi
+            }
+            run_step "Unit Tests" ./gradlew test --stacktrace --no-daemon
+            run_step "Assemble Debug APK" ./gradlew assembleDebug --stacktrace --no-daemon
+            run_step "Assemble Release APK" ./gradlew assembleRelease --stacktrace --no-daemon
+            run_step "Bundle Release AAB" ./gradlew bundleRelease --stacktrace --no-daemon
+            rm -f "${GITHUB_WORKSPACE}/upload-keystore.jks"
+          fi
+
+      - name: Upload APK, AAB, Merged Manifest & JUnit Reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: winter-forest-release-and-debug-outputs
+          path: |
+            app-winterforest/build/outputs/apk/debug/*.apk
+            app-winterforest/build/outputs/apk/release/*.apk
+            app-winterforest/build/outputs/bundle/release/*.aab
+            app-winterforest/build/intermediates/merged_manifests/**/AndroidManifest.xml
+            app-winterforest/build/reports/tests/**
