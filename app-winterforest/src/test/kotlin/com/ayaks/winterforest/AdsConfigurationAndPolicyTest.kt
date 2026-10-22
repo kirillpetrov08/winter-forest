@@ -81,6 +81,40 @@ class AdsConfigurationAndPolicyTest {
     }
 
     @Test
+    fun `production РСЯ block ids for winter forest are wired in build config and survive release`() {
+        // Боевые блоки из кабинета РСЯ (приложение winter forest, ID 20264124):
+        // баннер R-M-20264124-1 и реклама с вознаграждением R-M-20264124-2
+        val prodConfig = AdConfig.resolve(
+            buildConfigBannerId = "R-M-20264124-1",
+            buildConfigRewardedId = "R-M-20264124-2",
+            isDebugBuild = false,
+            enableDebugDemoAds = true // демо-флаг не должен перебивать реальные ID
+        )
+        assertEquals("R-M-20264124-1", prodConfig.bannerAdUnitId)
+        assertEquals("R-M-20264124-2", prodConfig.rewardedAdUnitId)
+        assertTrue(prodConfig.isBannerEnabled)
+        assertTrue(prodConfig.isRewardedEnabled)
+
+        val debugConfig = AdConfig.resolve(
+            buildConfigBannerId = "R-M-20264124-1",
+            buildConfigRewardedId = "R-M-20264124-2",
+            isDebugBuild = true
+        )
+        assertEquals("R-M-20264124-1", debugConfig.bannerAdUnitId)
+        assertEquals("R-M-20264124-2", debugConfig.rewardedAdUnitId)
+
+        // Пустой демо-флаг по умолчанию — демо-блоки не подставляются даже в debug
+        val noDemo = AdConfig.resolve(
+            buildConfigBannerId = "",
+            buildConfigRewardedId = "",
+            isDebugBuild = true,
+            enableDebugDemoAds = false
+        )
+        assertEquals("", noDemo.bannerAdUnitId)
+        assertEquals("", noDemo.rewardedAdUnitId)
+    }
+
+    @Test
     fun `closing rewarded ad without onRewarded grants zero reward and ads never grant special loot`() = runTest {
         val tempDir = Files.createTempDirectory("wf_ads_test").toFile()
         val testScope = CoroutineScope(coroutineContext + SupervisorJob())

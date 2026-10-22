@@ -37,8 +37,13 @@ fun resolveConfigProperty(propKey: String, envKey: String): String {
 fun escapeForBuildConfig(value: String): String =
     "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
 
+// Рекламные ID РСЯ приложения «winter forest» (ID 20264124): боевые блоки из кабинета РСЯ
+// зашиты как значения по умолчанию (local.properties / env могут переопределить).
+// Баннер: R-M-20264124-1 • Реклама с вознаграждением: R-M-20264124-2 • демо-блоки НЕ используются.
 val yandexBannerId = resolveConfigProperty("yandex.banner.id", "YANDEX_BANNER_AD_UNIT_ID")
+    .ifEmpty { "R-M-20264124-1" }
 val yandexRewardedId = resolveConfigProperty("yandex.rewarded.id", "YANDEX_REWARDED_AD_UNIT_ID")
+    .ifEmpty { "R-M-20264124-2" }
 val yandexDebugDemo = resolveConfigProperty("yandex.debug.demo", "YANDEX_DEBUG_DEMO")
     .equals("true", ignoreCase = true)
 

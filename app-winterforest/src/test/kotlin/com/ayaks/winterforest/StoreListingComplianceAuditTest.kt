@@ -72,6 +72,16 @@ class StoreListingComplianceAuditTest {
             )
         }
 
+        // 4b. Боевые блоки РСЯ (кабинет: приложение winter forest, ID 20264124) зашиты
+        // СТРОГО в build config (build.gradle.kts), а не в runtime-исходниках: баннер + вознаграждение,
+        // без демо-заглушек. local.properties/env могут переопределить при необходимости.
+        val buildGradle = File(root, "app-winterforest/build.gradle.kts").readText(Charsets.UTF_8)
+        assertTrue(buildGradle.contains("\"R-M-20264124-1\""))
+        assertTrue(buildGradle.contains("\"R-M-20264124-2\""))
+        val wiredIds = realYandexIdRegex.findAll(buildGradle).map { it.value }.toSet()
+        assertEquals("В build config должны быть ровно два боевых блока РСЯ", setOf("R-M-20264124-1", "R-M-20264124-2"), wiredIds)
+        assertFalse("Демо-блоки РСЯ не должны подмешиваться в сборку", buildGradle.contains("demo-banner") || buildGradle.contains("demo-rewarded"))
+
         // 5. Проверка размеров и цветовых форматов графики магазина (icon 512x512 RGB, feature 1024x500 RGB, 7 горизонтальных скриншотов 1920x1080 RGB)
         val (iconW, iconH, iconColor) = readPngDimensionsAndColorType(File(root, "store/icon-512x512.png"))
         assertEquals(512, iconW)
