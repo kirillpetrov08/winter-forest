@@ -385,6 +385,7 @@ fun GameScreen(
                     Modifier.fillMaxWidth()
                 )
             }
+        }
 
         // 4. Верхняя центральная строка живых событий + пропуск активного таймера
         Column(
