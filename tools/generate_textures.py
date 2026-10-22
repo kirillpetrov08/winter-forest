@@ -11,7 +11,7 @@ from PIL import Image
 
 OUT = os.path.join(os.path.dirname(__file__), "..", "app-winterforest", "src", "main", "assets", "textures")
 SIZE = 2048
-NEW_SIZE = 1024  # new additions at 1024 to control APK growth
+NEW_SIZE = 2048  # audit contract: all textures 2048px
 
 
 def tile_noise(size, beta, seed, aniso=1.0, angle=0.0):
