@@ -67,10 +67,8 @@ PY
   fi
 }
 
-run_gradle_step "Unit Tests (./gradlew test)" ./gradlew test --stacktrace --no-daemon
-run_gradle_step "Assemble Debug APK (./gradlew assembleDebug)" ./gradlew assembleDebug --stacktrace --no-daemon
-run_gradle_step "Assemble Release APK (./gradlew assembleRelease)" ./gradlew assembleRelease --stacktrace --no-daemon
-run_gradle_step "Bundle Release AAB (./gradlew bundleRelease)" ./gradlew bundleRelease --stacktrace --no-daemon
+run_gradle_step "Test + Debug APK + Release APK + Release AAB" \
+  ./gradlew test assembleDebug assembleRelease bundleRelease --stacktrace
 
 python3 - << 'PY'
 import glob, os

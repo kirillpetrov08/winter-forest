@@ -2,9 +2,9 @@
 # JetBrains Kotlin/KSP releases, and Yandex Mobile Ads SDK Android repository (October 2026).
 
 [versions]
-agp = "8.9.0"
+agp = "8.10.1"
 kotlin = "2.3.10"
-ksp = "2.3.10"
+ksp = "2.3.6"
 coreKtx = "1.15.0"
 activityCompose = "1.9.3"
 lifecycle = "2.8.7"
