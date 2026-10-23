@@ -3,13 +3,15 @@ package com.ayaks.winterforest.data.preferences
 import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.core.handlers.ReplaceFileCorruptionHandler
+import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.floatPreferencesKey
+import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.preferencesDataStoreFile
-import androidx.datastore.preferences.core.PreferenceDataStoreFactory
+import com.ayaks.winterforest.domain.model.GraphicsQuality
 import com.ayaks.winterforest.domain.repository.UserSettings
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -20,6 +22,11 @@ class SettingsDataStore(private val dataStore: DataStore<Preferences>) {
         UserSettings(
             soundVolume = (prefs[KEY_SOUND_VOLUME] ?: 0.80f).coerceIn(0f, 1f),
             lookSensitivity = (prefs[KEY_LOOK_SENSITIVITY] ?: 1.0f).coerceIn(0.3f, 2.5f),
+            graphicsQuality = GraphicsQuality.fromOrdinal(
+                prefs[KEY_GRAPHICS_QUALITY] ?: GraphicsQuality.HIGH.ordinal
+            ),
+            showFpsCounter = prefs[KEY_SHOW_FPS] ?: false,
+            autoSprintEnabled = prefs[KEY_AUTO_SPRINT] ?: true,
             gdprUserConsent = prefs[KEY_GDPR_CONSENT] ?: false,
             consentDialogShown = prefs[KEY_CONSENT_SHOWN] ?: false,
             // Геолокация жёстко отключена всегда
@@ -33,6 +40,18 @@ class SettingsDataStore(private val dataStore: DataStore<Preferences>) {
 
     suspend fun setLookSensitivity(sensitivity: Float) {
         dataStore.edit { it[KEY_LOOK_SENSITIVITY] = sensitivity.coerceIn(0.3f, 2.5f) }
+    }
+
+    suspend fun setGraphicsQuality(quality: GraphicsQuality) {
+        dataStore.edit { it[KEY_GRAPHICS_QUALITY] = quality.ordinal }
+    }
+
+    suspend fun setShowFpsCounter(enabled: Boolean) {
+        dataStore.edit { it[KEY_SHOW_FPS] = enabled }
+    }
+
+    suspend fun setAutoSprint(enabled: Boolean) {
+        dataStore.edit { it[KEY_AUTO_SPRINT] = enabled }
     }
 
     suspend fun setGdprConsent(granted: Boolean) {
@@ -49,11 +68,13 @@ class SettingsDataStore(private val dataStore: DataStore<Preferences>) {
     companion object {
         private val KEY_SOUND_VOLUME = floatPreferencesKey("sound_volume")
         private val KEY_LOOK_SENSITIVITY = floatPreferencesKey("look_sensitivity")
+        private val KEY_GRAPHICS_QUALITY = intPreferencesKey("graphics_quality")
+        private val KEY_SHOW_FPS = booleanPreferencesKey("show_fps_counter")
+        private val KEY_AUTO_SPRINT = booleanPreferencesKey("auto_sprint_enabled")
         private val KEY_GDPR_CONSENT = booleanPreferencesKey("gdpr_user_consent")
         private val KEY_CONSENT_SHOWN = booleanPreferencesKey("consent_dialog_shown")
 
         fun inMemoryForTesting(): SettingsDataStore {
-            val map = LinkedHashMap<Preferences.Key<*>, Any?>()
             val store = object : DataStore<Preferences> {
                 private val flow = kotlinx.coroutines.flow.MutableStateFlow<Preferences>(emptyPreferences())
                 override val data: Flow<Preferences> = flow

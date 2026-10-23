@@ -5,6 +5,8 @@ import com.ayaks.winterforest.domain.model.LocationId
 import com.ayaks.winterforest.domain.model.ResourceNode
 import com.ayaks.winterforest.domain.model.ResourceType
 import com.ayaks.winterforest.domain.model.SpecialLootId
+import com.ayaks.winterforest.domain.model.WildlifeEntity
+import com.ayaks.winterforest.domain.model.WildlifeKind
 import com.ayaks.winterforest.domain.model.WorldObjectKind
 import kotlin.math.cos
 import kotlin.math.sin
@@ -14,23 +16,27 @@ import kotlin.random.Random
 object WorldPopulator {
 
     fun terrainHeight(location: LocationId, x: Float, z: Float): Float {
-        // Плавная площадка у костра и построек на Базовой поляне и у ледяной глади озера
         val centerDist = sqrt(x * x + z * z)
-        if (location == LocationId.FROZEN_LAKE && centerDist < 24f) {
-            return -0.25f + 0.04f * sin(x * 0.25f) * cos(z * 0.25f)
+        if (location == LocationId.FROZEN_LAKE && centerDist < 23.5f) {
+            return -0.26f + 0.03f * sin(x * 0.30f) * cos(z * 0.30f)
         }
-        val flatten = ((centerDist - 6f) / 8f).coerceIn(0f, 1f)
+        val flatten = ((centerDist - 6.2f) / 8.0f).coerceIn(0f, 1f)
+        val microDrift = 0.14f * sin(x * 0.38f + z * 0.21f) + 0.08f * cos(x * 0.62f - z * 0.44f) +
+            0.055f * sin(x * 1.15f - z * 0.9f) + 0.035f * cos(x * 1.8f + z * 1.55f)
         val raw = when (location) {
             LocationId.BASE_CLEARING ->
-                0.75f * sin(x * 0.09f) * cos(z * 0.08f) + 0.35f * sin((x + z) * 0.17f)
+                0.85f * sin(x * 0.085f) * cos(z * 0.075f) + 0.38f * sin((x + z) * 0.15f) + microDrift
             LocationId.DENSE_SPRUCE ->
-                1.15f * sin(x * 0.11f + 1.1f) * cos(z * 0.10f) + 0.45f * cos(x * 0.21f)
+                1.35f * sin(x * 0.105f + 1.1f) * cos(z * 0.095f) + 0.52f * cos(x * 0.20f) +
+                0.34f * sin(x * 0.31f + z * 0.27f) + microDrift
             LocationId.FROZEN_LAKE ->
-                1.30f * ((centerDist - 22f) / 14f).coerceAtLeast(0f) + 0.25f * sin(x * 0.14f)
+                1.55f * ((centerDist - 22.5f) / 13f).coerceAtLeast(0f) + 0.28f * sin(x * 0.14f) + microDrift * 0.6f
             LocationId.ABANDONED_MINE ->
-                0.85f * cos(x * 0.13f) * sin(z * 0.12f) + 0.40f * sin(z * 0.26f)
+                0.95f * cos(x * 0.125f) * sin(z * 0.115f) + 0.42f * sin(z * 0.25f) +
+                0.30f * cos(x * 0.29f - z * 0.33f) + microDrift * 0.5f
             LocationId.HUNTERS_CABIN ->
-                1.35f * sin(x * 0.08f + 0.6f) * cos(z * 0.09f - 0.4f) + 0.50f * sin(x * 0.19f)
+                1.55f * sin(x * 0.078f + 0.6f) * cos(z * 0.088f - 0.4f) + 0.58f * sin(x * 0.18f) +
+                0.36f * cos(x * 0.24f + z * 0.29f) + microDrift
         }
         return raw * flatten
     }
@@ -47,6 +53,76 @@ object WorldPopulator {
             )
         }
 
+    fun generateAllWildlife(seed: Long = 20261021L): Map<LocationId, List<WildlifeEntity>> =
+        LocationId.entries.associateWith { loc ->
+            generateLocationWildlife(
+                location = loc,
+                seed = seed + 91_823L + loc.ordinal * 4999L
+            )
+        }
+
+    fun generateLocationWildlife(
+        location: LocationId,
+        seed: Long = 20261021L
+    ): List<WildlifeEntity> {
+        val rng = Random(seed)
+        // На Базовой поляне — только мирная дичь (зайцы и северный олень), без хищников!
+        val roster: List<WildlifeKind> = when (location) {
+            LocationId.BASE_CLEARING -> listOf(
+                WildlifeKind.SNOW_HARE,
+                WildlifeKind.SNOW_HARE,
+                WildlifeKind.SNOW_HARE,
+                WildlifeKind.NORTHERN_DEER,
+                WildlifeKind.NORTHERN_DEER
+            )
+            LocationId.DENSE_SPRUCE -> listOf(
+                WildlifeKind.SNOW_HARE,
+                WildlifeKind.SNOW_HARE,
+                WildlifeKind.NORTHERN_DEER,
+                WildlifeKind.NORTHERN_DEER,
+                WildlifeKind.TIMBER_WOLF,
+                WildlifeKind.TIMBER_WOLF
+            )
+            LocationId.FROZEN_LAKE -> listOf(
+                WildlifeKind.SNOW_HARE,
+                WildlifeKind.NORTHERN_DEER,
+                WildlifeKind.NORTHERN_DEER,
+                WildlifeKind.TIMBER_WOLF
+            )
+            LocationId.ABANDONED_MINE -> listOf(
+                WildlifeKind.SNOW_HARE,
+                WildlifeKind.TIMBER_WOLF,
+                WildlifeKind.TIMBER_WOLF
+            )
+            LocationId.HUNTERS_CABIN -> listOf(
+                WildlifeKind.SNOW_HARE,
+                WildlifeKind.SNOW_HARE,
+                WildlifeKind.NORTHERN_DEER,
+                WildlifeKind.NORTHERN_DEER,
+                WildlifeKind.TIMBER_WOLF,
+                WildlifeKind.TIMBER_WOLF,
+                WildlifeKind.TIMBER_WOLF
+            )
+        }
+
+        return roster.mapIndexed { idx, kind ->
+            val angle = (idx.toFloat() / roster.size.toFloat()) * (Math.PI.toFloat() * 2f) + 0.55f + rng.nextFloat() * 0.4f
+            val radius = if (kind.isPredator) {
+                20f + rng.nextFloat() * 12f
+            } else {
+                12f + rng.nextFloat() * 16f
+            }
+            WildlifeEntity(
+                id = "${location.name.lowercase()}_fauna_$idx",
+                kind = kind,
+                x = (cos(angle) * radius).coerceIn(-33f, 33f),
+                z = (sin(angle) * radius).coerceIn(-33f, 33f),
+                headingRad = rng.nextFloat() * (Math.PI.toFloat() * 2f),
+                hp = kind.maxHp
+            )
+        }
+    }
+
     fun generateLocationNodes(
         location: LocationId,
         seed: Long = 20261021L,
@@ -62,11 +138,11 @@ object WorldPopulator {
         val totalWeight = weights.sumOf { it.value.toDouble() }.toFloat().coerceAtLeast(0.01f)
 
         val nodeCount = when (location) {
-            LocationId.BASE_CLEARING -> 18
-            LocationId.DENSE_SPRUCE -> 24
-            LocationId.FROZEN_LAKE -> 16
-            LocationId.ABANDONED_MINE -> 18
-            LocationId.HUNTERS_CABIN -> 18
+            LocationId.BASE_CLEARING -> 34
+            LocationId.DENSE_SPRUCE -> 46
+            LocationId.FROZEN_LAKE -> 30
+            LocationId.ABANDONED_MINE -> 36
+            LocationId.HUNTERS_CABIN -> 38
         }
 
         for (index in 0 until nodeCount) {
@@ -88,7 +164,7 @@ object WorldPopulator {
             }
 
             val kind = kindForResource(location, chosenType)
-            val yieldAmount = rng.nextInt(1, 4) // строго 1..3 единицы ресурса по ТЗ
+            val yieldAmount = rng.nextInt(1, 3)
 
             result += ResourceNode(
                 id = "${location.name.lowercase()}_node_$index",
@@ -102,7 +178,6 @@ object WorldPopulator {
             )
         }
 
-        // Уникальный тайник специального лута локации (фиксированная ориентирная точка рядом с центром/тропой)
         val specialLoot = location.uniqueLoot
         val alreadyCollectedPermanent =
             specialLoot.persistsAcrossRuns && specialLoot in alreadyFoundPersistentLoot

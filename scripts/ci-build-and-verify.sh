@@ -54,10 +54,22 @@ run_gradle_step() {
   cat /tmp/ci_gradle_step.log
   if [ "$rc" -ne 0 ]; then
     python3 - "$label" /tmp/ci_gradle_step.log << 'PY'
-import pathlib, sys
+import pathlib, re, sys
 label = sys.argv[1]
 lines = pathlib.Path(sys.argv[2]).read_text(errors="replace").splitlines()
-# Keep error lines + tail context so annotation stays well under 8 KB limit
+
+# 1) Emit each Kotlin/Java compile error as its OWN file/line annotation (survives truncation)
+error_pat = re.compile(r"^[ew]: file://.+/winter-forest/(?:winter-forest/)?(.+?):(\d+)(?::\d+)?\s+(.*)$")
+emitted = 0
+for ln in lines:
+    m = error_pat.match(ln)
+    if m and emitted < 40:
+        fpath, line_no, msg = m.group(1), m.group(2), m.group(3)
+        msg = msg.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+        print(f"::error file={fpath},line={line_no},title=Kotlin compile error::{msg}")
+        emitted += 1
+
+# 2) Keep error lines + tail context so annotation stays well under 8 KB limit
 interesting = [ln for ln in lines if any(k in ln for k in ("e: ", "FAILURE:", "What went wrong:", "> ", "Exception", "Error", "FAILED", "Unresolved", "Cannot"))]
 snippet = "\n".join((interesting[-45:] + ["--- TAIL ---"] + lines[-55:]))[-6500:]
 encoded = snippet.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
