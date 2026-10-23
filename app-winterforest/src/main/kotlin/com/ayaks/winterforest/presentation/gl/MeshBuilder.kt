@@ -799,6 +799,23 @@ class MeshBuilder(initialFloatsCapacity: Int = 16384) {
                     )
                 }
                 furBuilder.addEllipsoid(x - fwdX * 0.24f, by + 0.05f, z - fwdZ * 0.24f, 0.07f, 0.07f, 0.07f, r = 1.9f, g = 1.88f, b = 1.82f)
+                // 4 короткие лапы с противофазным шагом — заяц перебирает ногами при беге
+                val hareLegs = listOf(
+                    Triple(0.08f, 0.15f, stride),
+                    Triple(-0.08f, 0.15f, -stride),
+                    Triple(0.09f, -0.13f, -stride),
+                    Triple(-0.09f, -0.13f, stride)
+                )
+                for ((lx, lz, swing) in hareLegs) {
+                    val px2 = x + rightX * lx + fwdX * lz
+                    val pz2 = z + rightZ * lx + fwdZ * lz
+                    val footY = groundY + 0.02f + hop * 0.55f
+                    furBuilder.addTaperedCylinder(
+                        px2, by - 0.11f, pz2,
+                        px2 + sin(swing) * 0.05f, footY, pz2 + cos(swing) * 0.02f,
+                        0.038f, 0.024f, 8, 1.60f, 1.56f, 1.50f
+                    )
+                }
             }
 
             WildlifeKind.NORTHERN_DEER -> {

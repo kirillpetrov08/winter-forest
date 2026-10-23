@@ -77,9 +77,12 @@ class ForestGlRenderer(
                 smoothCurZ = value.run.playerZ
                 smoothPrevBobSin = smoothCurBobSin
                 smoothCurBobSin = kotlin.math.sin(value.run.walkBobPhaseRad)
+                smoothPrevBobPhase = smoothCurBobPhase
+                smoothCurBobPhase = value.run.walkBobPhaseRad
                 smoothStartNs = System.nanoTime()
                 smoothInitialized = true
             }
+            syncBeasts(value)
             field = value
         }
 
@@ -101,7 +104,83 @@ class ForestGlRenderer(
     @Volatile private var smoothCurZ = 0f
     @Volatile private var smoothPrevBobSin = 0f
     @Volatile private var smoothCurBobSin = 0f
+    @Volatile private var smoothPrevBobPhase = 0f
+    @Volatile private var smoothCurBobPhase = 0f
     @Volatile private var smoothStartNs = 0L
+
+    /**
+     * Сглаживание зверей между 20-герцевыми тиками (ключ — стабильный id зверя):
+     * позиция, поворот по кратчайшей дуге и фаза шага лап. Без этого звери
+     * дёргаются сеткой тиков и «телепортируются» на высоких FPS.
+     */
+    private class BeastSmooth {
+        @Volatile var prevX = 0f
+        @Volatile var prevZ = 0f
+        @Volatile var prevH = 0f
+        @Volatile var prevGait = 0f
+        @Volatile var curX = 0f
+        @Volatile var curZ = 0f
+        @Volatile var curH = 0f
+        @Volatile var curGait = 0f
+        @Volatile var startNs = 0L
+        @Volatile var initialized = false
+        @Volatile var moving = false
+    }
+
+    private val beastSmooth = HashMap<String, BeastSmooth>()
+    private var beastSmoothLoc: LocationId? = null
+
+    private fun syncBeasts(value: RenderSceneSnapshot) {
+        val now = System.nanoTime()
+        synchronized(beastSmooth) {
+            val loc = value.run.currentLocation
+            if (beastSmoothLoc != loc) {
+                beastSmooth.clear()
+                beastSmoothLoc = loc
+            }
+            val seen = HashSet<String>(beastSmooth.size + 4)
+            for (beast in value.run.currentWildlife()) {
+                if (!beast.isAlive) continue
+                seen.add(beast.id)
+                val bs = beastSmooth.getOrPut(beast.id) { BeastSmooth() }
+                val dx = beast.x - bs.curX
+                val dz = beast.z - bs.curZ
+                val teleport = (dx * dx + dz * dz) > SNAP_DISTANCE_M * SNAP_DISTANCE_M
+                val posMoved = beast.x != bs.curX || beast.z != bs.curZ
+                val headMoved = beast.headingRad != bs.curH
+                if (!bs.initialized || teleport) {
+                    bs.prevX = beast.x; bs.prevZ = beast.z
+                    bs.prevH = beast.headingRad; bs.prevGait = bs.curGait
+                    bs.curX = beast.x; bs.curZ = beast.z
+                    bs.curH = beast.headingRad
+                    bs.initialized = true
+                    bs.moving = false
+                    bs.startNs = now
+                } else if (posMoved || headMoved) {
+                    if (posMoved) {
+                        bs.prevX = bs.curX
+                        bs.prevZ = bs.curZ
+                        bs.prevGait = bs.curGait
+                        bs.curGait += kotlin.math.sqrt(dx * dx + dz * dz) * GAIT_RAD_PER_METER
+                        bs.moving = true
+                    } else {
+                        bs.moving = false
+                    }
+                    bs.prevH = bs.curH
+                    bs.curX = beast.x; bs.curZ = beast.z
+                    bs.curH = beast.headingRad
+                    bs.startNs = now
+                } else {
+                    bs.moving = false
+                }
+            }
+            if (seen.size != beastSmooth.size) {
+                beastSmooth.keys.retainAll(seen)
+            }
+        }
+    }
+
+    private fun beastSmoothOf(id: String): BeastSmooth? = synchronized(beastSmooth) { beastSmooth[id] }
 
     private var viewportWidth = 1920
     private var viewportHeight = 1080
@@ -225,6 +304,11 @@ class ForestGlRenderer(
         dynVbos.values.forEach { it.release() }
         assetPropBatches.values.forEach { it.release() }
         assetPropBatches.clear()
+        entityParts.values.forEach { ep ->
+            ep.body.release()
+            ep.legs.forEach { it.vbo.release() }
+        }
+        entityParts.clear()
         assetTextures.values.forEach { id -> if (id != 0) GLES20.glDeleteTextures(1, intArrayOf(id), 0) }
         assetTextures.clear()
         assetTexturesQuality = null
@@ -470,6 +554,11 @@ class ForestGlRenderer(
             }
             assetTexturesQuality = quality
         }
+        if (entityParts.isEmpty()) {
+            for (id in AssetProps.ENTITY_MODEL_IDS) {
+                buildEntityParts(id)
+            }
+        }
         if (assetPropsBuiltLoc != loc) {
             rebuildAssetPropsVbo(loc)
             assetPropsBuiltLoc = loc
@@ -485,10 +574,7 @@ class ForestGlRenderer(
         for (p in AssetProps.forLocation(loc)) {
             byModel.getOrPut(p.modelId) { mutableListOf() }.add(p)
         }
-        // Модели животных строятся в начале координат — позицию задаёт model-матрица при draw
-        for (id in AssetProps.ENTITY_MODEL_IDS) {
-            byModel.getOrPut(id) { mutableListOf() }
-        }
+        // Модели животных НЕ пекутся в статику: они рисуются по месту через entityParts
         for ((modelId, spots0) in byModel) {
             val spots = if (spots0.isEmpty()) listOf(AssetProps.Placement(modelId, 0f, 0f)) else spots0
             val floats = assetMeshCache.getOrPut(modelId) {
@@ -505,19 +591,28 @@ class ForestGlRenderer(
                 val groundY = WorldPopulator.terrainHeight(loc, p.x, p.z)
                 val cos = kotlin.math.cos(p.yawRad)
                 val sin = kotlin.math.sin(p.yawRad)
+                val cp = kotlin.math.cos(p.pitchRad)
+                val sp = kotlin.math.sin(p.pitchRad)
                 var i = 0
                 while (i + 11 < floats.size) {
                     val lx = floats[i]; val ly = floats[i + 1]; val lz = floats[i + 2]
                     val nx = floats[i + 3]; val ny = floats[i + 4]; val nz = floats[i + 5]
                     val u = floats[i + 6]; val v = floats[i + 7]
                     val r = floats[i + 8]; val g = floats[i + 9]; val b = floats[i + 10]; val a = floats[i + 11]
+                    // pitch вокруг локальной X, затем yaw вокруг Y
+                    val px1 = lx
+                    val py1 = ly * cp - lz * sp
+                    val pz1 = ly * sp + lz * cp
+                    val nx1 = nx
+                    val ny1 = ny * cp - nz * sp
+                    val nz1 = ny * sp + nz * cp
                     builder.addVertex(
-                        p.x + (lx * cos + lz * sin) * p.scale,
-                        groundY + ly * p.scale,
-                        p.z + (-lx * sin + lz * cos) * p.scale,
-                        nx * cos + nz * sin,
-                        ny,
-                        -nx * sin + nz * cos,
+                        p.x + (px1 * cos + pz1 * sin) * p.scale,
+                        groundY + py1 * p.scale,
+                        p.z + (-px1 * sin + pz1 * cos) * p.scale,
+                        nx1 * cos + nz1 * sin,
+                        ny1,
+                        -nx1 * sin + nz1 * cos,
                         u, v,
                         r * p.tintR, g * p.tintG, b * p.tintB, a
                     )
@@ -703,20 +798,14 @@ class ForestGlRenderer(
                 }
             }
 
-            // Плотницкий верстак на 4 брусьях с наковальней и Термосом
+            // Верстак-тележка рисуется импортной моделью (4.8, -4.5); сверху — наковальня и Термос
             val wbX = 4.8f; val wbZ = -4.5f
             val wbY = WorldPopulator.terrainHeight(loc, wbX, wbZ)
             foliage.addShadowDisc(wbX, wbY, wbZ, 1.45f, 0.34f)
-            for (dx in listOf(-0.82f, 0.82f)) {
-                for (dz in listOf(-0.42f, 0.42f)) {
-                    timber.addBox(wbX + dx, wbY, wbZ + dz, 0.16f, 0.96f, 0.16f)
-                }
-            }
-            timber.addBox(wbX, wbY + 0.96f, wbZ, 2.05f, 0.14f, 1.12f)
-            metal.addBox(wbX - 0.45f, wbY + 1.10f, wbZ, 0.42f, 0.24f, 0.24f, 0.72f, 0.76f, 0.82f)
+            metal.addBox(wbX - 0.45f, wbY + 1.18f, wbZ, 0.42f, 0.24f, 0.24f, 0.72f, 0.76f, 0.82f)
             if (base.thermosInstalledOnBase) {
-                metal.addTaperedCylinder(wbX + 0.52f, wbY + 1.10f, wbZ, wbX + 0.52f, wbY + 1.62f, wbZ, 0.14f, 0.13f, 10, 0.90f, 0.96f, 1.0f)
-                cloth.addTaperedCylinder(wbX + 0.52f, wbY + 1.24f, wbZ, wbX + 0.52f, wbY + 1.44f, wbZ, 0.146f, 0.146f, 10)
+                metal.addTaperedCylinder(wbX + 0.52f, wbY + 1.16f, wbZ, wbX + 0.52f, wbY + 1.68f, wbZ, 0.14f, 0.13f, 10, 0.90f, 0.96f, 1.0f)
+                cloth.addTaperedCylinder(wbX + 0.52f, wbY + 1.30f, wbZ, wbX + 0.52f, wbY + 1.50f, wbZ, 0.146f, 0.146f, 10)
             }
         } else if (loc == LocationId.HUNTERS_CABIN) {
             val cabX = 7.2f; val cabZ = 8.8f
@@ -967,12 +1056,36 @@ class ForestGlRenderer(
             }
         }
 
-        // 3. Живая 3D-фауна (зайцы, северные олени с рогами, таёжные волки) с отсечением по пирамиде обзора
-        val importedBeasts = ArrayList<Triple<WildlifeKind, FloatArray, Float>>(4)
+        // 3. Живая 3D-фауна (зайцы, северные олени с рогами, таёжные волки) с отсечением по пирамиде обзора.
+        //    Позиции/повороты интерполируются между 20-герцевыми тиками — движение плавное,
+        //    а фаза шага привязана к пройденному пути (лапы перебираются ровно тогда, когда зверь идёт).
+        val frameNowNs = System.nanoTime()
+        val importedBeasts = ArrayList<BeastDraw>(4)
         for ((idx, beast) in run.currentWildlife().withIndex()) {
             if (!beast.isAlive) continue
-            val dx = beast.x - camX
-            val dz = beast.z - camZ
+            val bs = beastSmoothOf(beast.id)
+            val alpha = if (bs != null && bs.initialized) {
+                FramePacing.interpAlpha(frameNowNs - bs.startNs, TICK_INTERP_WINDOW_NS)
+            } else {
+                1f
+            }
+            val bx: Float
+            val bz: Float
+            val bh: Float
+            val gait: Float
+            val moving: Boolean
+            if (bs != null && bs.initialized) {
+                bx = FramePacing.lerpCoord(bs.prevX, bs.curX, alpha, SNAP_DISTANCE_M)
+                bz = FramePacing.lerpCoord(bs.prevZ, bs.curZ, alpha, SNAP_DISTANCE_M)
+                bh = FramePacing.lerpAngle(bs.prevH, bs.curH, alpha)
+                gait = bs.prevGait + (bs.curGait - bs.prevGait) * alpha
+                moving = bs.moving || alpha < 1f
+            } else {
+                bx = beast.x; bz = beast.z; bh = beast.headingRad
+                gait = 0f; moving = false
+            }
+            val dx = bx - camX
+            val dz = bz - camZ
             val distSq = dx * dx + dz * dz
             if (distSq > 56f * 56f) continue
             if (distSq > 9f) {
@@ -980,11 +1093,11 @@ class ForestGlRenderer(
                 val dotFwd = (dx * invD) * fwdX + (dz * invD) * fwdZ
                 if (dotFwd < -0.35f) continue // Frustum culling за спиной камеры!
             }
-            val gy = WorldPopulator.terrainHeight(loc, beast.x, beast.z)
+            val gy = WorldPopulator.terrainHeight(loc, bx, bz)
             if (beast.kind == WildlifeKind.TIMBER_WOLF || beast.kind == WildlifeKind.NORTHERN_DEER) {
-                // Импортированные модели волка и оленя (рисуются с model-матрицей ниже)
-                fur.addShadowDisc(beast.x, gy, beast.z, if (beast.kind == WildlifeKind.TIMBER_WOLF) 1.05f else 1.3f, 0.34f)
-                importedBeasts.add(Triple(beast.kind, floatArrayOf(beast.x, gy, beast.z), beast.headingRad))
+                // Импортированные модели волка и оленя: тело + качающиеся ноги (draw ниже)
+                fur.addShadowDisc(bx, gy, bz, if (beast.kind == WildlifeKind.TIMBER_WOLF) 1.05f else 1.3f, 0.34f)
+                importedBeasts.add(BeastDraw(beast.kind, bx, gy, bz, bh, gait, moving))
                 continue
             }
             MeshBuilder.addWildlifeCreature(
@@ -992,11 +1105,11 @@ class ForestGlRenderer(
                 barkHornBuilder = bark,
                 glowBuilder = fire,
                 kind = beast.kind,
-                x = beast.x,
+                x = bx,
                 groundY = gy,
-                z = beast.z,
-                headingRad = beast.headingRad,
-                animPhase = animTimeSec * (4.8f + beast.kind.cruiseSpeedMps) + idx * 1.7f
+                z = bz,
+                headingRad = bh,
+                animPhase = if (moving) gait + idx * 1.7f else 0f
             )
         }
 
@@ -1017,6 +1130,9 @@ class ForestGlRenderer(
         if (!menuOrbitMode) {
             val swingNorm = (run.swingAnimRemainingSec / run.equippedTool.swingDurationSec.coerceAtLeast(0.1f))
                 .coerceIn(0f, 1f)
+            // bob-фаза тоже интерполируется между тиками — рука не дёргается
+            val fpAlpha = FramePacing.interpAlpha(frameNowNs - smoothStartNs, TICK_INTERP_WINDOW_NS)
+            val fpBobPhase = FramePacing.lerpAngle(smoothPrevBobPhase, smoothCurBobPhase, fpAlpha)
             MeshBuilder.addFirstPersonEquippedItem(
                 timberBuilder = timber,
                 metalBuilder = metal,
@@ -1030,7 +1146,7 @@ class ForestGlRenderer(
                 yawRad = yawRad,
                 pitchRad = pitchRad,
                 swingProgress = 1f - swingNorm,
-                walkBobPhase = run.walkBobPhaseRad,
+                walkBobPhase = fpBobPhase,
                 timeSec = animTimeSec
             )
         }
@@ -1070,14 +1186,15 @@ class ForestGlRenderer(
             drawVbo(fireVbo, textures[ProceduralTextureId.FIRE_EMBER] ?: 0, unlit = true, specStrength = 0f)
         }
 
-        // Импортированные 3D-модели животных (волк/олень) — отдельные draw с model-матрицей
-        for ((kind, pos, heading) in importedBeasts) {
-            val modelId = if (kind == WildlifeKind.TIMBER_WOLF) "wolf_body" else "deer_body"
-            drawModelInstance(
+        // Импортированные 3D-модели животных (волк/олень) — тело + ноги с шагом
+        for (bd in importedBeasts) {
+            val modelId = if (bd.kind == WildlifeKind.TIMBER_WOLF) "wolf_body" else "deer_body"
+            drawAnimatedEntity(
                 modelId = modelId,
-                x = pos[0], y = pos[1], z = pos[2],
-                yawRad = -heading + Math.PI.toFloat() * 0.5f,
-                scale = 1f
+                x = bd.x, y = bd.y, z = bd.z,
+                yawRad = -bd.heading + Math.PI.toFloat() * 0.5f,
+                gaitPhase = bd.gait,
+                swingAmp = if (bd.moving) 0.30f else 0f
             )
         }
     }
@@ -1144,16 +1261,50 @@ class ForestGlRenderer(
         shadow.addShadowDisc(cx, baseY, cz, width * 0.85f, alpha = 0.42f)
         // Каменный фундамент
         stone.addBox(cx, baseY - 0.12f, cz, width + 0.24f, 0.34f, depth + 0.24f)
-        // Основной сруб
-        timber.addBox(cx, baseY + 0.22f, cz, width, wallHeight, depth)
-        // Выступающие венцы брёвен («перерубы» на всех 4 углах!)
+        val hw = width * 0.5f; val hd = depth * 0.5f
+        val wallT = 0.30f
+        val doorCx = cx - 0.85f
+        val doorHalf = 0.58f
+        val doorTopY = baseY + 0.22f + 2.05f
+        // Стены сруба сегментами: фасад (+Z) разорван реальным дверным проёмом,
+        // внутрь можно войти (2D-коллизии WorldCollision повторяют этот контур).
+        timber.addBox(cx, baseY + 0.22f + wallHeight * 0.5f, cz - hd + wallT * 0.5f, width, wallHeight, wallT)
+        timber.addBox(cx - hw + wallT * 0.5f, baseY + 0.22f + wallHeight * 0.5f, cz, wallT, wallHeight, depth - wallT * 2f)
+        timber.addBox(cx + hw - wallT * 0.5f, baseY + 0.22f + wallHeight * 0.5f, cz, wallT, wallHeight, depth - wallT * 2f)
+        val leftW = (doorCx - doorHalf) - (cx - hw)
+        val rightW = (cx + hw) - (doorCx + doorHalf)
+        if (leftW > 0.05f) {
+            timber.addBox(cx - hw + leftW * 0.5f, baseY + 0.22f + wallHeight * 0.5f, cz + hd - wallT * 0.5f, leftW, wallHeight, wallT)
+        }
+        if (rightW > 0.05f) {
+            timber.addBox(cx + hw - rightW * 0.5f, baseY + 0.22f + wallHeight * 0.5f, cz + hd - wallT * 0.5f, rightW, wallHeight, wallT)
+        }
+        // Притолока над дверью
+        val lintelH = (baseY + 0.22f + wallHeight) - doorTopY
+        if (lintelH > 0.05f) {
+            timber.addBox(doorCx, doorTopY + lintelH * 0.5f, cz + hd - wallT * 0.5f, doorHalf * 2f + 0.1f, lintelH, wallT)
+        }
+        // Пол внутри сруба
+        timber.addBox(cx, baseY + 0.26f, cz, width - wallT * 1.6f, 0.10f, depth - wallT * 1.6f)
+        // Выступающие венцы брёвен («перерубы» на углах); фасадный ряд прерывается дверью
         val courses = 7
         val stepY = wallHeight / courses
-        val hw = width * 0.5f; val hd = depth * 0.5f
         for (i in 0 until courses) {
             val ly = baseY + 0.30f + i * stepY
             val rLog = stepY * 0.48f
-            bark.addTaperedCylinder(cx - hw - 0.28f, ly, cz + hd, cx + hw + 0.28f, ly, cz + hd, rLog, rLog, 7)
+            val frontBreak = ly < doorTopY - 0.12f
+            if (frontBreak) {
+                val segL = (doorCx - doorHalf - 0.12f) - (cx - hw - 0.28f)
+                val segR = (cx + hw + 0.28f) - (doorCx + doorHalf + 0.12f)
+                if (segL > 0.1f) {
+                    bark.addTaperedCylinder(cx - hw - 0.28f, ly, cz + hd, doorCx - doorHalf - 0.12f, ly, cz + hd, rLog, rLog, 7)
+                }
+                if (segR > 0.1f) {
+                    bark.addTaperedCylinder(doorCx + doorHalf + 0.12f, ly, cz + hd, cx + hw + 0.28f, ly, cz + hd, rLog, rLog, 7)
+                }
+            } else {
+                bark.addTaperedCylinder(cx - hw - 0.28f, ly, cz + hd, cx + hw + 0.28f, ly, cz + hd, rLog, rLog, 7)
+            }
             bark.addTaperedCylinder(cx - hw - 0.28f, ly, cz - hd, cx + hw + 0.28f, ly, cz - hd, rLog, rLog, 7)
             bark.addTaperedCylinder(cx - hw, ly + stepY * 0.5f, cz - hd - 0.28f, cx - hw, ly + stepY * 0.5f, cz + hd + 0.28f, rLog, rLog, 7)
             bark.addTaperedCylinder(cx + hw, ly + stepY * 0.5f, cz - hd - 0.28f, cx + hw, ly + stepY * 0.5f, cz + hd + 0.28f, rLog, rLog, 7)
@@ -1170,15 +1321,25 @@ class ForestGlRenderer(
 
         // Каменная печная труба
         stone.addBox(cx + hw * 0.55f, roofBaseY + 0.35f, cz + hd * 0.25f, 0.62f, 1.55f, 0.62f)
-        // Входная дверь с петлями, ступенями крыльца и тёплые светящиеся окна с переплётом
-        timber.addBox(cx - 0.85f, baseY + 0.24f, cz + hd + 0.05f, 0.96f, 1.72f, 0.10f, 0.72f, 0.52f, 0.34f)
-        metal.addBox(cx - 0.50f, baseY + 1.05f, cz + hd + 0.12f, 0.09f, 0.09f, 0.06f)
-        timber.addBox(cx - 0.85f, baseY, cz + hd + 0.48f, 1.45f, 0.24f, 0.78f)
-        // Тёплое янтарное свечение окон на фасаде и боковой стене
+        // Дверь распахнута наружу (вход внутрь свободен), ступени крыльца
+        val doorSwing = 1.30f
+        val hingeX = doorCx - doorHalf
+        timber.addOrientedBox(
+            hingeX + kotlin.math.cos(doorSwing) * doorHalf,
+            baseY + 0.24f + 1.02f,
+            cz + hd + 0.06f + kotlin.math.sin(doorSwing) * doorHalf,
+            doorHalf * 2f, 1.78f, 0.09f,
+            doorSwing, 0f, 0f,
+            0.72f, 0.52f, 0.34f
+        )
+        metal.addBox(hingeX + 0.08f, baseY + 1.05f, cz + hd + 0.12f, 0.09f, 0.09f, 0.06f)
+        timber.addBox(doorCx, baseY, cz + hd + 0.48f, 1.45f, 0.24f, 0.78f)
+        // Тёплое янтарное свечение: окна с переплётом + свет печи внутри сруба
         glow.addBox(cx + 0.95f, baseY + 1.05f, cz + hd + 0.06f, 0.88f, 0.72f, 0.08f, 1.0f, 0.80f, 0.36f, 1f)
         timber.addBox(cx + 0.95f, baseY + 1.05f, cz + hd + 0.11f, 0.07f, 0.76f, 0.05f)
         timber.addBox(cx + 0.95f, baseY + 1.38f, cz + hd + 0.11f, 0.92f, 0.07f, 0.05f)
         glow.addBox(cx + hw + 0.06f, baseY + 1.05f, cz, 0.08f, 0.70f, 0.86f, 1.0f, 0.78f, 0.34f, 1f)
+        glow.addBox(cx + 0.55f, baseY + 1.15f, cz - hd + wallT + 0.06f, 1.15f, 0.85f, 0.08f, 1.0f, 0.74f, 0.34f, 1f)
     }
 
     private fun initSkyQuadVbo() {
@@ -1272,7 +1433,7 @@ class ForestGlRenderer(
         val tex = IntArray(1)
         GLES20.glGenTextures(1, tex, 0)
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, tex[0])
-        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR_MIPMAP_LINEAR)
         GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
         val wrap = if (wrapRepeat) GLES20.GL_REPEAT else GLES20.GL_CLAMP_TO_EDGE
         GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, wrap)
@@ -1281,6 +1442,8 @@ class ForestGlRenderer(
             GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA,
             outSize, outSize, 0, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, buf
         )
+        // mipmaps — небо и облака не «плывут» и не мерцают вдали
+        GLES20.glGenerateMipmap(GLES20.GL_TEXTURE_2D)
         return tex[0]
     }
 
@@ -1386,6 +1549,125 @@ class ForestGlRenderer(
         GLES20.glUniformMatrix4fv(uModelLoc, 1, false, modelMatrix, 0)
     }
 
+    /** Модель зверя: тело + 4 ноги-сегмента с маятниковым шагом (перебирают ногами). */
+    private class BeastDraw(
+        val kind: WildlifeKind,
+        val x: Float,
+        val y: Float,
+        val z: Float,
+        val heading: Float,
+        val gait: Float,
+        val moving: Boolean
+    )
+
+    private class LegPart(val vbo: GlVbo, val pivotX: Float, val pivotY: Float, val pivotZ: Float)
+
+    private class EntityParts(val body: GlVbo, val legs: List<LegPart>)
+
+    private val entityParts = HashMap<String, EntityParts>()
+
+    private fun buildEntityParts(modelId: String) {
+        val ctx = appContext ?: return
+        val bodyFloats = readAssetFloats(ctx, "models/$modelId/mesh_body.obj")
+        if (bodyFloats.isEmpty()) return
+        val bodyVbo = GlVbo()
+        bodyVbo.uploadStatic(floatsToBuilder(bodyFloats))
+        val legs = ArrayList<LegPart>(4)
+        for (k in 0..3) {
+            val floats = readAssetFloats(ctx, "models/$modelId/mesh_leg$k.obj")
+            if (floats.isEmpty()) continue
+            var maxY = Float.NEGATIVE_INFINITY
+            var i = 1
+            while (i < floats.size) {
+                if (floats[i] > maxY) maxY = floats[i]
+                i += 12
+            }
+            var sx = 0f
+            var sz = 0f
+            var n = 0
+            i = 0
+            while (i + 11 < floats.size) {
+                if (floats[i + 1] > maxY - (maxY * 0.28f).coerceAtLeast(0.05f)) {
+                    sx += floats[i]; sz += floats[i + 2]; n++
+                }
+                i += 12
+            }
+            if (n == 0) continue
+            val vbo = GlVbo()
+            vbo.uploadStatic(floatsToBuilder(floats))
+            legs.add(LegPart(vbo, sx / n, maxY * 0.92f, sz / n))
+        }
+        // диагональные пары шага: сортируем «вперёд-назад, слева-направо»
+        val sorted = legs.sortedWith(compareByDescending<LegPart> { it.pivotZ }.thenBy { it.pivotX })
+        entityParts[modelId] = EntityParts(bodyVbo, sorted)
+    }
+
+    private fun readAssetFloats(ctx: android.content.Context, path: String): FloatArray {
+        val text = try {
+            ctx.assets.open(path).bufferedReader().use { it.readText() }
+        } catch (e: Exception) {
+            ""
+        }
+        return if (text.isEmpty()) FloatArray(0) else ObjParser.parseToExpandedFloats(text)
+    }
+
+    private fun floatsToBuilder(floats: FloatArray): MeshBuilder {
+        val builder = MeshBuilder(floats.size + 64)
+        var i = 0
+        while (i + 11 < floats.size) {
+            builder.addVertex(
+                floats[i], floats[i + 1], floats[i + 2],
+                floats[i + 3], floats[i + 4], floats[i + 5],
+                floats[i + 6], floats[i + 7],
+                floats[i + 8], floats[i + 9], floats[i + 10], floats[i + 11]
+            )
+            i += 12
+        }
+        return builder
+    }
+
+    /** Отрисовка зверя: тело стоит на месте, ноги качаются вокруг тазобедренных пиотов. */
+    private fun drawAnimatedEntity(
+        modelId: String,
+        x: Float,
+        y: Float,
+        z: Float,
+        yawRad: Float,
+        gaitPhase: Float,
+        swingAmp: Float
+    ) {
+        val parts = entityParts[modelId] ?: return
+        val tex = assetTextures[modelId] ?: return
+        val yawDeg = yawRad * 180f / Math.PI.toFloat()
+        // тело
+        Matrix.setIdentityM(modelMatrix, 0)
+        Matrix.translateM(modelMatrix, 0, x, y, z)
+        Matrix.rotateM(modelMatrix, 0, yawDeg, 0f, 1f, 0f)
+        Matrix.multiplyMM(mvpMatrix, 0, vpMatrix, 0, modelMatrix, 0)
+        GLES20.glUniformMatrix4fv(uMvpLoc, 1, false, mvpMatrix, 0)
+        GLES20.glUniformMatrix4fv(uModelLoc, 1, false, modelMatrix, 0)
+        drawVbo(parts.body.vbo, tex, unlit = false, specStrength = 0.22f)
+        // ноги: маятник вокруг пиота, диагональные пары в противофазе
+        for ((idx, leg) in parts.legs.withIndex()) {
+            val phase = gaitPhase + (if (idx == 1 || idx == 2) Math.PI.toFloat() else 0f)
+            val swing = if (swingAmp > 0.001f) sin(phase) * swingAmp else 0f
+            Matrix.setIdentityM(modelMatrix, 0)
+            Matrix.translateM(modelMatrix, 0, x, y, z)
+            Matrix.rotateM(modelMatrix, 0, yawDeg, 0f, 1f, 0f)
+            Matrix.translateM(modelMatrix, 0, leg.pivotX, leg.pivotY, leg.pivotZ)
+            if (swing != 0f) Matrix.rotateM(modelMatrix, 0, swing * 180f / Math.PI.toFloat(), 1f, 0f, 0f)
+            Matrix.translateM(modelMatrix, 0, -leg.pivotX, -leg.pivotY, -leg.pivotZ)
+            Matrix.multiplyMM(mvpMatrix, 0, vpMatrix, 0, modelMatrix, 0)
+            GLES20.glUniformMatrix4fv(uMvpLoc, 1, false, mvpMatrix, 0)
+            GLES20.glUniformMatrix4fv(uModelLoc, 1, false, modelMatrix, 0)
+            drawVbo(leg.vbo, tex, unlit = false, specStrength = 0.22f)
+        }
+        Matrix.setIdentityM(modelMatrix, 0)
+        System.arraycopy(vpMatrix, 0, mvpMatrix, 0, 16)
+        GLES20.glUniformMatrix4fv(uMvpLoc, 1, false, mvpMatrix, 0)
+        GLES20.glUniformMatrix4fv(uModelLoc, 1, false, modelMatrix, 0)
+    }
+
     private fun drawVbo(vbo: GlVbo, textureId: Int, unlit: Boolean, specStrength: Float) {
         if (vbo.bufferId == 0 || vbo.vertexCount <= 0 || textureId == 0) return
         GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
@@ -1463,6 +1745,9 @@ class ForestGlRenderer(
 
         /** Скачок больше этой дистанции считается телепортом. */
         private const val SNAP_DISTANCE_M = 4.0f
+
+        /** Радиан фазы шага лап на метр пути (видимый шаг ~0.7 м). */
+        private const val GAIT_RAD_PER_METER = 9.0f
 
         private val OPAQUE_DRAW_ORDER = arrayOf(
             ProceduralTextureId.WOOD_BARK,
