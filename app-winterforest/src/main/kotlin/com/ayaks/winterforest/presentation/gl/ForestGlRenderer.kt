@@ -10,6 +10,7 @@ import com.ayaks.winterforest.domain.model.GraphicsQuality
 import com.ayaks.winterforest.domain.model.LocationId
 import com.ayaks.winterforest.domain.model.ResourceNode
 import com.ayaks.winterforest.domain.model.WorldObjectKind
+import com.ayaks.winterforest.domain.model.WildlifeKind
 import com.ayaks.winterforest.domain.world.WorldPopulator
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -105,6 +106,13 @@ class ForestGlRenderer(
     private var cachedNodeStateHash: Int = Int.MIN_VALUE
     private val nodeBatches = EnumMap<ProceduralTextureId, GlVbo>(ProceduralTextureId::class.java)
 
+    // Уровень 2.5: Импортированные 3D-модели (Poly Haven: камни, кострище, топор, ветви, растение, деревья)
+    private val assetMeshCache = HashMap<String, FloatArray>()
+    private val assetTextures = HashMap<String, Int>()
+    private val assetPropBatches = HashMap<String, GlVbo>()
+    private var assetPropsBuiltLoc: LocationId? = null
+    private var assetTexturesQuality: GraphicsQuality? = null
+
     // Уровень 3: Быстрые динамические VBO (животные, оружие в руках, пламя, искры, метель) — 0 аллокаций!
     private val dynBuilders = EnumMap<ProceduralTextureId, MeshBuilder>(ProceduralTextureId::class.java)
     private val dynVbos = EnumMap<ProceduralTextureId, GlVbo>(ProceduralTextureId::class.java)
@@ -150,6 +158,12 @@ class ForestGlRenderer(
         staticBatches.values.forEach { it.release() }
         nodeBatches.values.forEach { it.release() }
         dynVbos.values.forEach { it.release() }
+        assetPropBatches.values.forEach { it.release() }
+        assetPropBatches.clear()
+        assetTextures.values.forEach { id -> if (id != 0) GLES20.glDeleteTextures(1, intArrayOf(id), 0) }
+        assetTextures.clear()
+        assetTexturesQuality = null
+        assetPropsBuiltLoc = null
 
         GLES20.glEnable(GLES20.GL_DEPTH_TEST)
         GLES20.glEnable(GLES20.GL_BLEND)
@@ -192,6 +206,7 @@ class ForestGlRenderer(
         }
 
         ensureGpuSceneReady(run, base, quality)
+        ensureAssetPropsReady(loc, quality)
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT or GLES20.GL_DEPTH_BUFFER_BIT)
 
         // 1. Суточное освещение, цвет неба, Северное сияние и плотность дымки
@@ -338,6 +353,10 @@ class ForestGlRenderer(
         nodeBatches[ProceduralTextureId.FIRE_EMBER]?.let {
             drawVbo(it, textures[ProceduralTextureId.FIRE_EMBER] ?: 0, unlit = true, specStrength = 0f)
         }
+        // 6b. Импортированные 3D-модели Poly Haven (камни, кострище, топор, ветви, растение, деревья)
+        for ((modelId, vbo) in assetPropBatches) {
+            drawVbo(vbo, assetTextures[modelId] ?: 0, unlit = false, specStrength = 0.18f)
+        }
 
         // 7. Динамический слой (животные, 3D-оружие в руках, пламя, искры удара, метель) через reusable VBO
         buildAndDrawDynamicFrameLayer(
@@ -352,6 +371,92 @@ class ForestGlRenderer(
             animTimeSec = animTimeSec,
             menuOrbitMode = snap.menuOrbitMode
         )
+    }
+
+    /** Загрузка импортированных моделей и построение статических пропов локации. */
+    private fun ensureAssetPropsReady(loc: LocationId, quality: GraphicsQuality) {
+        val ctx = appContext ?: return
+        if (assetTexturesQuality != quality) {
+            assetTextures.values.forEach { id -> if (id != 0) GLES20.glDeleteTextures(1, intArrayOf(id), 0) }
+            assetTextures.clear()
+            val texRes = quality.textureSize
+            for (id in AssetProps.ALL_MODEL_IDS) {
+                val buf = AssetTextureLibrary.loadRgbaFromAsset(ctx, "models/$id/diff.png", texRes)
+                    ?: continue
+                val texHandle = IntArray(1)
+                GLES20.glGenTextures(1, texHandle, 0)
+                GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, texHandle[0])
+                GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR_MIPMAP_LINEAR)
+                GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
+                GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_REPEAT)
+                GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_REPEAT)
+                GLES20.glTexImage2D(
+                    GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA,
+                    texRes, texRes, 0, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, buf
+                )
+                GLES20.glGenerateMipmap(GLES20.GL_TEXTURE_2D)
+                assetTextures[id] = texHandle[0]
+            }
+            assetTexturesQuality = quality
+        }
+        if (assetPropsBuiltLoc != loc) {
+            rebuildAssetPropsVbo(loc)
+            assetPropsBuiltLoc = loc
+        }
+    }
+
+    private fun rebuildAssetPropsVbo(loc: LocationId) {
+        val ctx = appContext ?: return
+        assetPropBatches.values.forEach { it.release() }
+        assetPropBatches.clear()
+
+        val byModel = HashMap<String, MutableList<AssetProps.Placement>>()
+        for (p in AssetProps.forLocation(loc)) {
+            byModel.getOrPut(p.modelId) { mutableListOf() }.add(p)
+        }
+        // Модели животных строятся в начале координат — позицию задаёт model-матрица при draw
+        for (id in AssetProps.ENTITY_MODEL_IDS) {
+            byModel.getOrPut(id) { mutableListOf() }
+        }
+        for ((modelId, spots0) in byModel) {
+            val spots = if (spots0.isEmpty()) listOf(AssetProps.Placement(modelId, 0f, 0f)) else spots0
+            val floats = assetMeshCache.getOrPut(modelId) {
+                val text = try {
+                    ctx.assets.open("models/$modelId/mesh.obj").bufferedReader().use { it.readText() }
+                } catch (e: Exception) {
+                    ""
+                }
+                if (text.isEmpty()) FloatArray(0) else ObjParser.parseToExpandedFloats(text)
+            }
+            if (floats.isEmpty()) continue
+            val builder = MeshBuilder(floats.size * spots.size + 64)
+            for (p in spots) {
+                val groundY = WorldPopulator.terrainHeight(loc, p.x, p.z)
+                val cos = kotlin.math.cos(p.yawRad)
+                val sin = kotlin.math.sin(p.yawRad)
+                var i = 0
+                while (i + 11 < floats.size) {
+                    val lx = floats[i]; val ly = floats[i + 1]; val lz = floats[i + 2]
+                    val nx = floats[i + 3]; val ny = floats[i + 4]; val nz = floats[i + 5]
+                    val u = floats[i + 6]; val v = floats[i + 7]
+                    val r = floats[i + 8]; val g = floats[i + 9]; val b = floats[i + 10]; val a = floats[i + 11]
+                    builder.addVertex(
+                        p.x + (lx * cos + lz * sin) * p.scale,
+                        groundY + ly * p.scale,
+                        p.z + (-lx * sin + lz * cos) * p.scale,
+                        nx * cos + nz * sin,
+                        ny,
+                        -nx * sin + nz * cos,
+                        u, v,
+                        r * p.tintR, g * p.tintG, b * p.tintB, a
+                    )
+                    i += 12
+                }
+            }
+            val vbo = GlVbo()
+            vbo.uploadStatic(builder)
+            assetPropBatches[modelId] = vbo
+        }
     }
 
     private fun ensureGpuSceneReady(
@@ -413,7 +518,9 @@ class ForestGlRenderer(
         val baseSig = base.shelterLevel * 31 + base.campfireLevel * 7 + base.workbenchLevel * 3 +
             (if (base.thermosInstalledOnBase) 1000 else 0)
         if (staticBuiltLocation != loc || staticBuiltQuality != quality || staticBuiltBaseSig != baseSig) {
-            val terrainBuilder = MeshBuilder.buildTerrainIntoBuilder(loc, halfExtent = 48f, steps = quality.terrainSteps)
+            // На Базовой поляне — высокая сетка (128 шагов) под импортированный ландшафт
+            val terrainSteps = if (loc == LocationId.BASE_CLEARING) 128 else quality.terrainSteps
+            val terrainBuilder = MeshBuilder.buildTerrainIntoBuilder(loc, halfExtent = 48f, steps = terrainSteps)
             terrainVbo.uploadStatic(terrainBuilder)
 
             if (loc == LocationId.FROZEN_LAKE) {
@@ -543,12 +650,7 @@ class ForestGlRenderer(
         } else if (loc == LocationId.HUNTERS_CABIN) {
             val cabX = 7.2f; val cabZ = 8.8f
             val cabY = WorldPopulator.terrainHeight(loc, cabX, cabZ)
-            addDetailedLogCabin(
-                timber = timber, bark = bark, stone = stone, snowRoof = builders[ProceduralTextureId.SNOW]!!,
-                metal = metal, glow = fire, shadow = foliage,
-                cx = cabX, baseY = cabY, cz = cabZ,
-                width = 5.4f, wallHeight = 2.85f, depth = 4.8f
-            )
+            // Зимовье рисуется импортированной 3D-моделью (cabin_wood/bark/stone/shingle/burned)
             // Сушильные козлы охотника возле зимовья
             bark.addTaperedCylinder(cabX - 4.2f, cabY, cabZ - 1.2f, cabX - 4.2f, cabY + 2.0f, cabZ - 0.2f, 0.08f, 0.06f, 6)
             bark.addTaperedCylinder(cabX - 4.2f, cabY, cabZ + 0.8f, cabX - 4.2f, cabY + 2.0f, cabZ - 0.2f, 0.08f, 0.06f, 6)
@@ -795,6 +897,7 @@ class ForestGlRenderer(
         }
 
         // 3. Живая 3D-фауна (зайцы, северные олени с рогами, таёжные волки) с отсечением по пирамиде обзора
+        val importedBeasts = ArrayList<Triple<WildlifeKind, FloatArray, Float>>(4)
         for ((idx, beast) in run.currentWildlife().withIndex()) {
             if (!beast.isAlive) continue
             val dx = beast.x - camX
@@ -807,6 +910,12 @@ class ForestGlRenderer(
                 if (dotFwd < -0.35f) continue // Frustum culling за спиной камеры!
             }
             val gy = WorldPopulator.terrainHeight(loc, beast.x, beast.z)
+            if (beast.kind == WildlifeKind.TIMBER_WOLF || beast.kind == WildlifeKind.NORTHERN_DEER) {
+                // Импортированные модели волка и оленя (рисуются с model-матрицей ниже)
+                fur.addShadowDisc(beast.x, gy, beast.z, if (beast.kind == WildlifeKind.TIMBER_WOLF) 1.05f else 1.3f, 0.34f)
+                importedBeasts.add(Triple(beast.kind, floatArrayOf(beast.x, gy, beast.z), beast.headingRad))
+                continue
+            }
             MeshBuilder.addWildlifeCreature(
                 furBuilder = fur,
                 barkHornBuilder = bark,
@@ -888,6 +997,17 @@ class ForestGlRenderer(
             val fireVbo = dynVbos[ProceduralTextureId.FIRE_EMBER]!!
             reusableUploadBuffer = fireVbo.uploadDynamic(fireBuilder, reusableUploadBuffer)
             drawVbo(fireVbo, textures[ProceduralTextureId.FIRE_EMBER] ?: 0, unlit = true, specStrength = 0f)
+        }
+
+        // Импортированные 3D-модели животных (волк/олень) — отдельные draw с model-матрицей
+        for ((kind, pos, heading) in importedBeasts) {
+            val modelId = if (kind == WildlifeKind.TIMBER_WOLF) "wolf_body" else "deer_body"
+            drawModelInstance(
+                modelId = modelId,
+                x = pos[0], y = pos[1], z = pos[2],
+                yawRad = -heading + Math.PI.toFloat() * 0.5f,
+                scale = 1f
+            )
         }
     }
 
@@ -1174,6 +1294,25 @@ class ForestGlRenderer(
         GLES20.glUniform3fv(uFogColLoc, 1, fogRgb, 0)
         GLES20.glUniform1f(uFogNearLoc, fogNear)
         GLES20.glUniform1f(uFogFarLoc, fogFar)
+    }
+
+    /** Разовая отрисовка импортированной модели в точке мира (волк/олень и т.п.). */
+    private fun drawModelInstance(modelId: String, x: Float, y: Float, z: Float, yawRad: Float, scale: Float) {
+        val vbo = assetPropBatches[modelId] ?: return
+        val tex = assetTextures[modelId] ?: return
+        Matrix.setIdentityM(modelMatrix, 0)
+        Matrix.translateM(modelMatrix, 0, x, y, z)
+        Matrix.rotateM(modelMatrix, 0, yawRad * 180f / Math.PI.toFloat(), 0f, 1f, 0f)
+        if (scale != 1f) Matrix.scaleM(modelMatrix, 0, scale, scale, scale)
+        Matrix.multiplyMM(mvpMatrix, 0, vpMatrix, 0, modelMatrix, 0)
+        GLES20.glUniformMatrix4fv(uMvpLoc, 1, false, mvpMatrix, 0)
+        GLES20.glUniformMatrix4fv(uModelLoc, 1, false, modelMatrix, 0)
+        drawVbo(vbo, tex, unlit = false, specStrength = 0.22f)
+        // восстановить identity для последующих отрисовок
+        Matrix.setIdentityM(modelMatrix, 0)
+        System.arraycopy(vpMatrix, 0, mvpMatrix, 0, 16)
+        GLES20.glUniformMatrix4fv(uMvpLoc, 1, false, mvpMatrix, 0)
+        GLES20.glUniformMatrix4fv(uModelLoc, 1, false, modelMatrix, 0)
     }
 
     private fun drawVbo(vbo: GlVbo, textureId: Int, unlit: Boolean, specStrength: Float) {
