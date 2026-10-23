@@ -278,7 +278,7 @@ def extract_objects(path, out_dir, name, y_up=True, verbose=False):
             ob_name = ob_name[2:]
         data_ptr = rp(ob.data, offs["data"][0]) if "data" in offs else 0
         me_blk = blocks_by_ptr.get(data_ptr)
-        if me_blk is None:
+        if me_blk is None or block_type(dna, me_blk) != "Mesh":
             continue
         info = parse_mesh(me_blk, dna, blocks_by_ptr, end, ptr_size, verbose)
         if not info or not info["tris"]:
@@ -340,7 +340,7 @@ def parse_mesh(mb, dna, blocks_by_ptr, end, ptr_size, verbose):
     def read_ptr(off):
         return struct.unpack_from(end + ("Q" if ptr_size == 8 else "I"), d, off)[0]
 
-    layers = {}  # name -> (type_code, data_block)
+    layers = {}  # fld -> list[(name, type_code, data_block)]
     for fld in ("vdata", "edata", "fdata", "pdata", "ldata"):
         if fld not in offs:
             continue
@@ -353,6 +353,7 @@ def parse_mesh(mb, dna, blocks_by_ptr, end, ptr_size, verbose):
         cdl_o = field_offsets(dna, "CustomDataLayer")
         t_idx = next(i for i, t in enumerate(dna.types) if t == "CustomDataLayer")
         stride = dna.tlens[t_idx]
+        entries = []
         for i in range(totlayer):
             b = i * stride
             typ = i32(lay_blk.data, end, b + cdl_o["type"][0])
@@ -362,7 +363,8 @@ def parse_mesh(mb, dna, blocks_by_ptr, end, ptr_size, verbose):
                 .split(b"\x00")[0].decode(errors="replace")
             blk = blocks_by_ptr.get(dp)
             if blk is not None:
-                layers[nm] = (typ, blk)
+                entries.append((nm, typ, blk))
+        layers[fld] = entries
 
     def legacy(fld, tname):
         if fld in offs:
@@ -372,16 +374,23 @@ def parse_mesh(mb, dna, blocks_by_ptr, end, ptr_size, verbose):
                 return blk
         return None
 
-    def layer_data(*names):
-        for n in names:
-            if n in layers:
-                return layers[n][1]
+    def find_layer(fld, names, legacy_type):
+        """Named generic layer (4.x) or legacy typed layer (2.7x)."""
+        for nm, typ, blk in layers.get(fld, []):
+            if nm in names and legacy_type is None:
+                return blk
+            if nm in names:
+                return blk
+        for nm, typ, blk in layers.get(fld, []):
+            if legacy_type and block_type(dna, blk) == legacy_type:
+                return blk
         return None
 
-    mv = layer_data("position") or legacy("mvert", "MVert")
-    ml = layer_data(".corner_vert") or legacy("mloop", "MLoop")
-    mu = layer_data("UVMap") or legacy("mloopuv", "MLoopUV")
-    mp_legacy = legacy("mpoly", "MPoly")
+    mv = find_layer("vdata", ("position",), "MVert") or legacy("mvert", "MVert")
+    ml = find_layer("ldata", (".corner_vert",), "MLoop") or legacy("mloop", "MLoop")
+    mu = find_layer("ldata", ("UVMap",), "MLoopUV") or legacy("mloopuv", "MLoopUV")
+    mp_legacy = legacy("mpoly", "MPoly") or find_layer("pdata", (), "MPoly")
+    mat_layer = find_layer("pdata", ("material_index",), None)
 
     if mv is None or ml is None:
         if verbose:
@@ -433,7 +442,7 @@ def parse_mesh(mb, dna, blocks_by_ptr, end, ptr_size, verbose):
         if "poly_offset_indices" in offs:
             p = read_ptr(offs["poly_offset_indices"][0])
             off_blk = blocks_by_ptr.get(p)
-        mats = layer_data("material_index", "material_index\0")
+        mats = mat_layer
         mat_arr = mats.data if mats is not None else None
         if off_blk is not None:
             n = min(totpoly + 1, off_blk.size // 4)

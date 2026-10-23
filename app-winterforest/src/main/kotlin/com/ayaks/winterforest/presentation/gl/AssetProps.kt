@@ -23,8 +23,13 @@ object AssetProps {
     /** Все модели, которые нужно загрузить из assets/models/. */
     val ALL_MODEL_IDS = listOf(
         "rock_09", "rock_moss_a", "rock_moss_b", "fire_pit", "wooden_axe",
-        "dry_branches_a", "dry_branches_b", "calathea", "tree_bark", "tree_leaves"
+        "dry_branches_a", "dry_branches_b", "calathea", "tree_bark", "tree_leaves",
+        "cabin_wood", "cabin_bark", "cabin_stone", "cabin_shingle", "cabin_burned",
+        "wolf_body", "deer_body"
     )
+
+    /** Модели животных: VBO строится в начале координат, позиция задаётся model-матрицей. */
+    val ENTITY_MODEL_IDS = listOf("wolf_body", "deer_body")
 
     /** Тусклые/тёплые тонировки под северную палитру (листва холоднее, кора теплее). */
     private fun placements(loc: LocationId): List<Placement> = when (loc) {
@@ -42,6 +47,11 @@ object AssetProps {
             Placement("tree_leaves", 13.2f, -8.4f, 2.4f, 0.92f, 0.58f, 0.74f, 0.70f)
         )
         LocationId.HUNTERS_CABIN -> listOf(
+            Placement("cabin_wood", 7.2f, 8.8f, 3.6f, 0.78f),
+            Placement("cabin_bark", 7.2f, 8.8f, 3.6f, 0.78f),
+            Placement("cabin_stone", 7.2f, 8.8f, 3.6f, 0.78f),
+            Placement("cabin_shingle", 7.2f, 8.8f, 3.6f, 0.78f),
+            Placement("cabin_burned", 7.2f, 8.8f, 3.6f, 0.78f),
             Placement("fire_pit", 4.5f, 6.3f, 1.1f, 0.92f),
             Placement("wooden_axe", 8.35f, 7.0f, 2.6f, 1.0f),
             Placement("calathea", 6.15f, 7.15f, 0.7f, 1.0f),

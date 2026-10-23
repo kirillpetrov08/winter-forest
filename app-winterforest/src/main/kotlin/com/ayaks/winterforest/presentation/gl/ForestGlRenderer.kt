@@ -10,6 +10,7 @@ import com.ayaks.winterforest.domain.model.GraphicsQuality
 import com.ayaks.winterforest.domain.model.LocationId
 import com.ayaks.winterforest.domain.model.ResourceNode
 import com.ayaks.winterforest.domain.model.WorldObjectKind
+import com.ayaks.winterforest.domain.model.WildlifeKind
 import com.ayaks.winterforest.domain.world.WorldPopulator
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -413,7 +414,12 @@ class ForestGlRenderer(
         for (p in AssetProps.forLocation(loc)) {
             byModel.getOrPut(p.modelId) { mutableListOf() }.add(p)
         }
-        for ((modelId, spots) in byModel) {
+        // Модели животных строятся в начале координат — позицию задаёт model-матрица при draw
+        for (id in AssetProps.ENTITY_MODEL_IDS) {
+            byModel.getOrPut(id) { mutableListOf() }
+        }
+        for ((modelId, spots0) in byModel) {
+            val spots = if (spots0.isEmpty()) listOf(AssetProps.Placement(modelId, 0f, 0f)) else spots0
             val floats = assetMeshCache.getOrPut(modelId) {
                 val text = try {
                     ctx.assets.open("models/$modelId/mesh.obj").bufferedReader().use { it.readText() }
@@ -642,12 +648,7 @@ class ForestGlRenderer(
         } else if (loc == LocationId.HUNTERS_CABIN) {
             val cabX = 7.2f; val cabZ = 8.8f
             val cabY = WorldPopulator.terrainHeight(loc, cabX, cabZ)
-            addDetailedLogCabin(
-                timber = timber, bark = bark, stone = stone, snowRoof = builders[ProceduralTextureId.SNOW]!!,
-                metal = metal, glow = fire, shadow = foliage,
-                cx = cabX, baseY = cabY, cz = cabZ,
-                width = 5.4f, wallHeight = 2.85f, depth = 4.8f
-            )
+            // Зимовье рисуется импортированной 3D-моделью (cabin_wood/bark/stone/shingle/burned)
             // Сушильные козлы охотника возле зимовья
             bark.addTaperedCylinder(cabX - 4.2f, cabY, cabZ - 1.2f, cabX - 4.2f, cabY + 2.0f, cabZ - 0.2f, 0.08f, 0.06f, 6)
             bark.addTaperedCylinder(cabX - 4.2f, cabY, cabZ + 0.8f, cabX - 4.2f, cabY + 2.0f, cabZ - 0.2f, 0.08f, 0.06f, 6)
@@ -894,6 +895,7 @@ class ForestGlRenderer(
         }
 
         // 3. Живая 3D-фауна (зайцы, северные олени с рогами, таёжные волки) с отсечением по пирамиде обзора
+        val importedBeasts = ArrayList<Triple<WildlifeKind, FloatArray, Float>>(4)
         for ((idx, beast) in run.currentWildlife().withIndex()) {
             if (!beast.isAlive) continue
             val dx = beast.x - camX
@@ -906,6 +908,12 @@ class ForestGlRenderer(
                 if (dotFwd < -0.35f) continue // Frustum culling за спиной камеры!
             }
             val gy = WorldPopulator.terrainHeight(loc, beast.x, beast.z)
+            if (beast.kind == WildlifeKind.TIMBER_WOLF || beast.kind == WildlifeKind.NORTHERN_DEER) {
+                // Импортированные модели волка и оленя (рисуются с model-матрицей ниже)
+                fur.addShadowDisc(beast.x, gy, beast.z, if (beast.kind == WildlifeKind.TIMBER_WOLF) 1.05f else 1.3f, 0.34f)
+                importedBeasts.add(Triple(beast.kind, floatArrayOf(beast.x, gy, beast.z), beast.headingRad))
+                continue
+            }
             MeshBuilder.addWildlifeCreature(
                 furBuilder = fur,
                 barkHornBuilder = bark,
@@ -987,6 +995,17 @@ class ForestGlRenderer(
             val fireVbo = dynVbos[ProceduralTextureId.FIRE_EMBER]!!
             reusableUploadBuffer = fireVbo.uploadDynamic(fireBuilder, reusableUploadBuffer)
             drawVbo(fireVbo, textures[ProceduralTextureId.FIRE_EMBER] ?: 0, unlit = true, specStrength = 0f)
+        }
+
+        // Импортированные 3D-модели животных (волк/олень) — отдельные draw с model-матрицей
+        for ((kind, pos, heading) in importedBeasts) {
+            val modelId = if (kind == WildlifeKind.TIMBER_WOLF) "wolf_body" else "deer_body"
+            drawModelInstance(
+                modelId = modelId,
+                x = pos[0], y = pos[1], z = pos[2],
+                yawRad = -heading + Math.PI.toFloat() * 0.5f,
+                scale = 1f
+            )
         }
     }
 
@@ -1273,6 +1292,25 @@ class ForestGlRenderer(
         GLES20.glUniform3fv(uFogColLoc, 1, fogRgb, 0)
         GLES20.glUniform1f(uFogNearLoc, fogNear)
         GLES20.glUniform1f(uFogFarLoc, fogFar)
+    }
+
+    /** Разовая отрисовка импортированной модели в точке мира (волк/олень и т.п.). */
+    private fun drawModelInstance(modelId: String, x: Float, y: Float, z: Float, yawRad: Float, scale: Float) {
+        val vbo = assetPropBatches[modelId] ?: return
+        val tex = assetTextures[modelId] ?: return
+        Matrix.setIdentityM(modelMatrix, 0)
+        Matrix.translateM(modelMatrix, 0, x, y, z)
+        Matrix.rotateM(modelMatrix, 0, yawRad * 180f / Math.PI.toFloat(), 0f, 1f, 0f)
+        if (scale != 1f) Matrix.scaleM(modelMatrix, 0, scale, scale, scale)
+        Matrix.multiplyMM(mvpMatrix, 0, vpMatrix, 0, modelMatrix, 0)
+        GLES20.glUniformMatrix4fv(uMvpLoc, 1, false, mvpMatrix, 0)
+        GLES20.glUniformMatrix4fv(uModelLoc, 1, false, modelMatrix, 0)
+        drawVbo(vbo, tex, unlit = false, specStrength = 0.22f)
+        // восстановить identity для последующих отрисовок
+        Matrix.setIdentityM(modelMatrix, 0)
+        System.arraycopy(vpMatrix, 0, mvpMatrix, 0, 16)
+        GLES20.glUniformMatrix4fv(uMvpLoc, 1, false, mvpMatrix, 0)
+        GLES20.glUniformMatrix4fv(uModelLoc, 1, false, modelMatrix, 0)
     }
 
     private fun drawVbo(vbo: GlVbo, textureId: Int, unlit: Boolean, specStrength: Float) {
