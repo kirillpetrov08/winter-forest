@@ -42,13 +42,23 @@ object AssetTextureLibrary {
         tintR: Float = 1f,
         tintG: Float = 1f,
         tintB: Float = 1f
+    ): ByteBuffer? = loadRgbaFromAsset(context, "textures/$name.png", outSize, tintR, tintG, tintB)
+
+    /** Загрузка произвольного PNG из assets по полному пути (модели: models/<id>/diff.png). */
+    fun loadRgbaFromAsset(
+        context: Context,
+        assetPath: String,
+        outSize: Int,
+        tintR: Float = 1f,
+        tintG: Float = 1f,
+        tintB: Float = 1f
     ): ByteBuffer? {
         return try {
             val opts = BitmapFactory.Options().apply {
                 inScaled = false
                 inPreferredConfig = Bitmap.Config.ARGB_8888
             }
-            val raw = context.assets.open("textures/$name.png").use { stream ->
+            val raw = context.assets.open(assetPath).use { stream ->
                 BitmapFactory.decodeStream(stream, null, opts)
             } ?: return null
             val bmp = if (raw.width != outSize || raw.height != outSize) {
