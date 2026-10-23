@@ -1646,7 +1646,7 @@ class ForestGlRenderer(
         Matrix.multiplyMM(mvpMatrix, 0, vpMatrix, 0, modelMatrix, 0)
         GLES20.glUniformMatrix4fv(uMvpLoc, 1, false, mvpMatrix, 0)
         GLES20.glUniformMatrix4fv(uModelLoc, 1, false, modelMatrix, 0)
-        drawVbo(parts.body.vbo, tex, unlit = false, specStrength = 0.22f)
+        drawVbo(parts.body, tex, unlit = false, specStrength = 0.22f)
         // ноги: маятник вокруг пиота, диагональные пары в противофазе
         for ((idx, leg) in parts.legs.withIndex()) {
             val phase = gaitPhase + (if (idx == 1 || idx == 2) Math.PI.toFloat() else 0f)
