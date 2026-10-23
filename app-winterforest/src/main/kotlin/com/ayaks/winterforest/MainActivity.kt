@@ -26,6 +26,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.ayaks.winterforest.data.ads.YandexAdsPrivacyBootstrapper
 import com.ayaks.winterforest.domain.model.GameRunState
 import com.ayaks.winterforest.presentation.gl.ForestGlSurfaceView
+import com.ayaks.winterforest.presentation.gl.FramePacing
 import com.ayaks.winterforest.presentation.gl.RenderSceneSnapshot
 import com.ayaks.winterforest.presentation.navigation.AppDestination
 import com.ayaks.winterforest.presentation.ui.screens.AboutScreen
@@ -58,6 +59,8 @@ class MainActivity : ComponentActivity() {
         requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
         enableEdgeToEdge()
         configureImmersiveLandscapeWindow()
+        // Снимаем системный лимит 60 FPS: самый быстрый режим дисплея (90/120/144 Гц)
+        requestHighRefreshRate()
 
         setContent {
             WinterForestTheme {
@@ -70,6 +73,35 @@ class MainActivity : ComponentActivity() {
         super.onWindowFocusChanged(hasFocus)
         if (hasFocus) {
             configureImmersiveLandscapeWindow()
+            // Некоторые прошивки сбрасывают режим дисплея после сворачивания
+            requestHighRefreshRate()
+        }
+    }
+
+    /**
+     * Переключает окно на самый быстрый режим дисплея с текущим разрешением —
+     * иначе Android держит классический лимит в 60 FPS даже на 120-герцевых
+     * панелях. Вызывается при старте и при возврате фокуса.
+     */
+    private fun requestHighRefreshRate() {
+        val targetDisplay = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            this.display
+        } else {
+            @Suppress("DEPRECATION")
+            windowManager.defaultDisplay
+        } ?: return
+        val currentMode = targetDisplay.mode ?: return
+        val mode = FramePacing.pickFastestMode(
+            modes = targetDisplay.supportedModes.map {
+                FramePacing.DisplayModeInfo(it.modeId, it.physicalWidth, it.physicalHeight, it.refreshRate)
+            },
+            currentWidth = currentMode.physicalWidth,
+            currentHeight = currentMode.physicalHeight
+        ) ?: return
+        if (mode.id != currentMode.modeId && mode.refreshRate > currentMode.refreshRate) {
+            val attrs = window.attributes
+            attrs.preferredDisplayModeId = mode.id
+            window.attributes = attrs
         }
     }
 

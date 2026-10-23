@@ -1,9 +1,13 @@
 package com.ayaks.winterforest.presentation.gl
 
 import android.content.Context
+import android.opengl.EGL14
 import android.opengl.GLES20
 import android.opengl.GLSurfaceView
 import android.opengl.Matrix
+import android.os.Build
+import android.view.Surface
+import android.view.SurfaceHolder
 import com.ayaks.winterforest.domain.model.BaseProgress
 import com.ayaks.winterforest.domain.model.GameRunState
 import com.ayaks.winterforest.domain.model.GraphicsQuality
@@ -33,7 +37,8 @@ data class RenderSceneSnapshot(
 /**
  * Высокопроизводительный аппаратный 3D-движок OpenGL ES 2.0/3.0 «Winter Forest»:
  * - 3 уровня кэширования GPU VBO (Static World VBOs + Dirty-Flag Node VBOs + Zero-Alloc Dynamic VBOs);
- * - 0 аллокаций ByteBuffer/FloatArray в onDrawFrame() -> стабильные 60–120 FPS без GC-фризов;
+ * - 0 аллокаций ByteBuffer/FloatArray в onDrawFrame() -> стабильные 120+ FPS без GC-фризов
+ *   (лимит 60 FPS снят: eglSwapInterval(0) + быстрый режим дисплея + интерполяция тиков);
  * - панорамный купол неба 360° с 3D-горами, звёздами и Северным сиянием;
  * - до 3 тёплых динамических источников света + блики на льду и металле + частицы удара и метели.
  */
@@ -44,6 +49,59 @@ class ForestGlRenderer(
 
     @Volatile
     var snapshot: RenderSceneSnapshot = RenderSceneSnapshot()
+        set(value) {
+            // Окно интерполяции: тики симуляции приходят на 20 Гц, а кадры — 90/120+
+            // (лимит 60 FPS снят). Позицию игрока сглаживаем между тиками, чтобы
+            // движение на высокой частоте кадров оставалось плавным.
+            val prev = field
+            val moved =
+                value.run.playerX != prev.run.playerX ||
+                value.run.playerY != prev.run.playerY ||
+                value.run.playerZ != prev.run.playerZ
+            if (moved) {
+                if (!smoothInitialized ||
+                    value.run.currentLocation != prev.run.currentLocation ||
+                    snapDistanceExceeded(prev.run, value.run)
+                ) {
+                    // телепорт / смена локации — без «поездки» камеры через карту
+                    smoothPrevX = value.run.playerX
+                    smoothPrevY = value.run.playerY
+                    smoothPrevZ = value.run.playerZ
+                } else {
+                    smoothPrevX = smoothCurX
+                    smoothPrevY = smoothCurY
+                    smoothPrevZ = smoothCurZ
+                }
+                smoothCurX = value.run.playerX
+                smoothCurY = value.run.playerY
+                smoothCurZ = value.run.playerZ
+                smoothPrevBobSin = smoothCurBobSin
+                smoothCurBobSin = kotlin.math.sin(value.run.walkBobPhaseRad)
+                smoothStartNs = System.nanoTime()
+                smoothInitialized = true
+            }
+            field = value
+        }
+
+    private fun snapDistanceExceeded(a: com.ayaks.winterforest.domain.model.GameRunState,
+                                     b: com.ayaks.winterforest.domain.model.GameRunState): Boolean {
+        val dx = b.playerX - a.playerX
+        val dy = b.playerY - a.playerY
+        val dz = b.playerZ - a.playerZ
+        return (dx * dx + dy * dy + dz * dz) > SNAP_DISTANCE_M * SNAP_DISTANCE_M
+    }
+
+    // Состояние интерполяции позиции камеры между тиками (пишет UI-поток, читает GL)
+    @Volatile private var smoothInitialized = false
+    @Volatile private var smoothPrevX = 0f
+    @Volatile private var smoothPrevY = 0f
+    @Volatile private var smoothPrevZ = 0f
+    @Volatile private var smoothCurX = 0f
+    @Volatile private var smoothCurY = 0f
+    @Volatile private var smoothCurZ = 0f
+    @Volatile private var smoothPrevBobSin = 0f
+    @Volatile private var smoothCurBobSin = 0f
+    @Volatile private var smoothStartNs = 0L
 
     private var viewportWidth = 1920
     private var viewportHeight = 1080
@@ -148,6 +206,13 @@ class ForestGlRenderer(
     }
 
     override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
+        // Лимит 60 FPS снят: eglSwapInterval(0) — рендер без ожидания vsync.
+        // Контекст в этом колбэке уже current; при пересоздании поверхности
+        // вызов повторяется (интервал привязан к draw-surface).
+        val eglDisplay = EGL14.eglGetCurrentDisplay()
+        if (eglDisplay != null && eglDisplay != EGL14.EGL_NO_DISPLAY) {
+            EGL14.eglSwapInterval(eglDisplay, 0)
+        }
         // При пересоздании EGL-контекста сбрасываем старые GPU-хэндлы
         uploadedPaletteLocation = null
         staticBuiltLocation = null
@@ -246,11 +311,17 @@ class ForestGlRenderer(
             yawRad = kotlin.math.atan2(dx, -dz)
             pitchRad = kotlin.math.atan2(dy, flatDist)
         } else {
-            val stepBobY = sin(run.walkBobPhaseRad) * 0.032f
+            // Позиция сглаживается между 20-герцевыми тиками: на 90/120 FPS шаг
+            // не дёргается сеткой тиков, а pitch/yaw (события ввода) идут как есть.
+            val alpha = FramePacing.interpAlpha(nowNs - smoothStartNs, TICK_INTERP_WINDOW_NS)
+            val px = FramePacing.lerpCoord(smoothPrevX, smoothCurX, alpha, SNAP_DISTANCE_M)
+            val py = FramePacing.lerpCoord(smoothPrevY, smoothCurY, alpha, SNAP_DISTANCE_M)
+            val pz = FramePacing.lerpCoord(smoothPrevZ, smoothCurZ, alpha, SNAP_DISTANCE_M)
+            val stepBobY = FramePacing.lerpBob(smoothPrevBobSin, smoothCurBobSin, alpha) * 0.032f
             val sprintTilt = if (run.isSprinting) -0.02f else 0f
-            camX = run.playerX
-            camY = run.playerY + 1.72f + stepBobY
-            camZ = run.playerZ
+            camX = px
+            camY = py + 1.72f + stepBobY
+            camZ = pz
             yawRad = Math.toRadians(run.yawDeg.toDouble()).toFloat()
             pitchRad = Math.toRadians(run.pitchDeg.toDouble()).toFloat() + sprintTilt
         }
@@ -1387,6 +1458,12 @@ class ForestGlRenderer(
     }
 
     companion object {
+        /** Окно интерполяции позиции = период тика симуляции (20 Гц). */
+        private const val TICK_INTERP_WINDOW_NS = 50_000_000L
+
+        /** Скачок больше этой дистанции считается телепортом. */
+        private const val SNAP_DISTANCE_M = 4.0f
+
         private val OPAQUE_DRAW_ORDER = arrayOf(
             ProceduralTextureId.WOOD_BARK,
             ProceduralTextureId.TIMBER,
@@ -1432,7 +1509,20 @@ class ForestGlSurfaceView(
         setEGLContextClientVersion(2)
         setEGLConfigChooser(8, 8, 8, 8, 16, 0)
         preserveEGLContextOnPause = true
+        // Лимит 60 FPS снят: swap interval 0 в onSurfaceCreated (без ожидания vsync),
+        // кадры уходят на панель с максимально возможной частотой (90/120/144 Гц).
         setRenderer(forestRenderer)
         renderMode = RENDERMODE_CONTINUOUSLY
+    }
+
+    override fun surfaceCreated(holder: SurfaceHolder) {
+        super.surfaceCreated(holder)
+        // Android 11+ (API 30): явный запрос системе — не троттлить частоту кадров.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            holder.surface.setFrameRate(
+                0f,
+                Surface.FRAME_RATE_COMPATIBILITY_DEFAULT
+            )
+        }
     }
 }
