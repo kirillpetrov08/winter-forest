@@ -105,6 +105,13 @@ class ForestGlRenderer(
     private var cachedNodeStateHash: Int = Int.MIN_VALUE
     private val nodeBatches = EnumMap<ProceduralTextureId, GlVbo>(ProceduralTextureId::class.java)
 
+    // Уровень 2.5: Импортированные 3D-модели (Poly Haven: камни, кострище, топор, ветви, растение, деревья)
+    private val assetMeshCache = HashMap<String, FloatArray>()
+    private val assetTextures = HashMap<String, Int>()
+    private val assetPropBatches = HashMap<String, GlVbo>()
+    private var assetPropsBuiltLoc: LocationId? = null
+    private var assetTexturesQuality: GraphicsQuality? = null
+
     // Уровень 3: Быстрые динамические VBO (животные, оружие в руках, пламя, искры, метель) — 0 аллокаций!
     private val dynBuilders = EnumMap<ProceduralTextureId, MeshBuilder>(ProceduralTextureId::class.java)
     private val dynVbos = EnumMap<ProceduralTextureId, GlVbo>(ProceduralTextureId::class.java)
@@ -150,6 +157,12 @@ class ForestGlRenderer(
         staticBatches.values.forEach { it.release() }
         nodeBatches.values.forEach { it.release() }
         dynVbos.values.forEach { it.release() }
+        assetPropBatches.values.forEach { it.release() }
+        assetPropBatches.clear()
+        assetTextures.values.forEach { id -> if (id != 0) GLES20.glDeleteTextures(1, intArrayOf(id), 0) }
+        assetTextures.clear()
+        assetTexturesQuality = null
+        assetPropsBuiltLoc = null
 
         GLES20.glEnable(GLES20.GL_DEPTH_TEST)
         GLES20.glEnable(GLES20.GL_BLEND)
@@ -192,6 +205,7 @@ class ForestGlRenderer(
         }
 
         ensureGpuSceneReady(run, base, quality)
+        ensureAssetPropsReady(loc, quality)
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT or GLES20.GL_DEPTH_BUFFER_BIT)
 
         // 1. Суточное освещение, цвет неба, Северное сияние и плотность дымки
@@ -338,6 +352,10 @@ class ForestGlRenderer(
         nodeBatches[ProceduralTextureId.FIRE_EMBER]?.let {
             drawVbo(it, textures[ProceduralTextureId.FIRE_EMBER] ?: 0, unlit = true, specStrength = 0f)
         }
+        // 6b. Импортированные 3D-модели Poly Haven (камни, кострище, топор, ветви, растение, деревья)
+        for ((modelId, vbo) in assetPropBatches) {
+            drawVbo(vbo, assetTextures[modelId] ?: 0, unlit = false, specStrength = 0.18f)
+        }
 
         // 7. Динамический слой (животные, 3D-оружие в руках, пламя, искры удара, метель) через reusable VBO
         buildAndDrawDynamicFrameLayer(
@@ -352,6 +370,87 @@ class ForestGlRenderer(
             animTimeSec = animTimeSec,
             menuOrbitMode = snap.menuOrbitMode
         )
+    }
+
+    /** Загрузка импортированных моделей и построение статических пропов локации. */
+    private fun ensureAssetPropsReady(loc: LocationId, quality: GraphicsQuality) {
+        val ctx = appContext ?: return
+        if (assetTexturesQuality != quality) {
+            assetTextures.values.forEach { id -> if (id != 0) GLES20.glDeleteTextures(1, intArrayOf(id), 0) }
+            assetTextures.clear()
+            val texRes = quality.textureSize
+            for (id in AssetProps.ALL_MODEL_IDS) {
+                val buf = AssetTextureLibrary.loadRgbaFromAsset(ctx, "models/$id/diff.png", texRes)
+                    ?: continue
+                val texHandle = IntArray(1)
+                GLES20.glGenTextures(1, texHandle, 0)
+                GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, texHandle[0])
+                GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR_MIPMAP_LINEAR)
+                GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
+                GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_REPEAT)
+                GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_REPEAT)
+                GLES20.glTexImage2D(
+                    GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA,
+                    texRes, texRes, 0, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, buf
+                )
+                GLES20.glGenerateMipmap(GLES20.GL_TEXTURE_2D)
+                assetTextures[id] = texHandle[0]
+            }
+            assetTexturesQuality = quality
+        }
+        if (assetPropsBuiltLoc != loc) {
+            rebuildAssetPropsVbo(loc)
+            assetPropsBuiltLoc = loc
+        }
+    }
+
+    private fun rebuildAssetPropsVbo(loc: LocationId) {
+        val ctx = appContext ?: return
+        assetPropBatches.values.forEach { it.release() }
+        assetPropBatches.clear()
+
+        val byModel = HashMap<String, MutableList<AssetProps.Placement>>()
+        for (p in AssetProps.forLocation(loc)) {
+            byModel.getOrPut(p.modelId) { mutableListOf() }.add(p)
+        }
+        for ((modelId, spots) in byModel) {
+            val floats = assetMeshCache.getOrPut(modelId) {
+                val text = try {
+                    ctx.assets.open("models/$modelId/mesh.obj").bufferedReader().use { it.readText() }
+                } catch (e: Exception) {
+                    ""
+                }
+                if (text.isEmpty()) FloatArray(0) else ObjParser.parseToExpandedFloats(text)
+            }
+            if (floats.isEmpty()) continue
+            val builder = MeshBuilder(floats.size * spots.size + 64)
+            for (p in spots) {
+                val groundY = WorldPopulator.terrainHeight(loc, p.x, p.z)
+                val cos = kotlin.math.cos(p.yawRad)
+                val sin = kotlin.math.sin(p.yawRad)
+                var i = 0
+                while (i + 11 < floats.size) {
+                    val lx = floats[i]; val ly = floats[i + 1]; val lz = floats[i + 2]
+                    val nx = floats[i + 3]; val ny = floats[i + 4]; val nz = floats[i + 5]
+                    val u = floats[i + 6]; val v = floats[i + 7]
+                    val r = floats[i + 8]; val g = floats[i + 9]; val b = floats[i + 10]; val a = floats[i + 11]
+                    builder.addVertex(
+                        p.x + (lx * cos + lz * sin) * p.scale,
+                        groundY + ly * p.scale,
+                        p.z + (-lx * sin + lz * cos) * p.scale,
+                        nx * cos + nz * sin,
+                        ny,
+                        -nx * sin + nz * cos,
+                        u, v,
+                        r * p.tintR, g * p.tintG, b * p.tintB, a
+                    )
+                    i += 12
+                }
+            }
+            val vbo = GlVbo()
+            vbo.uploadStatic(builder)
+            assetPropBatches[modelId] = vbo
+        }
     }
 
     private fun ensureGpuSceneReady(
