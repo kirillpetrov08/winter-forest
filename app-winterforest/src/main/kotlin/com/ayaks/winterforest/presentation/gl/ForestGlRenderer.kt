@@ -518,7 +518,9 @@ class ForestGlRenderer(
         val baseSig = base.shelterLevel * 31 + base.campfireLevel * 7 + base.workbenchLevel * 3 +
             (if (base.thermosInstalledOnBase) 1000 else 0)
         if (staticBuiltLocation != loc || staticBuiltQuality != quality || staticBuiltBaseSig != baseSig) {
-            val terrainBuilder = MeshBuilder.buildTerrainIntoBuilder(loc, halfExtent = 48f, steps = quality.terrainSteps)
+            // На Базовой поляне — высокая сетка (128 шагов) под импортированный ландшафт
+            val terrainSteps = if (loc == LocationId.BASE_CLEARING) 128 else quality.terrainSteps
+            val terrainBuilder = MeshBuilder.buildTerrainIntoBuilder(loc, halfExtent = 48f, steps = terrainSteps)
             terrainVbo.uploadStatic(terrainBuilder)
 
             if (loc == LocationId.FROZEN_LAKE) {
