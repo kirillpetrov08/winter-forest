@@ -15,7 +15,9 @@ import com.ayaks.winterforest.domain.model.SpecialLootId
 import com.ayaks.winterforest.domain.model.StarterLoadout
 import com.ayaks.winterforest.domain.model.UnlockStatus
 import com.ayaks.winterforest.domain.model.WildlifeEntity
+import com.ayaks.winterforest.domain.model.WildlifeKind
 import com.ayaks.winterforest.domain.model.WorkbenchRecipe
+import com.ayaks.winterforest.domain.world.WorldCollision
 import com.ayaks.winterforest.domain.world.WorldPopulator
 import kotlin.math.atan2
 import kotlin.math.cos
@@ -162,7 +164,9 @@ object SurvivalEngine {
         } else {
             val weatherEvent = AdvancedMechanics.weatherFor(run.elapsedRealSeconds)
             val weatherMul = AdvancedMechanics.coldMultiplierFor(weatherEvent) * AdvancedMechanics.coldPerkMultiplier(base)
-            val shelterMul = if (run.shelterAt?.covers(run.playerX, run.playerZ) == true) 0.6f else 1f
+            // Внутри сруба/зимовья тепло уходит заметно медленнее
+            val insideCabin = WorldCollision.isInsideShelter(run.currentLocation, run.playerX, run.playerZ)
+            val shelterMul = if (run.shelterAt?.covers(run.playerX, run.playerZ) == true || insideCabin) 0.55f else 1f
             val baseColdPerSec = 0.32f * run.currentLocation.coldMultiplier * weatherMul * shelterMul
             val nightFactor = if (nowNight) 2.2f else 1.0f
             val moveFactor = if (isMoving) 1.28f else 1.0f
@@ -427,9 +431,24 @@ object SurvivalEngine {
                         if (clampedX != rawX || clampedZ != rawZ) {
                             nextHeading += Math.PI.toFloat() * 0.75f
                         }
+                        // Звери тоже не проходят сквозь деревья и строения
+                        val beastRadius = if (entity.kind == WildlifeKind.TIMBER_WOLF) 0.5f else 0.42f
+                        val resolved = WorldCollision.resolveFor(
+                            curLoc,
+                            run.currentLocationNodes(),
+                            clampedX,
+                            clampedZ,
+                            beastRadius
+                        )
+                        val finalX = resolved[0]
+                        val finalZ = resolved[1]
+                        if (finalX != clampedX || finalZ != clampedZ) {
+                            // упёрлись в препятствие — плавный разворот в сторону
+                            nextHeading += Math.PI.toFloat() * 0.42f
+                        }
                         entity.copy(
-                            x = clampedX,
-                            z = clampedZ,
+                            x = finalX,
+                            z = finalZ,
                             headingRad = nextHeading,
                             fleeTimerSec = nextFlee,
                             attackCooldownSec = nextAtkCd
@@ -470,7 +489,16 @@ object SurvivalEngine {
 
         val clampedX = rawX.coerceIn(-bound, bound)
         val clampedZ = rawZ.coerceIn(-bound, bound)
-        val groundY = WorldPopulator.terrainHeight(run.currentLocation, clampedX, clampedZ)
+        // Непроходимость: деревья, валуны, ящики и стены срубов со скольжением
+        val resolved = WorldCollision.resolveFor(
+            run.currentLocation,
+            run.currentLocationNodes(),
+            clampedX,
+            clampedZ
+        )
+        val finalX = resolved[0]
+        val finalZ = resolved[1]
+        val groundY = WorldPopulator.terrainHeight(run.currentLocation, finalX, finalZ)
 
         val msg = if (hitBoundary) {
             "Граница локации: впереди заснеженный хребет. Ищите деревянные ворота тропы на севере!"
@@ -478,9 +506,9 @@ object SurvivalEngine {
             run.lastStatusMessage
         }
         return run.copy(
-            playerX = clampedX,
+            playerX = finalX,
             playerY = groundY,
-            playerZ = clampedZ,
+            playerZ = finalZ,
             lastStatusMessage = msg
         )
     }

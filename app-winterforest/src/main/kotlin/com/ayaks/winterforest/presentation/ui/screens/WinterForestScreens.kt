@@ -388,12 +388,12 @@ fun GameScreen(
             }
         }
 
-        // 4. Верхняя центральная строка живых событий + пропуск активного таймера
+        // 4. Строка активного таймера — под верхней панелью, чтобы не перекрывать «Меню»
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             modifier = Modifier
                 .align(Alignment.TopCenter)
-                .padding(top = 8.dp)
+                .padding(top = 64.dp)
                 .width(340.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
@@ -557,26 +557,14 @@ fun GameScreen(
                 modifier = Modifier.width(120.dp)
             )
 
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                com.ayaks.winterforest.presentation.ui.components.CooldownButton(
-                    label = "Еда / Тепло",
-                    cooldownRemainingSec = state.cooldowns["quick_use"] ?: 0f,
-                    cooldownTotalSec = 0.9f,
-                    onClick = { viewModel.onActionQuickUse() },
-                    modifier = Modifier.width(128.dp).height(42.dp)
-                )
-
-                com.ayaks.winterforest.presentation.ui.components.CooldownButton(
-                    label = primaryLabel,
-                    cooldownRemainingSec = state.cooldowns["strike"] ?: 0f,
-                    cooldownTotalSec = 1.0f,
-                    onClick = { viewModel.onActionStrike() },
-                    modifier = Modifier.width(150.dp).height(54.dp)
-                )
-            }
+            // Еда/Костёр живут в хотбаре (слоты 5–6) — дублирующая кнопка «Еда / Тепло» убрана
+            com.ayaks.winterforest.presentation.ui.components.CooldownButton(
+                label = primaryLabel,
+                cooldownRemainingSec = state.cooldowns["strike"] ?: 0f,
+                cooldownTotalSec = 1.0f,
+                onClick = { viewModel.onActionStrike() },
+                modifier = Modifier.width(150.dp).height(54.dp)
+            )
         }
     }
 }

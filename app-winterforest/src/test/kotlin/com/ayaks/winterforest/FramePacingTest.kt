@@ -87,6 +87,29 @@ class FramePacingTest {
     }
 
     @Test
+    fun `angle interpolation takes shortest arc across zero`() {
+        // 350deg -> 10deg кратчайший путь через ноль, а не через 340 градусов
+        val a = Math.toRadians(350.0).toFloat()
+        val b = Math.toRadians(10.0).toFloat()
+        val mid = FramePacing.lerpAngle(a, b, 0.5f)
+        val midDeg = Math.toDegrees((((mid % 6.2831855f) + 6.2831855f) % 6.2831855f).toDouble()).toFloat()
+        assertTrue("mid=$midDeg", midDeg > 350f || midDeg < 20f)
+        // обратный переход тоже короткий
+        val mid2 = FramePacing.lerpAngle(b, a, 0.5f)
+        val mid2Deg = Math.toDegrees((((mid2 % 6.2831855f) + 6.2831855f) % 6.2831855f).toDouble()).toFloat()
+        assertTrue("mid2=$mid2Deg", mid2Deg > 350f || mid2Deg < 20f)
+    }
+
+    @Test
+    fun `angle interpolation endpoints and full turn`() {
+        assertEquals(2.0f, FramePacing.lerpAngle(0.4f, 2.0f, 1f), 1e-4f)
+        assertEquals(0.4f, FramePacing.lerpAngle(0.4f, 2.0f, 0f), 1e-4f)
+        // полный оборот — это не поворот
+        val full = FramePacing.lerpAngle(0.5f, 0.5f + 6.2831855f, 0.5f)
+        assertEquals(0.5f, full, 1e-3f)
+    }
+
+    @Test
     fun `smooth window covers a full simulation tick`() {
         // 20 Гц тики: за окно ровно один тик проходит alpha от 0 до 1
         assertTrue(FramePacing.interpAlpha(50_000_000L, 50_000_000L) >= 1f)

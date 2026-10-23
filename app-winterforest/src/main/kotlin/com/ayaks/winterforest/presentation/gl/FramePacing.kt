@@ -50,4 +50,17 @@ object FramePacing {
     /** Интерполяция синуса фазы bobbing-шага (без проблем 2π-перехода). */
     fun lerpBob(prevSin: Float, curSin: Float, alpha: Float): Float =
         prevSin + (curSin - prevSin) * alpha
+
+    /**
+     * Плавный поворот по кратчайшей дуге: разница углов сворачивается в (-π, π],
+     * поэтому зверь не проворачивается через 2π при обходе нуля.
+     */
+    fun lerpAngle(prevRad: Float, curRad: Float, alpha: Float): Float {
+        var delta = (curRad - prevRad) % TWO_PI
+        if (delta > Math.PI.toFloat()) delta -= TWO_PI
+        if (delta < -Math.PI.toFloat()) delta += TWO_PI
+        return prevRad + delta * alpha
+    }
+
+    private const val TWO_PI = 6.2831855f
 }
