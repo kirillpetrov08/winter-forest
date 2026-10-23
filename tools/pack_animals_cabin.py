@@ -10,7 +10,8 @@ import glob
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from blend2obj import (
-    parse_file, parse_mesh, field_offsets, block_type, material_names, i32
+    parse_file, parse_mesh, field_offsets, block_type, material_names, i32,
+    object_world_matrices,
 )
 from PIL import Image, ImageDraw
 import struct
@@ -25,6 +26,7 @@ def bake_and_merge(blend_path, keep_objects=None, skip_objects=(), min_tris=25):
     byp = {b.old_ptr: b for b in blocks if b.old_ptr}
     id_o = field_offsets(dna, "ID")["name"][0]
     offs = field_offsets(dna, "Object")
+    worlds = object_world_matrices(blocks, dna, end, ptr_size)
 
     all_v, all_vt, all_vn = [], [], []
     groups = {}  # mat_name -> list[(a,b,c)]
@@ -46,8 +48,10 @@ def bake_and_merge(blend_path, keep_objects=None, skip_objects=(), min_tris=25):
         if not info or not info["tris"] or len(info["tris"]) < min_tris:
             continue
         mats = material_names(me, dna, byp, end, ptr_size)
-        mat_off = offs["obmat"][0]
-        m = [struct.unpack_from(end + "16f", ob.data, mat_off)[i:i + 4] for i in range(0, 16, 4)]
+        m = worlds.get(id(ob))
+        if m is None:
+            mat_off = offs["obmat"][0]
+            m = [struct.unpack_from(end + "16f", ob.data, mat_off)[i:i + 4] for i in range(0, 16, 4)]
 
         def xform(v):
             x, y, z = v
