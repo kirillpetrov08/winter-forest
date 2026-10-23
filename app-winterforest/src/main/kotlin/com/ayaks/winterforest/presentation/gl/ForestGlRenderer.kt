@@ -1,6 +1,7 @@
 package com.ayaks.winterforest.presentation.gl
 
 import android.content.Context
+import android.opengl.EGL14
 import android.opengl.GLES20
 import android.opengl.GLSurfaceView
 import android.opengl.Matrix
@@ -19,10 +20,7 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.FloatBuffer
 import java.util.EnumMap
-import javax.microedition.khronos.egl.EGL10
 import javax.microedition.khronos.egl.EGLConfig
-import javax.microedition.khronos.egl.EGLDisplay
-import javax.microedition.khronos.egl.EGLSurface
 import javax.microedition.khronos.opengles.GL10
 import kotlin.math.abs
 import kotlin.math.cos
@@ -208,6 +206,13 @@ class ForestGlRenderer(
     }
 
     override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
+        // Лимит 60 FPS снят: eglSwapInterval(0) — рендер без ожидания vsync.
+        // Контекст в этом колбэке уже current; при пересоздании поверхности
+        // вызов повторяется (интервал привязан к draw-surface).
+        val eglDisplay = EGL14.eglGetCurrentDisplay()
+        if (eglDisplay != null && eglDisplay != EGL14.EGL_NO_DISPLAY) {
+            EGL14.eglSwapInterval(eglDisplay, 0)
+        }
         // При пересоздании EGL-контекста сбрасываем старые GPU-хэндлы
         uploadedPaletteLocation = null
         staticBuiltLocation = null
@@ -1504,9 +1509,8 @@ class ForestGlSurfaceView(
         setEGLContextClientVersion(2)
         setEGLConfigChooser(8, 8, 8, 8, 16, 0)
         preserveEGLContextOnPause = true
-        // Лимит 60 FPS снят: swap interval 0 отключает ожидание vsync в eglSwapBuffers,
+        // Лимит 60 FPS снят: swap interval 0 в onSurfaceCreated (без ожидания vsync),
         // кадры уходят на панель с максимально возможной частотой (90/120/144 Гц).
-        setEGLWindowSurfaceFactory(SwapIntervalZeroSurfaceFactory())
         setRenderer(forestRenderer)
         renderMode = RENDERMODE_CONTINUOUSLY
     }
@@ -1519,25 +1523,6 @@ class ForestGlSurfaceView(
                 0f,
                 Surface.FRAME_RATE_COMPATIBILITY_DEFAULT
             )
-        }
-    }
-
-    /** EGL-поверхность с eglSwapInterval(0) — рендер без ожидания вертикального интервала. */
-    private class SwapIntervalZeroSurfaceFactory : GLSurfaceView.EGLWindowSurfaceFactory {
-        override fun createWindowSurface(
-            egl: EGL10,
-            display: EGLDisplay,
-            config: EGLConfig,
-            nativeWindow: Any?
-        ): EGLSurface {
-            val surface = egl.eglCreateWindowSurface(display, config, nativeWindow, null)
-            // 0 = не ждать vsync при показе кадра (лимит в 60 FPS снят)
-            egl.eglSwapInterval(display, 0)
-            return surface
-        }
-
-        override fun destroySurface(egl: EGL10, display: EGLDisplay, surface: EGLSurface) {
-            egl.eglDestroySurface(display, surface)
         }
     }
 }
