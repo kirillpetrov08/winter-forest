@@ -605,8 +605,9 @@ object SurvivalEngine {
         target: WildlifeEntity
     ): EngineStepOutcome {
         val tool = run.equippedTool
+        val ironHeadBonus = if (base.ironSpearCrafted) 12f else 0f
         val damage = when (tool) {
-            EquippedTool.SPEAR -> if (base.masterSpearCrafted) 58f else 36f
+            EquippedTool.SPEAR -> (if (base.masterSpearCrafted) 58f else 36f) + ironHeadBonus
             EquippedTool.AXE -> 28f
             EquippedTool.PICKAXE -> 24f
             EquippedTool.TORCH -> 18f
@@ -639,7 +640,7 @@ object SurvivalEngine {
         }
 
         // Зверь повержен: выдаём трофеи охоты + опыт
-        val spearBonus = if (tool == EquippedTool.SPEAR && base.masterSpearCrafted) 1 else 0
+        val spearBonus = if (tool == EquippedTool.SPEAR && (base.masterSpearCrafted || base.ironSpearCrafted)) 1 else 0
         val primaryQty = 2 + spearBonus
         var nextInv = run.inventory.tryAddResource(target.kind.primaryDrop, primaryQty).inventory
         val secType = target.kind.secondaryDrop
@@ -762,6 +763,12 @@ object SurvivalEngine {
             0
         }
         val levelBonus = if (run.level >= 3 && (run.totalResourcesGathered % 2 == 0)) 1 else 0
+        // Кованый железный инструмент — постоянный бонус поверх профильного инструмента
+        val ironToolBonus = when {
+            base.ironPickaxeCrafted && resType in setOf(ResourceType.STONE, ResourceType.COAL, ResourceType.IRON) -> 1
+            base.ironAxeCrafted && resType == ResourceType.WOOD -> 1
+            else -> 0
+        }
         // Жёсткое правило выживания: профильный ресурс без инструмента — максимум 1 ед. руками
         val requiredToolMissing = when (resType) {
             ResourceType.WOOD -> run.equippedTool != EquippedTool.AXE
@@ -773,7 +780,7 @@ object SurvivalEngine {
         val rawYield = if (requiredToolMissing) {
             1
         } else {
-            (target.baseYield + pickaxeBonus + axeWoodBonus + levelBonus).coerceIn(1, 6)
+            (target.baseYield + pickaxeBonus + axeWoodBonus + ironToolBonus + levelBonus).coerceIn(1, 6)
         }
         val addResult = run.inventory.tryAddResource(resType, rawYield)
 
@@ -1190,10 +1197,15 @@ object SurvivalEngine {
             BaseUpgradeType.SHELTER -> baseAfterSpend.copy(shelterLevel = nextLevelVal)
             BaseUpgradeType.CAMPFIRE -> baseAfterSpend.copy(campfireLevel = nextLevelVal)
             BaseUpgradeType.WORKBENCH -> baseAfterSpend.copy(workbenchLevel = nextLevelVal)
+            BaseUpgradeType.FURNACE -> baseAfterSpend.copy(furnaceLevel = nextLevelVal)
         }
 
         val (nextXp, nextPlayerLevel) = applyXpGain(run.xp, run.level, 35)
-        val msg = "«${type.titleRu}» улучшено до уровня $nextLevelVal (+35 опыта)!"
+        val msg = if (type == BaseUpgradeType.FURNACE && nextLevelVal == 1) {
+            "«${type.titleRu}» построена! Открыта плавка железа (+35 опыта)!"
+        } else {
+            "«${type.titleRu}» улучшено до уровня $nextLevelVal (+35 опыта)!"
+        }
         return EngineStepOutcome(
             run.copy(
                 inventory = nextInv,
@@ -1249,6 +1261,10 @@ object SurvivalEngine {
             run.inventory.hasSpecial(SpecialLootId.PICKAXE)
         if (recipe.requiresPickaxe && !hasPickaxe) {
             val msg = "Этот рецепт открывается после нахождения «Кирки» в Заброшенной шахте."
+            return EngineStepOutcome(run.copy(lastStatusMessage = msg), base, false, msg)
+        }
+        if (recipe.requiresFurnace && base.furnaceLevel < 1) {
+            val msg = "Сначала постройте Каменную печь и выплавьте железо."
             return EngineStepOutcome(run.copy(lastStatusMessage = msg), base, false, msg)
         }
         val spent = spendResourcesAcrossInventoryAndBase(run.inventory, base, recipe.cost)
@@ -1355,7 +1371,98 @@ object SurvivalEngine {
                     msg
                 )
             }
+            WorkbenchRecipe.CRAFT_IRON_AXE -> {
+                val (nextXp, nextLvl) = applyXpGain(run.xp, run.level, 32)
+                val msg = "Выкован «Железный топор»: +1 дерева за удар навсегда!"
+                EngineStepOutcome(
+                    run.copy(
+                        inventory = invAfterCost,
+                        xp = nextXp,
+                        level = nextLvl,
+                        lastStatusMessage = msg
+                    ),
+                    baseAfterCost.copy(ironAxeCrafted = true),
+                    true,
+                    msg
+                )
+            }
+            WorkbenchRecipe.CRAFT_IRON_PICKAXE -> {
+                val (nextXp, nextLvl) = applyXpGain(run.xp, run.level, 32)
+                val msg = "Выкована «Железная кирка»: +1 руды и камня за добычу навсегда!"
+                EngineStepOutcome(
+                    run.copy(
+                        inventory = invAfterCost,
+                        xp = nextXp,
+                        level = nextLvl,
+                        lastStatusMessage = msg
+                    ),
+                    baseAfterCost.copy(ironPickaxeCrafted = true),
+                    true,
+                    msg
+                )
+            }
+            WorkbenchRecipe.CRAFT_IRON_SPEARHEAD -> {
+                val (nextXp, nextLvl) = applyXpGain(run.xp, run.level, 32)
+                val msg = "Насажен «Железный наконечник»: урон зверю и добыча охоты выше навсегда!"
+                EngineStepOutcome(
+                    run.copy(
+                        inventory = invAfterCost,
+                        xp = nextXp,
+                        level = nextLvl,
+                        lastStatusMessage = msg
+                    ),
+                    baseAfterCost.copy(ironSpearCrafted = true),
+                    true,
+                    msg
+                )
+            }
         }
+    }
+
+    /** Плавка железной руды в слитки в Каменной печи базы (можно плавить партиями). */
+    fun smeltAtFurnace(
+        run: GameRunState,
+        base: BaseProgress,
+        batches: Int
+    ): EngineStepOutcome {
+        if (base.furnaceLevel < 1) {
+            val msg = "Каменная печь ещё не построена."
+            return EngineStepOutcome(run.copy(lastStatusMessage = msg), base, false, msg)
+        }
+        val batchesSafe = batches.coerceIn(1, 10)
+        val perBatch = BaseProgress.smeltCost(base.furnaceLevel)
+        val totalCost = perBatch.mapValues { it.value * batchesSafe }
+        val spent = spendResourcesAcrossInventoryAndBase(run.inventory, base, totalCost)
+        if (spent == null) {
+            val needed = totalCost.entries.joinToString(", ") { "${it.key.titleRu}: ${it.value}" }
+            val msg = "Не хватает руды и угля для плавки ($needed)."
+            return EngineStepOutcome(run.copy(lastStatusMessage = msg), base, false, msg)
+        }
+        val (invAfterCost, baseAfterCost) = spent
+        val ingots = BaseProgress.smeltYield(base.furnaceLevel) * batchesSafe
+        val addResult = invAfterCost.tryAddResource(ResourceType.IRON_INGOT, ingots)
+        if (addResult.isFullBlocked) {
+            val msg = "Инвентарь полон — освободите место под слитки!"
+            return EngineStepOutcome(run.copy(lastStatusMessage = msg), base, false, msg)
+        }
+        val added = addResult.addedAmount
+        val msg = if (ingots > 1 && added == ingots) {
+            "Печь выплавила $ingots слитков железа!"
+        } else {
+            "Печь выплавила $added слитков железа!"
+        }
+        val (nextXp, nextLvl) = applyXpGain(run.xp, run.level, 16 * added)
+        return EngineStepOutcome(
+            run.copy(
+                inventory = addResult.inventory,
+                xp = nextXp,
+                level = nextLvl,
+                lastStatusMessage = msg
+            ),
+            baseAfterCost,
+            true,
+            msg
+        )
     }
 
     fun startCookingOnCampfire(run: GameRunState, base: BaseProgress): EngineStepOutcome {

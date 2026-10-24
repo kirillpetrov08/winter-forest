@@ -141,6 +141,10 @@ enum class BaseUpgradeType(
     WORKBENCH(
         titleRu = "Верстак",
         effectDescriptionRu = "Открывает крафт Смоляного факела, рационов и продвинутых наборов (с Киркой — ур. 4–5)"
+    ),
+    FURNACE(
+        titleRu = "Каменная печь",
+        effectDescriptionRu = "Плавит железную руду в слитки: выше уровень — дешевле плавка и больше выход"
     )
 }
 
@@ -159,7 +163,9 @@ enum class WorkbenchRecipe(
     val minWorkbenchLevel: Int,
     val requiresPickaxe: Boolean,
     val cost: Map<ResourceType, Int>,
-    val category: RecipeCategory
+    val category: RecipeCategory,
+    /** Открывается после постройки Каменной печи и плавки железа. */
+    val requiresFurnace: Boolean = false
 ) {
     CRAFT_RESIN_TORCH(
         titleRu = "Смоляной факел",
@@ -216,6 +222,37 @@ enum class WorkbenchRecipe(
         requiresPickaxe = true,
         cost = mapOf(ResourceType.COAL to 2, ResourceType.IRON to 1),
         category = RecipeCategory.GEAR
+    ),
+    CRAFT_IRON_AXE(
+        titleRu = "Железный топор",
+        descriptionRu = "Кованое лезвие: +1 дерева за каждый удар навсегда",
+        minWorkbenchLevel = 2,
+        requiresPickaxe = false,
+        cost = mapOf(ResourceType.IRON_INGOT to 2, ResourceType.WOOD to 2),
+        category = RecipeCategory.TOOLS,
+        requiresFurnace = true
+    ),
+    CRAFT_IRON_PICKAXE(
+        titleRu = "Железная кирка",
+        descriptionRu = "Крепкое остриё: +1 камня, угля и руды за каждую добычу навсегда",
+        minWorkbenchLevel = 2,
+        requiresPickaxe = false,
+        cost = mapOf(ResourceType.IRON_INGOT to 2, ResourceType.WOOD to 2),
+        category = RecipeCategory.TOOLS,
+        requiresFurnace = true
+    ),
+    CRAFT_IRON_SPEARHEAD(
+        titleRu = "Железный наконечник копья",
+        descriptionRu = "Листовидное остриё: +12 урона зверю и +1 добычи с охоты навсегда",
+        minWorkbenchLevel = 2,
+        requiresPickaxe = false,
+        cost = mapOf(
+            ResourceType.IRON_INGOT to 1,
+            ResourceType.WOOD to 1,
+            ResourceType.CLOTH to 1
+        ),
+        category = RecipeCategory.TOOLS,
+        requiresFurnace = true
     )
 }
 
@@ -229,24 +266,30 @@ data class BaseProgress(
     val dailyClaimed: Set<String> = emptySet(),
     val campfireLevel: Int = 1,
     val workbenchLevel: Int = 1,
+    /** 0 — печь ещё не построена; 1–5 — уровни каменной печи. */
+    val furnaceLevel: Int = 0,
     val storageResources: Map<ResourceType, Int> = emptyMap(),
     val persistentSpecialLoot: Set<SpecialLootId> = emptySet(),
     val thermosInstalledOnBase: Boolean = false,
     val warmCoatEquipped: Boolean = false,
     val furBootsCrafted: Boolean = false,
     val masterSpearCrafted: Boolean = false,
+    val ironAxeCrafted: Boolean = false,
+    val ironPickaxeCrafted: Boolean = false,
+    val ironSpearCrafted: Boolean = false,
     val totalWildlifeHunted: Int = 0,
     val selectedLoadout: StarterLoadout = StarterLoadout.SURVIVOR,
     val bestDaysSurvived: Int = 0,
     val lifetimeWoodGathered: Int = 0,
     val completedRunsCount: Int = 0
 ) {
-    val totalBaseLevel: Int get() = shelterLevel + campfireLevel + workbenchLevel
+    val totalBaseLevel: Int get() = shelterLevel + campfireLevel + workbenchLevel + furnaceLevel
 
     fun levelOf(type: BaseUpgradeType): Int = when (type) {
         BaseUpgradeType.SHELTER -> shelterLevel
         BaseUpgradeType.CAMPFIRE -> campfireLevel
         BaseUpgradeType.WORKBENCH -> workbenchLevel
+        BaseUpgradeType.FURNACE -> furnaceLevel
     }
 
     fun upgradeCost(type: BaseUpgradeType): Map<ResourceType, Int>? {
@@ -271,6 +314,21 @@ data class BaseProgress(
                     base[ResourceType.IRON] = (current - 1)
                 }
                 base
+            }
+            BaseUpgradeType.FURNACE -> {
+                if (current == 0) {
+                    // Постройка каменной печи
+                    mapOf(
+                        ResourceType.STONE to 8,
+                        ResourceType.WOOD to 4
+                    )
+                } else {
+                    mapOf(
+                        ResourceType.STONE to (4 * current),
+                        ResourceType.WOOD to (2 * current),
+                        ResourceType.IRON to (current - 1).coerceAtLeast(1)
+                    )
+                }
             }
         }
     }
@@ -303,5 +361,16 @@ data class BaseProgress(
             ResourceType.WOOD to 2,
             ResourceType.STONE to 2
         )
+
+        /** Стоимость одной плавки в Каменной печи: руда + уголь. Чем выше уровень печи, тем выгоднее. */
+        fun smeltCost(furnaceLevel: Int): Map<ResourceType, Int> =
+            if (furnaceLevel >= 3) {
+                mapOf(ResourceType.IRON to 2, ResourceType.COAL to 1)
+            } else {
+                mapOf(ResourceType.IRON to 3, ResourceType.COAL to 1)
+            }
+
+        /** Выход одной плавки (слитков). Печь 4–5 уровня даёт двойной выход. */
+        fun smeltYield(furnaceLevel: Int): Int = if (furnaceLevel >= 4) 2 else 1
     }
 }

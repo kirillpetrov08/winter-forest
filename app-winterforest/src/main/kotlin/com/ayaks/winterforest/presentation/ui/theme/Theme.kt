@@ -7,7 +7,8 @@ import androidx.compose.ui.graphics.Color
 
 val DeepPineNight = Color(0xFF091119)
 val SlateCabinSurface = Color(0xFF12212E)
-val FrostedCardSurface = Color(0xFF1A2F40)
+/** Полупрозрачное «стекло» карточек — сквозь него просвечивает сцена и фон меню. */
+val FrostedCardSurface = Color(0xE61A2F40)
 val IceCyanPrimary = Color(0xFF7CC6FE)
 val HearthAmberAccent = Color(0xFFF4A261)
 val SpruceEmerald = Color(0xFF52B788)

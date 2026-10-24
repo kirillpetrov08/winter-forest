@@ -523,6 +523,7 @@ fun assetIconNameFor(type: ResourceType): String = when (type) {
     ResourceType.WOOD -> "icon_wood"
     ResourceType.STONE -> "icon_stone"
     ResourceType.IRON -> "icon_iron_ore"
+    ResourceType.IRON_INGOT -> "icon_iron_ore"
     ResourceType.COAL -> "icon_coal"
     ResourceType.CLOTH -> "icon_cloth"
     ResourceType.HIDE -> "icon_hide"
