@@ -221,6 +221,7 @@ object WorldPopulator {
             }
             ResourceType.COAL -> WorldObjectKind.COAL_SEAM
             ResourceType.IRON -> WorldObjectKind.IRON_VEIN
+            ResourceType.IRON_INGOT -> WorldObjectKind.IRON_VEIN
             ResourceType.MEAT, ResourceType.HIDE -> WorldObjectKind.GAME_CARCASS
         }
 }

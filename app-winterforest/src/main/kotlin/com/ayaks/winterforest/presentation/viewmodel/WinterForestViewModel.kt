@@ -504,6 +504,15 @@ class WinterForestViewModel(
         SurvivalEngine.installThermosOnBase(run, base)
     }
 
+    fun onSmeltIron(batches: Int) = applyEngineAction(cooldownId = "smelt", cooldownSec = 2.0f) { run, base ->
+        val o = SurvivalEngine.smeltAtFurnace(run, base, batches)
+        if (o.actionSucceeded) {
+            o.copy(base = com.ayaks.winterforest.domain.rules.AdvancedMechanics.trackChallenge(
+                o.base, com.ayaks.winterforest.domain.rules.DailyChallengeId.Kind.CRAFT, 1
+            ))
+        } else o
+    }
+
     fun onCraftRecipe(recipe: WorkbenchRecipe) = applyEngineAction(cooldownId = "craft", cooldownSec = 2.5f) { run, base ->
         val o = SurvivalEngine.craftAtWorkbench(run, base, recipe)
         if (o.actionSucceeded) {

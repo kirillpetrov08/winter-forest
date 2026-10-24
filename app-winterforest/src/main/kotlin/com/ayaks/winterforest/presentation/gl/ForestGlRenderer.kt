@@ -9,6 +9,7 @@ import android.os.Build
 import android.view.Surface
 import android.view.SurfaceHolder
 import com.ayaks.winterforest.domain.model.BaseProgress
+import com.ayaks.winterforest.domain.model.EquippedTool
 import com.ayaks.winterforest.domain.model.GameRunState
 import com.ayaks.winterforest.domain.model.GraphicsQuality
 import com.ayaks.winterforest.domain.model.LocationId
@@ -250,6 +251,13 @@ class ForestGlRenderer(
     private var assetPropsBuiltLoc: LocationId? = null
     private var assetTexturesQuality: GraphicsQuality? = null
 
+    // Камни-ресурсы (камень/руда/уголь) рисуются МОДЕЛЯМИ автора (rock_09 / rock_moss_*),
+    // а не процедурными «булыжниками»: батчи перестраиваются вместе с узлами локации.
+    private val rockNodeBatches = HashMap<String, GlVbo>()
+
+    // Модели инструментов в РУКАХ игрока (первое лицо): топор/кирка/копьё
+    private val toolHandVbos = HashMap<String, GlVbo>()
+
     // Уровень 3: Быстрые динамические VBO (животные, оружие в руках, пламя, искры, метель) — 0 аллокаций!
     private val dynBuilders = EnumMap<ProceduralTextureId, MeshBuilder>(ProceduralTextureId::class.java)
     private val dynVbos = EnumMap<ProceduralTextureId, GlVbo>(ProceduralTextureId::class.java)
@@ -309,6 +317,10 @@ class ForestGlRenderer(
             ep.legs.forEach { it.vbo.release() }
         }
         entityParts.clear()
+        rockNodeBatches.values.forEach { it.release() }
+        rockNodeBatches.clear()
+        toolHandVbos.values.forEach { it.release() }
+        toolHandVbos.clear()
         assetTextures.values.forEach { id -> if (id != 0) GLES20.glDeleteTextures(1, intArrayOf(id), 0) }
         assetTextures.clear()
         assetTexturesQuality = null
@@ -512,6 +524,10 @@ class ForestGlRenderer(
         for ((modelId, vbo) in assetPropBatches) {
             drawVbo(vbo, assetTextures[modelId] ?: 0, unlit = false, specStrength = 0.18f)
         }
+        // 6c. Камни-ресурсы (камень/руда/уголь) моделями автора
+        for ((modelId, vbo) in rockNodeBatches) {
+            drawVbo(vbo, assetTextures[modelId] ?: 0, unlit = false, specStrength = 0.18f)
+        }
 
         // 7. Динамический слой (животные, 3D-оружие в руках, пламя, искры удара, метель) через reusable VBO
         buildAndDrawDynamicFrameLayer(
@@ -559,6 +575,11 @@ class ForestGlRenderer(
                 buildEntityParts(id)
             }
         }
+        if (toolHandVbos.isEmpty()) {
+            for (id in listOf("wooden_axe", "pickaxe", "spear")) {
+                buildToolHandVbo(id)
+            }
+        }
         if (assetPropsBuiltLoc != loc) {
             rebuildAssetPropsVbo(loc)
             assetPropsBuiltLoc = loc
@@ -572,6 +593,10 @@ class ForestGlRenderer(
 
         val byModel = HashMap<String, MutableList<AssetProps.Placement>>()
         for (p in AssetProps.forLocation(loc)) {
+            byModel.getOrPut(p.modelId) { mutableListOf() }.add(p)
+        }
+        // Валуны кольца и породы штольни — модели автора (камни-«булыжники» больше не генерятся)
+        for (p in generatedRockPlacements(loc)) {
             byModel.getOrPut(p.modelId) { mutableListOf() }.add(p)
         }
         // Модели животных НЕ пекутся в статику: они рисуются по месту через entityParts
@@ -682,7 +707,7 @@ class ForestGlRenderer(
 
         // 2. Статическая геометрия мира (рельеф + архитектура + два кольца векового леса)
         val baseSig = base.shelterLevel * 31 + base.campfireLevel * 7 + base.workbenchLevel * 3 +
-            (if (base.thermosInstalledOnBase) 1000 else 0)
+            base.furnaceLevel * 13 + (if (base.thermosInstalledOnBase) 1000 else 0)
         if (staticBuiltLocation != loc || staticBuiltQuality != quality || staticBuiltBaseSig != baseSig) {
             // На Базовой поляне — высокая сетка (128 шагов) под импортированный ландшафт
             val terrainSteps = if (loc == LocationId.BASE_CLEARING) 128 else quality.terrainSteps
@@ -807,6 +832,19 @@ class ForestGlRenderer(
                 metal.addTaperedCylinder(wbX + 0.52f, wbY + 1.16f, wbZ, wbX + 0.52f, wbY + 1.68f, wbZ, 0.14f, 0.13f, 10, 0.90f, 0.96f, 1.0f)
                 cloth.addTaperedCylinder(wbX + 0.52f, wbY + 1.30f, wbZ, wbX + 0.52f, wbY + 1.50f, wbZ, 0.146f, 0.146f, 10)
             }
+            // Каменная печь (строится игроком): массивный корпус, чугунная дверца, труба
+            if (base.furnaceLevel >= 1) {
+                val fx = 6.3f; val fz = -5.3f
+                val fy = WorldPopulator.terrainHeight(loc, fx, fz)
+                foliage.addShadowDisc(fx, fy, fz, 1.65f, 0.38f)
+                stone.addBox(fx, fy + 0.70f, fz, 1.42f, 1.40f, 1.22f)
+                stone.addBox(fx, fy + 1.48f, fz, 1.58f, 0.16f, 1.38f)
+                stone.addBox(fx + 0.38f, fy + 2.32f, fz - 0.24f, 0.38f, 1.70f, 0.38f)
+                stone.addBox(fx + 0.38f, fy + 3.18f, fz - 0.24f, 0.50f, 0.12f, 0.50f)
+                metal.addBox(fx - 0.74f, fy + 0.66f, fz, 0.08f, 0.60f, 0.50f)
+                metal.addBox(fx - 0.80f, fy + 0.66f, fz + 0.18f, 0.05f, 0.16f, 0.09f)
+                fire.addBox(fx - 0.78f, fy + 0.66f, fz, 0.03f, 0.42f, 0.34f, 1.0f, 0.62f, 0.26f, 1f)
+            }
         } else if (loc == LocationId.HUNTERS_CABIN) {
             val cabX = 7.2f; val cabZ = 8.8f
             val cabY = WorldPopulator.terrainHeight(loc, cabX, cabZ)
@@ -826,6 +864,7 @@ class ForestGlRenderer(
             }
         } else if (loc == LocationId.ABANDONED_MINE) {
             // Арочные бревенчатые крепи штольни с рельсами узкоколейки и фонарями
+            // (породы у штольни — модели автора rock_moss_*, см. generatedRockPlacements)
             for (zStep in listOf(-18f, -10f, -2f, 6f, 14f, 22f)) {
                 val gy = WorldPopulator.terrainHeight(loc, 0f, zStep)
                 bark.addTaperedCylinder(-3.3f, gy, zStep, -3.1f, gy + 3.4f, zStep, 0.20f, 0.18f, 8)
@@ -833,8 +872,6 @@ class ForestGlRenderer(
                 timber.addBox(0f, gy + 3.32f, zStep, 6.9f, 0.36f, 0.42f)
                 timber.addOrientedBox(-2.35f, gy + 2.85f, zStep, 1.4f, 0.20f, 0.22f, 0f, 0f, 0.68f)
                 timber.addOrientedBox(2.35f, gy + 2.85f, zStep, 1.4f, 0.20f, 0.22f, 0f, 0f, -0.68f)
-                stone.addSculptedBoulder(-4.6f, gy, zStep + 2.2f, 1.4f, 2.2f, 1.6f, 300 + zStep.toInt(), snowCapTint = false)
-                stone.addSculptedBoulder(4.6f, gy, zStep - 1.8f, 1.5f, 2.3f, 1.5f, 400 + zStep.toInt(), snowCapTint = false)
             }
             // Железные рельсы и шпалы вдоль штольни
             for (i in -11..11) {
@@ -856,7 +893,7 @@ class ForestGlRenderer(
         fire.addCrossedFlame(-1.55f, portalY + 2.25f, gateZ + 0.28f, 0.26f, 0.42f)
         fire.addCrossedFlame(1.55f, portalY + 2.25f, gateZ + 0.28f, 0.26f, 0.42f)
 
-        // Живописные поваленные заснеженные стволы и валуны в мире
+        // Живописные поваленные заснеженные стволы в мире (валуны — модели автора, см. generatedRockPlacements)
         for (i in 0 until 7) {
             val a = i * 0.91f + 0.4f
             val rDist = 13.5f + (i % 3) * 7.2f
@@ -869,7 +906,6 @@ class ForestGlRenderer(
                     lx + cos(a + 1.1f) * 1.5f, ly + 0.28f, lz + sin(a + 1.1f) * 1.5f,
                     0.22f, 0.16f, 8
                 )
-                stone.addSculptedBoulder(lx + 1.3f, ly, lz - 0.8f, 0.65f, 0.48f, 0.58f, 700 + i)
             }
         }
 
@@ -899,11 +935,38 @@ class ForestGlRenderer(
         }
     }
 
+    /**
+     * Декоративные камни мира: раньше рисовались процедурными «булыжниками»,
+     * теперь это модели автора (rock_09 — светлый, rock_moss_* — тёмный).
+     */
+    private fun generatedRockPlacements(loc: LocationId): List<AssetProps.Placement> {
+        val out = ArrayList<AssetProps.Placement>(14)
+        for (i in 0 until 7) {
+            val a = i * 0.91f + 0.4f
+            val rDist = 13.5f + (i % 3) * 7.2f
+            val lx = cos(a) * rDist
+            val lz = sin(a) * rDist
+            if (loc != LocationId.FROZEN_LAKE || rDist > 24.5f) {
+                val modelId = if (i % 2 == 0) "rock_09" else "rock_moss_a"
+                out.add(AssetProps.Placement(modelId, lx + 1.3f, lz - 0.8f, a * 1.7f, 0.52f))
+            }
+        }
+        if (loc == LocationId.ABANDONED_MINE) {
+            for ((i, zStep) in listOf(-18f, -10f, -2f, 6f, 14f, 22f).withIndex()) {
+                out.add(AssetProps.Placement("rock_moss_b", -4.6f, zStep + 2.2f, 0.7f + i * 0.9f, 1.35f))
+                out.add(AssetProps.Placement("rock_moss_a", 4.6f, zStep - 1.8f, 2.1f + i * 0.7f, 1.25f))
+            }
+        }
+        return out
+    }
+
     private fun rebuildInteractiveNodesVbo(loc: LocationId, nodes: List<ResourceNode>) {
         val builders = EnumMap<ProceduralTextureId, MeshBuilder>(ProceduralTextureId::class.java)
         for (mat in ProceduralTextureId.entries) {
             builders[mat] = MeshBuilder(12288)
         }
+        // [x, y, z, yaw, scale, tintR, tintG, tintB] — камни-ресурсы моделями автора
+        val nodeRockSpots = HashMap<String, MutableList<FloatArray>>()
         val bark = builders[ProceduralTextureId.WOOD_BARK]!!
         val foliage = builders[ProceduralTextureId.PINE_FOLIAGE]!!
         val stone = builders[ProceduralTextureId.STONE]!!
@@ -935,8 +998,9 @@ class ForestGlRenderer(
                 }
                 WorldObjectKind.STONE_OUTCROP -> {
                     foliage.addShadowDisc(node.x, y, node.z, 1.55f, 0.36f)
-                    stone.addSculptedBoulder(node.x, y, node.z, 0.92f, 0.85f, 0.82f, 120 + idx)
-                    stone.addSculptedBoulder(node.x + 0.62f, y - 0.06f, node.z - 0.42f, 0.56f, 0.52f, 0.54f, 220 + idx)
+                    // Светлая порода автора (rock_09) — из неё падает Камень
+                    nodeRockSpots.getOrPut("rock_09") { mutableListOf() }
+                        .add(floatArrayOf(node.x, y, node.z, idx * 1.71f, 1.22f, 1f, 1f, 1f))
                 }
                 WorldObjectKind.SUPPLY_CRATE -> {
                     foliage.addShadowDisc(node.x, y, node.z, 1.05f, 0.36f)
@@ -960,13 +1024,19 @@ class ForestGlRenderer(
                 }
                 WorldObjectKind.COAL_SEAM -> {
                     foliage.addShadowDisc(node.x, y, node.z, 1.45f, 0.38f)
-                    stone.addSculptedBoulder(node.x, y, node.z, 0.95f, 0.92f, 0.85f, 510 + idx, 0.24f, 0.26f, 0.30f, snowCapTint = false)
-                    metal.addSculptedBoulder(node.x + 0.35f, y + 0.25f, node.z + 0.28f, 0.36f, 0.34f, 0.34f, 540 + idx, 0.18f, 0.20f, 0.24f, snowCapTint = false)
+                    // Угольная жила — тёмная тонировка светлой породы
+                    nodeRockSpots.getOrPut("rock_09") { mutableListOf() }
+                        .add(floatArrayOf(node.x, y, node.z, idx * 1.37f, 1.18f, 0.30f, 0.30f, 0.34f))
+                    nodeRockSpots.getOrPut("rock_moss_a") { mutableListOf() }
+                        .add(floatArrayOf(node.x + 0.52f, y - 0.05f, node.z + 0.34f, idx * 2.1f, 0.55f, 0.26f, 0.26f, 0.30f))
                 }
                 WorldObjectKind.IRON_VEIN -> {
                     foliage.addShadowDisc(node.x, y, node.z, 1.45f, 0.38f)
-                    stone.addSculptedBoulder(node.x, y, node.z, 0.90f, 0.95f, 0.82f, 610 + idx, 0.62f, 0.48f, 0.40f, snowCapTint = false)
-                    metal.addSculptedBoulder(node.x - 0.28f, y + 0.32f, node.z + 0.30f, 0.38f, 0.36f, 0.32f, 640 + idx, 0.94f, 0.68f, 0.44f, snowCapTint = false)
+                    // Тёмная порода автора (rock_moss) — из неё падает Железная руда
+                    nodeRockSpots.getOrPut("rock_moss_b") { mutableListOf() }
+                        .add(floatArrayOf(node.x, y, node.z, idx * 1.13f, 1.12f, 1f, 1f, 1f))
+                    nodeRockSpots.getOrPut("rock_moss_a") { mutableListOf() }
+                        .add(floatArrayOf(node.x - 0.48f, y - 0.04f, node.z + 0.42f, idx * 2.31f, 0.62f, 1f, 1f, 1f))
                 }
                 WorldObjectKind.GAME_CARCASS -> {
                     foliage.addShadowDisc(node.x, y, node.z, 1.10f, 0.36f)
@@ -983,6 +1053,29 @@ class ForestGlRenderer(
 
         for ((mat, builder) in builders) {
             nodeBatches[mat]?.uploadStatic(builder)
+        }
+
+        // Камни-ресурсы моделями автора: отдельные батчи по моделям (пересборка при изменении узлов)
+        rockNodeBatches.values.forEach { it.release() }
+        rockNodeBatches.clear()
+        for ((modelId, spots) in nodeRockSpots) {
+            val floats = assetMeshCache.getOrPut(modelId) {
+                val ctx = appContext
+                if (ctx != null) readAssetFloats(ctx, "models/$modelId/mesh.obj") else FloatArray(0)
+            }
+            if (floats.isEmpty()) continue
+            val builder = MeshBuilder(spots.size * floats.size + 64)
+            for (s in spots) {
+                appendTransformedMesh(
+                    builder, floats,
+                    x = s[0], y = s[1], z = s[2],
+                    yawRad = s[3], pitchRad = 0f, scale = s[4],
+                    tintR = s[5], tintG = s[6], tintB = s[7]
+                )
+            }
+            val vbo = GlVbo()
+            vbo.uploadStatic(builder)
+            rockNodeBatches[modelId] = vbo
         }
     }
 
@@ -1035,6 +1128,22 @@ class ForestGlRenderer(
                 val rise = ((animTimeSec * 0.75f + p * 0.7f) % 3.5f)
                 val rad = 0.16f + rise * 0.14f
                 snow.addBox(-5.1f + rise * 0.28f, chY + rise, -4.6f - rise * 0.12f, rad, rad * 0.75f, rad, 0.82f, 0.85f, 0.90f, (0.42f * (1f - rise / 3.5f)).coerceAtLeast(0.05f))
+            }
+            // Каменная печь: живое пламя в топке и дым из трубы
+            if (base.furnaceLevel >= 1) {
+                val fx = 6.3f; val fz = -5.3f
+                val fy = WorldPopulator.terrainHeight(loc, fx, fz)
+                val flick2 = 0.86f + 0.20f * sin(animTimeSec * 9.2f)
+                fire.addCrossedFlame(fx - 0.88f, fy + 0.62f, fz, 0.15f, 0.28f * flick2, 0f)
+                for (p in 0 until 3) {
+                    val rise = ((animTimeSec * 0.9f + p * 1.1f) % 3.2f)
+                    val rad = 0.13f + rise * 0.12f
+                    snow.addBox(
+                        fx + 0.38f + rise * 0.12f, fy + 3.3f + rise, fz - 0.24f - rise * 0.08f,
+                        rad, rad * 0.7f, rad, 0.80f, 0.83f, 0.88f,
+                        (0.40f * (1f - rise / 3.2f)).coerceAtLeast(0.05f)
+                    )
+                }
             }
         }
 
@@ -1126,29 +1235,55 @@ class ForestGlRenderer(
             }
         }
 
-        // 5. Детальная 3D-модель экипированного оружия / инструмента от первого лица
+        // 5. Экипированный инструмент от первого лица: топор/кирка/копьё — ИМПОРТНЫЕ модели
+        //    в руках игрока (не на земле!), факел — процедурный (модели факела нет).
         if (!menuOrbitMode) {
             val swingNorm = (run.swingAnimRemainingSec / run.equippedTool.swingDurationSec.coerceAtLeast(0.1f))
                 .coerceIn(0f, 1f)
             // bob-фаза тоже интерполируется между тиками — рука не дёргается
             val fpAlpha = FramePacing.interpAlpha(frameNowNs - smoothStartNs, TICK_INTERP_WINDOW_NS)
             val fpBobPhase = FramePacing.lerpAngle(smoothPrevBobPhase, smoothCurBobPhase, fpAlpha)
-            MeshBuilder.addFirstPersonEquippedItem(
-                timberBuilder = timber,
-                metalBuilder = metal,
-                clothBuilder = cloth,
-                fireBuilder = fire,
-                tool = run.equippedTool,
-                torchLit = run.isTorchLit,
-                camX = camX,
-                camY = camY,
-                camZ = camZ,
-                yawRad = yawRad,
-                pitchRad = pitchRad,
-                swingProgress = 1f - swingNorm,
-                walkBobPhase = fpBobPhase,
-                timeSec = animTimeSec
-            )
+            if (run.equippedTool == EquippedTool.TORCH) {
+                MeshBuilder.addFirstPersonEquippedItem(
+                    timberBuilder = timber,
+                    metalBuilder = metal,
+                    clothBuilder = cloth,
+                    fireBuilder = fire,
+                    tool = run.equippedTool,
+                    torchLit = run.isTorchLit,
+                    camX = camX,
+                    camY = camY,
+                    camZ = camZ,
+                    yawRad = yawRad,
+                    pitchRad = pitchRad,
+                    swingProgress = 1f - swingNorm,
+                    walkBobPhase = fpBobPhase,
+                    timeSec = animTimeSec
+                )
+            } else {
+                // Варежка на хвате (та же позиция/наклон, что у модели инструмента)
+                val fwdXh = sin(yawRad) * cos(pitchRad)
+                val fwdYh = sin(pitchRad)
+                val fwdZh = -cos(yawRad) * cos(pitchRad)
+                val rightXh = cos(yawRad)
+                val rightZh = sin(yawRad)
+                val bobXh = sin(fpBobPhase * 0.5f) * 0.022f
+                val bobYh = abs(cos(fpBobPhase * 0.5f)) * 0.020f + sin(animTimeSec * 2.1f) * 0.006f
+                val chopArcH = sin((1f - swingNorm) * Math.PI.toFloat())
+                val gx = camX + fwdXh * (0.58f + chopArcH * 0.24f) + rightXh * (0.34f - chopArcH * 0.10f + bobXh)
+                val gy = camY - 0.34f + fwdYh * 0.52f - chopArcH * 0.16f - bobYh
+                val gz = camZ + fwdZh * (0.58f + chopArcH * 0.24f) + rightZh * (0.34f - chopArcH * 0.10f + bobXh)
+                val thetaH = 0.28f + chopArcH * 0.85f
+                cloth.addOrientedBox(
+                    gx, gy, gz, 0.145f, 0.115f, 0.175f,
+                    -yawRad, -thetaH, 0f, 0.58f, 0.45f, 0.34f
+                )
+                fur.addOrientedBox(
+                    gx - fwdXh * 0.055f, gy - 0.055f, gz - fwdZh * 0.055f,
+                    0.175f, 0.15f, 0.155f,
+                    -yawRad, -thetaH, 0f, 0.42f, 0.34f, 0.28f
+                )
+            }
         }
 
         // 6. Объёмная зимняя позёмка / снегопад в передней полусфере камеры (frustum-aware!)
@@ -1195,6 +1330,29 @@ class ForestGlRenderer(
                 yawRad = -bd.heading + Math.PI.toFloat() * 0.5f,
                 gaitPhase = bd.gait,
                 swingAmp = if (bd.moving) 0.30f else 0f
+            )
+        }
+
+        // Модель топора/кирки/копья в руках — рисуется поверх динамики (ближе всего к камере)
+        if (!menuOrbitMode && run.equippedTool != EquippedTool.TORCH) {
+            val swingNorm = (run.swingAnimRemainingSec / run.equippedTool.swingDurationSec.coerceAtLeast(0.1f))
+                .coerceIn(0f, 1f)
+            val fpAlpha = FramePacing.interpAlpha(frameNowNs - smoothStartNs, TICK_INTERP_WINDOW_NS)
+            val fpBobPhase = FramePacing.lerpAngle(smoothPrevBobPhase, smoothCurBobPhase, fpAlpha)
+            drawFirstPersonToolModel(
+                modelId = when (run.equippedTool) {
+                    EquippedTool.AXE -> "wooden_axe"
+                    EquippedTool.PICKAXE -> "pickaxe"
+                    else -> "spear"
+                },
+                camX = camX,
+                camY = camY,
+                camZ = camZ,
+                yawRad = yawRad,
+                pitchRad = pitchRad,
+                swingProgress = 1f - swingNorm,
+                walkBobPhase = fpBobPhase,
+                timeSec = animTimeSec
             )
         }
     }
@@ -1602,6 +1760,95 @@ class ForestGlRenderer(
         entityParts[modelId] = EntityParts(bodyVbo, sorted)
     }
 
+    /**
+     * Модель инструмента в пространстве «кисти»: рукоять вдоль +Y, хват в начале
+     * координат, масштаб и смещение хвата запечены в вершинах.
+     * wooden_axe лежит вдоль Z в авторской сцене — перекладываем рукоятью вверх (x,y,z)→(−x,z,y).
+     */
+    private fun buildToolHandVbo(modelId: String) {
+        val ctx = appContext ?: return
+        val floats = readAssetFloats(ctx, "models/$modelId/mesh.obj")
+        if (floats.isEmpty()) return
+        val remapXZ = modelId == "wooden_axe"
+        val gripShift = when (modelId) {
+            "wooden_axe" -> 1.30f
+            "pickaxe" -> -0.35f
+            "spear" -> -0.60f
+            else -> 0f
+        }
+        val scale = when (modelId) {
+            "wooden_axe" -> 0.28f
+            "pickaxe" -> 0.72f
+            "spear" -> 0.62f
+            else -> 1f
+        }
+        val builder = MeshBuilder(floats.size + 64)
+        var i = 0
+        while (i + 11 < floats.size) {
+            val lx = floats[i]; val ly = floats[i + 1]; val lz = floats[i + 2]
+            val nx = floats[i + 3]; val ny = floats[i + 4]; val nz = floats[i + 5]
+            val u = floats[i + 6]; val v = floats[i + 7]
+            val r = floats[i + 8]; val g = floats[i + 9]; val b = floats[i + 10]; val a = floats[i + 11]
+            val px: Float; val py: Float; val pz: Float
+            val pnx: Float; val pny: Float; val pnz: Float
+            if (remapXZ) {
+                px = -lx; py = lz; pz = ly
+                pnx = -nx; pny = nz; pnz = ny
+            } else {
+                px = lx; py = ly; pz = lz
+                pnx = nx; pny = ny; pnz = nz
+            }
+            builder.addVertex(
+                px * scale,
+                (py + gripShift) * scale,
+                pz * scale,
+                pnx, pny, pnz,
+                u, v,
+                r, g, b, a
+            )
+            i += 12
+        }
+        val vbo = GlVbo()
+        vbo.uploadStatic(builder)
+        toolHandVbos[modelId] = vbo
+    }
+
+    /** Модель топора/кирки/копья в руках игрока (первое лицо) с замахом и покачиванием шага. */
+    private fun drawFirstPersonToolModel(
+        modelId: String,
+        camX: Float,
+        camY: Float,
+        camZ: Float,
+        yawRad: Float,
+        pitchRad: Float,
+        swingProgress: Float,
+        walkBobPhase: Float,
+        timeSec: Float
+    ) {
+        val vbo = toolHandVbos[modelId] ?: return
+        val tex = assetTextures[modelId] ?: return
+        val fwdX = sin(yawRad) * cos(pitchRad)
+        val fwdY = sin(pitchRad)
+        val fwdZ = -cos(yawRad) * cos(pitchRad)
+        val rightX = cos(yawRad)
+        val rightZ = sin(yawRad)
+        val bobX = sin(walkBobPhase * 0.5f) * 0.022f
+        val bobY = abs(cos(walkBobPhase * 0.5f)) * 0.020f + sin(timeSec * 2.1f) * 0.006f
+        val chopArc = sin(swingProgress * Math.PI.toFloat())
+        val baseX = camX + fwdX * (0.58f + chopArc * 0.24f) + rightX * (0.34f - chopArc * 0.10f + bobX)
+        val baseY = camY - 0.34f + fwdY * 0.52f - chopArc * 0.16f - bobY
+        val baseZ = camZ + fwdZ * (0.58f + chopArc * 0.24f) + rightZ * (0.34f - chopArc * 0.10f + bobX)
+        val theta = 0.28f + chopArc * 0.85f
+        Matrix.setIdentityM(modelMatrix, 0)
+        Matrix.translateM(modelMatrix, 0, baseX, baseY, baseZ)
+        Matrix.rotateM(modelMatrix, 0, -yawRad * 180f / Math.PI.toFloat(), 0f, 1f, 0f)
+        Matrix.rotateM(modelMatrix, 0, -theta * 180f / Math.PI.toFloat(), 1f, 0f, 0f)
+        Matrix.multiplyMM(mvpMatrix, 0, vpMatrix, 0, modelMatrix, 0)
+        GLES20.glUniformMatrix4fv(uMvpLoc, 1, false, mvpMatrix, 0)
+        GLES20.glUniformMatrix4fv(uModelLoc, 1, false, modelMatrix, 0)
+        drawVbo(vbo, tex, unlit = false, specStrength = 0.26f)
+    }
+
     private fun readAssetFloats(ctx: android.content.Context, path: String): FloatArray {
         val text = try {
             ctx.assets.open(path).bufferedReader().use { it.readText() }
@@ -1624,6 +1871,53 @@ class ForestGlRenderer(
             i += 12
         }
         return builder
+    }
+
+    /**
+     * Печь импортированного меша в builder со сдвигом/поворотом/масштабом/тонировкой
+     * (та же математика, что у статических пропов: pitch вокруг X, затем yaw вокруг Y).
+     */
+    private fun appendTransformedMesh(
+        builder: MeshBuilder,
+        floats: FloatArray,
+        x: Float,
+        y: Float,
+        z: Float,
+        yawRad: Float,
+        pitchRad: Float,
+        scale: Float,
+        tintR: Float = 1f,
+        tintG: Float = 1f,
+        tintB: Float = 1f
+    ) {
+        val cos = kotlin.math.cos(yawRad)
+        val sin = kotlin.math.sin(yawRad)
+        val cp = kotlin.math.cos(pitchRad)
+        val sp = kotlin.math.sin(pitchRad)
+        var i = 0
+        while (i + 11 < floats.size) {
+            val lx = floats[i]; val ly = floats[i + 1]; val lz = floats[i + 2]
+            val nx = floats[i + 3]; val ny = floats[i + 4]; val nz = floats[i + 5]
+            val u = floats[i + 6]; val v = floats[i + 7]
+            val r = floats[i + 8]; val g = floats[i + 9]; val b = floats[i + 10]; val a = floats[i + 11]
+            val px1 = lx
+            val py1 = ly * cp - lz * sp
+            val pz1 = ly * sp + lz * cp
+            val nx1 = nx
+            val ny1 = ny * cp - nz * sp
+            val nz1 = ny * sp + nz * cp
+            builder.addVertex(
+                x + (px1 * cos + pz1 * sin) * scale,
+                y + py1 * scale,
+                z + (-px1 * sin + pz1 * cos) * scale,
+                nx1 * cos + nz1 * sin,
+                ny1,
+                -nx1 * sin + nz1 * cos,
+                u, v,
+                r * tintR, g * tintG, b * tintB, a
+            )
+            i += 12
+        }
     }
 
     /** Отрисовка зверя: тело стоит на месте, ноги качаются вокруг тазобедренных пиотов. */

@@ -58,6 +58,27 @@ class AssetPropsTest {
         val lake = AssetProps.forLocation(LocationId.FROZEN_LAKE).map { it.modelId }
         assertTrue(lake.contains("fish"))
         val mine = AssetProps.forLocation(LocationId.ABANDONED_MINE).map { it.modelId }
-        assertTrue(mine.contains("pickaxe"))
+        assertTrue(mine.contains("gate"))
+        assertTrue(mine.contains("cache_crate"))
+        assertTrue(mine.contains("lantern"))
+    }
+
+    @Test
+    fun `tool models live in player hands not on the floor`() {
+        // Топор/кирка/копьё рисуются от первого лица в руках — на земле их быть не должно
+        val floorTools = setOf("wooden_axe", "pickaxe", "spear")
+        for (loc in LocationId.entries) {
+            for (p in AssetProps.forLocation(loc)) {
+                assertTrue(
+                    "tool ${p.modelId} placed on the floor at $loc — must be held instead",
+                    p.modelId !in floorTools
+                )
+            }
+        }
+        // Но сами модели и их текстуры должны остаться загруженными (руки игрока)
+        val known = AssetProps.ALL_MODEL_IDS.toSet()
+        for (id in floorTools) {
+            assertTrue("tool model $id missing from ALL_MODEL_IDS", id in known)
+        }
     }
 }

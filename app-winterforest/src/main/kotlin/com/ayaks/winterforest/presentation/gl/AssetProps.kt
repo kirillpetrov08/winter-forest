@@ -26,7 +26,7 @@ object AssetProps {
     /** Все модели, которые нужно загрузить из assets/models/. */
     val ALL_MODEL_IDS = listOf(
         "rock_09", "rock_moss_a", "rock_moss_b", "fire_pit", "wooden_axe",
-        "dry_branches_a", "dry_branches_b", "calathea", "tree_bark", "tree_leaves",
+        "dry_branches_a", "dry_branches_b", "tree_bark",
         "cabin_wood", "cabin_bark", "cabin_stone", "cabin_shingle", "cabin_burned",
         "wolf_body", "deer_body",
         "spear", "pickaxe", "fence", "winter_tree", "workbench", "barrel",
@@ -39,7 +39,6 @@ object AssetProps {
     /** Тусклые/тёплые тонировки под северную палитру (листва холоднее, кора теплее). */
     private fun placements(loc: LocationId): List<Placement> = when (loc) {
         LocationId.BASE_CLEARING -> listOf(
-            Placement("wooden_axe", 6.15f, -3.05f, 2.1f, 0.35f),
             Placement("rock_09", 7.1f, -1.1f, 0.8f, 1.15f),
             Placement("rock_moss_a", -3.3f, 2.7f, 1.9f, 1.0f),
             Placement("rock_moss_b", -9.6f, -7.8f, 0.4f, 0.9f),
@@ -49,9 +48,6 @@ object AssetProps {
             Placement("tree_bark", 13.2f, -8.4f, 2.4f, 0.78f, 0.94f, 0.96f, 1.0f),
             // верстак-тележка — игровой ландмарк (4.8, -4.5)
             Placement("workbench", 4.8f, -4.5f, 2.35f, 1.0f),
-            // копьё и кирка воткнуты в снег с наклоном у верстака
-            Placement("spear", 5.35f, -5.15f, 1.15f, 1.0f, pitchRad = 0.30f),
-            Placement("pickaxe", 4.25f, -5.15f, 2.6f, 0.92f, pitchRad = 0.34f),
             Placement("crate", 6.35f, -2.55f, 1.9f, 1.0f),
             Placement("cache_crate", 4.2f, -3.6f, 0.5f, 1.25f),
             Placement("barrel", -5.85f, -6.7f, 0.6f, 1.0f),
@@ -70,7 +66,6 @@ object AssetProps {
             Placement("cabin_shingle", 7.2f, 8.8f, 3.6f, 0.78f),
             Placement("cabin_burned", 7.2f, 8.8f, 3.6f, 0.78f),
             Placement("fire_pit", 4.5f, 6.3f, 1.1f, 0.72f),
-            Placement("wooden_axe", 8.35f, 7.0f, 2.6f, 0.35f),
             Placement("rock_moss_b", 9.9f, 5.1f, 1.5f, 1.0f),
             Placement("rock_09", 3.2f, 11.6f, 2.2f, 1.1f),
             Placement("dry_branches_a", -5.9f, 3.2f, 0.3f, 1.0f),
@@ -85,7 +80,6 @@ object AssetProps {
             Placement("woodstack", 10.05f, 7.75f, 2.6f, 1.0f),
             Placement("fence", 3.55f, 6.05f, 1.18f, 1.0f),
             Placement("fence", 2.85f, 4.35f, 1.32f, 1.0f),
-            Placement("pickaxe", 6.05f, 10.25f, 2.2f, 0.92f, pitchRad = 0.32f),
             Placement("crate", 8.45f, 5.45f, 0.4f, 1.0f),
             Placement("winter_tree", 14.6f, 5.9f, 2.25f, 0.85f)
         )
@@ -104,7 +98,6 @@ object AssetProps {
             Placement("fence", 1.75f, 10.55f, 1.08f, 1.0f),
             Placement("woodstack", 6.45f, -9.15f, 1.35f, 1.0f),
             Placement("barrel", -13.55f, -2.25f, 2.1f, 1.0f),
-            Placement("spear", 3.35f, -5.55f, 0.35f, 1.0f, pitchRad = 0.28f),
             Placement("crate", -8.15f, -9.65f, 1.6f, 1.0f)
         )
         LocationId.FROZEN_LAKE -> listOf(
@@ -117,7 +110,6 @@ object AssetProps {
             Placement("fish", 8.15f, -5.85f, 0.75f, 1.0f),
             Placement("cache_crate", 10.5f, -8.5f, 0.9f, 1.25f),
             Placement("lantern", 9.25f, -7.55f, 1.4f, 1.0f),
-            Placement("spear", 7.75f, -7.05f, 2.5f, 1.0f, pitchRad = 0.28f),
             Placement("fence", -12.15f, 4.85f, 1.62f, 1.0f),
             Placement("woodstack", -18.35f, 9.45f, 0.42f, 1.0f),
             Placement("barrel", -20.55f, -7.15f, 1.15f, 1.0f)
@@ -127,14 +119,11 @@ object AssetProps {
             Placement("rock_moss_a", 5.6f, -17.3f, 2.2f, 1.0f),
             Placement("rock_09", -6.8f, 20.5f, 1.3f, 1.15f),
             Placement("rock_09", 7.2f, 24.0f, 0.5f, 0.95f),
-            Placement("wooden_axe", -3.7f, -2.1f, 1.8f, 0.35f),
             Placement("dry_branches_a", 3.9f, -25.2f, 2.7f, 1.0f),
             // врата к жиле, тайник шахты (-8, 10)
             Placement("gate", -8.0f, 7.6f, 0.0f, 0.85f),
             Placement("cache_crate", -8.0f, 10.0f, 3.0f, 1.25f),
             Placement("lantern", -7.05f, 8.45f, 2.2f, 1.0f),
-            Placement("pickaxe", -8.95f, 9.35f, 0.6f, 0.92f, pitchRad = 0.32f),
-            Placement("pickaxe", -6.25f, 11.35f, 2.4f, 0.92f, pitchRad = 0.30f),
             Placement("barrel", -4.45f, 12.55f, 1.7f, 1.0f),
             Placement("fence", 2.25f, 21.55f, 0.38f, 1.0f),
             Placement("fence", 3.45f, 23.05f, 0.52f, 1.0f),

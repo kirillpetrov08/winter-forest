@@ -75,10 +75,16 @@ enum class ResourceType(
         xpReward = 14
     ),
     IRON(
-        titleRu = "Железо",
+        titleRu = "Железная руда",
         titleEn = "Iron Ore",
         category = ResourceCategory.MATERIAL,
         xpReward = 16
+    ),
+    IRON_INGOT(
+        titleRu = "Железо",
+        titleEn = "Iron Ingot",
+        category = ResourceCategory.MATERIAL,
+        xpReward = 18
     ),
     MEAT(
         titleRu = "Мясо",
