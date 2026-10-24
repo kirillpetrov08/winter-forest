@@ -379,6 +379,11 @@ class ForestGlRenderer(
 
         val pal = loc.palette
         fillScaledHex(pal.skyZenithHex, 0.20f + 0.80f * daylight, zenithRgb)
+        // Днём зенит — холодное синее небо: иначе палитра «Snowy Night» даёт чёрный верх
+        val dayMix = daylight * daylight
+        zenithRgb[0] = zenithRgb[0] * (1f - dayMix) + 0.33f * dayMix
+        zenithRgb[1] = zenithRgb[1] * (1f - dayMix) + 0.46f * dayMix
+        zenithRgb[2] = zenithRgb[2] * (1f - dayMix) + 0.68f * dayMix
         fillScaledHex(pal.skyHorizonHex, 0.22f + 0.78f * daylight, horizonRgb)
         fillScaledHex(pal.fogHex, 0.20f + 0.80f * effectiveLight, fogRgb)
         fillScaledHex(pal.sunLightHex, 0.16f + 0.90f * effectiveLight, sunRgb)
@@ -1073,10 +1078,12 @@ class ForestGlRenderer(
                     foliage.addShadowDisc(node.x, y, node.z, 1.15f, 0.34f)
                     foliage.addSpruceBoughTier(node.x, y + 0.08f, node.z, 0.92f, 0.88f, tips = 7, twistRad = idx * 0.6f)
                     foliage.addSpruceBoughTier(node.x + 0.25f, y + 0.22f, node.z - 0.18f, 0.68f, 0.72f, tips = 6, twistRad = 1.1f)
+                    foliage.addSpruceBoughTier(node.x - 0.12f, y + 0.38f, node.z + 0.10f, 0.46f, 0.50f, tips = 6, twistRad = 2.05f)
+                    // Ягоды утоплены в крону: раньше шарики «висели» над кустом
                     for (b in 0 until 7) {
                         val ba = b * 0.9f + idx
                         cloth.addSculptedBoulder(
-                            node.x + cos(ba) * 0.46f, y + 0.32f + (b % 3) * 0.16f, node.z + sin(ba) * 0.46f,
+                            node.x + cos(ba) * 0.32f, y + 0.14f + (b % 3) * 0.11f, node.z + sin(ba) * 0.32f,
                             0.075f, 0.075f, 0.075f, 60 + b, r = 1.0f, g = 0.16f, b = 0.20f, snowCapTint = false
                         )
                     }
@@ -1467,11 +1474,11 @@ class ForestGlRenderer(
         }
         // 5 многолучевых ярусов заснеженных еловых лап с поворотом каждого яруса
         val tiers = arrayOf(
-            floatArrayOf(1.15f, 2.35f, 1.55f),
-            floatArrayOf(2.20f, 1.98f, 1.48f),
-            floatArrayOf(3.15f, 1.58f, 1.38f),
-            floatArrayOf(4.02f, 1.18f, 1.25f),
-            floatArrayOf(4.78f, 0.72f, 1.15f)
+            floatArrayOf(1.95f, 2.20f, 1.50f),
+            floatArrayOf(2.75f, 1.92f, 1.45f),
+            floatArrayOf(3.55f, 1.58f, 1.36f),
+            floatArrayOf(4.25f, 1.18f, 1.25f),
+            floatArrayOf(4.85f, 0.72f, 1.15f)
         )
         for ((ti, t) in tiers.withIndex()) {
             foliage.addSpruceBoughTier(
@@ -1949,14 +1956,14 @@ class ForestGlRenderer(
         val remapXZ = modelId == "wooden_axe"
         val gripShift = when (modelId) {
             "wooden_axe" -> 1.30f
-            "pickaxe" -> -0.35f
-            "spear" -> -0.60f
+            "pickaxe" -> -0.30f
+            "spear" -> -0.55f
             else -> 0f
         }
         val scale = when (modelId) {
             "wooden_axe" -> 0.28f
-            "pickaxe" -> 0.72f
-            "spear" -> 0.62f
+            "pickaxe" -> 0.52f
+            "spear" -> 0.52f
             else -> 1f
         }
         val builder = MeshBuilder(floats.size + 64)
@@ -2015,7 +2022,7 @@ class ForestGlRenderer(
         val baseX = camX + fwdX * (0.58f + chopArc * 0.24f) + rightX * (0.34f - chopArc * 0.10f + bobX)
         val baseY = camY - 0.34f + fwdY * 0.52f - chopArc * 0.16f - bobY
         val baseZ = camZ + fwdZ * (0.58f + chopArc * 0.24f) + rightZ * (0.34f - chopArc * 0.10f + bobX)
-        val theta = 0.28f + chopArc * 0.85f
+        val theta = 0.26f + chopArc * 0.62f
         Matrix.setIdentityM(modelMatrix, 0)
         Matrix.translateM(modelMatrix, 0, baseX, baseY, baseZ)
         Matrix.rotateM(modelMatrix, 0, -yawRad * 180f / Math.PI.toFloat(), 0f, 1f, 0f)
