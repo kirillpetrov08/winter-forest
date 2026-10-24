@@ -1113,5 +1113,163 @@ class MeshBuilder(initialFloatsCapacity: Int = 16384) {
                 (0.55f * sin(radial * 0.45f) * ((edge - 38.2f).coerceIn(0f, 4f) * 0.25f))
             return base + ridge
         }
+
+        /** Полуразмер мира и сетка мирового рельефа — одна правда для меша и пропов. */
+        const val WORLD_HALF_EXTENT = 168f
+
+        private fun worldGridSteps(qualitySteps: Int): Int = qualitySteps.coerceIn(120, 300)
+
+        /**
+         * Сеточная высота мирового рельефа: билинейная интерполяция по ТОЙ ЖЕ сетке,
+         * что и меш рельефа. Пропы и звери, поставленные по ней, НЕ висят в воздухе
+         * и не тонут в земле.
+         */
+        fun sampleWorldHeight(x: Float, z: Float, steps: Int): Float {
+            val s = worldGridSteps(steps)
+            val cell = (WORLD_HALF_EXTENT * 2f) / s
+            val fx = ((x + WORLD_HALF_EXTENT) / cell).coerceIn(0f, s - 0.001f)
+            val fz = ((z + WORLD_HALF_EXTENT) / cell).coerceIn(0f, s - 0.001f)
+            val gx = fx.toInt()
+            val gz = fz.toInt()
+            val tx = fx - gx
+            val tz = fz - gz
+            val x0 = -WORLD_HALF_EXTENT + gx * cell
+            val z0 = -WORLD_HALF_EXTENT + gz * cell
+            val h00 = WorldPopulator.worldHeight(x0, z0)
+            val h10 = WorldPopulator.worldHeight(x0 + cell, z0)
+            val h01 = WorldPopulator.worldHeight(x0, z0 + cell)
+            val h11 = WorldPopulator.worldHeight(x0 + cell, z0 + cell)
+            val h0 = h00 + (h10 - h00) * tx
+            val h1 = h01 + (h11 - h01) * tx
+            return h0 + (h1 - h0) * tz
+        }
+
+        /** Меш единого большого мира: все районы, смешение рельефа, кряж по краю. */
+        fun buildWorldTerrainIntoBuilder(steps: Int): MeshBuilder {
+            val s = worldGridSteps(steps)
+            val half = WORLD_HALF_EXTENT
+            val gCount = s + 1
+            val cell = (half * 2f) / s
+            val heights = FloatArray(gCount * gCount)
+            val normX = FloatArray(gCount * gCount)
+            val normY = FloatArray(gCount * gCount)
+            val normZ = FloatArray(gCount * gCount)
+            val vertAo = FloatArray(gCount * gCount)
+
+            for (gz in 0..s) {
+                val z = -half + gz * cell
+                for (gx in 0..s) {
+                    val x = -half + gx * cell
+                    heights[gz * gCount + gx] = WorldPopulator.worldHeight(x, z)
+                }
+            }
+
+            for (gz in 0..s) {
+                for (gx in 0..s) {
+                    val idx = gz * gCount + gx
+                    val hL = heights[gz * gCount + max(gx - 1, 0)]
+                    val hR = heights[gz * gCount + minOf(gx + 1, s)]
+                    val hD = heights[max(gz - 1, 0) * gCount + gx]
+                    val hU = heights[minOf(gz + 1, s) * gCount + gx]
+                    val hC = heights[idx]
+                    val dx = (hL - hR) / (2f * cell)
+                    val dz = (hD - hU) / (2f * cell)
+                    val inv = 1f / sqrt(dx * dx + 1f + dz * dz)
+                    normX[idx] = dx * inv
+                    normY[idx] = inv
+                    normZ[idx] = dz * inv
+                    val avgNeighbors = (hL + hR + hD + hU) * 0.25f
+                    val cavity = ((hC - avgNeighbors) * 0.55f).coerceIn(-0.18f, 0.10f)
+                    // Утоптанная тропа между районами (лучи от центра к каждому району)
+                    val x = -half + gx * cell
+                    val z = -half + gz * cell
+                    val onPath = if (pathFactor(x, z) > 0f) 0.92f else 1f
+                    vertAo[idx] = ((0.94f + cavity) * onPath).coerceIn(0.74f, 1.03f)
+                }
+            }
+
+            val mb = MeshBuilder(s * s * 6 * GlMesh.FLOATS_PER_VERTEX)
+            val uvScale = 0.52f
+            for (gz in 0 until s) {
+                val z0 = -half + gz * cell
+                val z1 = z0 + cell
+                for (gx in 0 until s) {
+                    val x0 = -half + gx * cell
+                    val x1 = x0 + cell
+                    val i00 = gz * gCount + gx
+                    val i10 = gz * gCount + (gx + 1)
+                    val i01 = (gz + 1) * gCount + gx
+                    val i11 = (gz + 1) * gCount + (gx + 1)
+                    val u0 = x0 * uvScale
+                    val u1 = x1 * uvScale
+                    val v0 = z0 * uvScale
+                    val v1 = z1 * uvScale
+                    fun emit(i: Int, x: Float, z: Float, u: Float, v: Float) {
+                        val ao = vertAo[i]
+                        val t = terrainTintAt(x, z)
+                        mb.addVertex(
+                            x, heights[i], z,
+                            normX[i], normY[i], normZ[i],
+                            u, v,
+                            ao * 0.99f * t[0], ao * t[1], (ao * 1.02f).coerceAtMost(1.04f) * t[2], 1f
+                        )
+                    }
+                    emit(i00, x0, z0, u0, v0)
+                    emit(i01, x0, z1, u0, v1)
+                    emit(i11, x1, z1, u1, v1)
+
+                    emit(i00, x0, z0, u0, v0)
+                    emit(i11, x1, z1, u1, v1)
+                    emit(i10, x1, z0, u1, v0)
+                }
+            }
+            return mb
+        }
+
+        /** Утоптанные тропы-лучи от центра мира к каждому району (для АО рельефа). */
+        private fun pathFactor(x: Float, z: Float): Float {
+            val targets = arrayOf(
+                floatArrayOf(0f, -120f), floatArrayOf(120f, 0f),
+                floatArrayOf(-120f, 0f), floatArrayOf(0f, 120f)
+            )
+            for (t in targets) {
+                val dx = t[0] - x
+                val dz = t[1] - z
+                val len = sqrt(dx * dx + dz * dz)
+                if (len < 1f) return 1f
+                val tPar = ((x * dx + z * dz) / (len * len)).coerceIn(0f, 1f)
+                val cx = x + dx * tPar
+                val cz = z + dz * tPar
+                if (cx * cx + cz * cz < 1.7f * 1.7f) return 1f
+            }
+            return 0f
+        }
+
+        /** Лёгкая подкраска рельефа района: шахта холоднее, озеро синее, тайга ярче. */
+        private fun terrainTintAt(x: Float, z: Float): FloatArray = when (com.ayaks.winterforest.domain.world.WorldRegions.regionAt(x, z)) {
+            com.ayaks.winterforest.domain.model.LocationId.ABANDONED_MINE -> floatArrayOf(0.86f, 0.88f, 0.97f)
+            com.ayaks.winterforest.domain.model.LocationId.FROZEN_LAKE -> floatArrayOf(0.97f, 1.0f, 1.05f)
+            com.ayaks.winterforest.domain.model.LocationId.DENSE_SPRUCE -> floatArrayOf(0.97f, 1.0f, 0.98f)
+            else -> floatArrayOf(1f, 1f, 1f)
+        }
+    }
+
+    /** Копирует вершины другого билдера со сдвигом X/Z (раскладка районов большого мира). */
+    fun appendTranslatedFrom(other: MeshBuilder, dx: Float, dz: Float) {
+        val src = other.rawArray()
+        val n = other.floatSize
+        if (floatSize + n > data.size) {
+            var cap = data.size
+            while (cap < floatSize + n) cap *= 2
+            data = data.copyOf(cap)
+        }
+        System.arraycopy(src, 0, data, floatSize, n)
+        var o = floatSize
+        while (o < floatSize + n) {
+            data[o] += dx
+            data[o + 2] += dz
+            o += GlMesh.FLOATS_PER_VERTEX
+        }
+        floatSize += n
     }
 }
