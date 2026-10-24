@@ -241,7 +241,7 @@ object WorldPopulator {
                 }
             }
 
-            val kind = kindForResource(location, chosenType)
+            val kind = kindForResource(location, chosenType, index)
             val yieldAmount = rng.nextInt(1, 3)
 
             result += ResourceNode(
@@ -285,10 +285,22 @@ object WorldPopulator {
         LocationId.HUNTERS_CABIN -> 9.0f to 9.5f
     }
 
-    private fun kindForResource(location: LocationId, type: ResourceType): WorldObjectKind =
+    private fun kindForResource(
+        location: LocationId,
+        type: ResourceType,
+        index: Int
+    ): WorldObjectKind =
         when (type) {
-            ResourceType.WOOD -> WorldObjectKind.PINE_TREE
-            ResourceType.BERRIES -> WorldObjectKind.BERRY_BUSH
+            // Каждый 4-й лесной узел — лиственное дерево пользователя (в заброшенной
+            // шахте растёт только хвоя), каждый 3-й ягодный — полевой куст.
+            ResourceType.WOOD ->
+                if (index % 4 == 3 && location != LocationId.ABANDONED_MINE) {
+                    WorldObjectKind.OAK_TREE
+                } else {
+                    WorldObjectKind.PINE_TREE
+                }
+            ResourceType.BERRIES ->
+                if (index % 3 == 2) WorldObjectKind.SCRUB_BUSH else WorldObjectKind.BERRY_BUSH
             ResourceType.STONE -> WorldObjectKind.STONE_OUTCROP
             ResourceType.CLOTH -> WorldObjectKind.SUPPLY_CRATE
             ResourceType.RESIN -> WorldObjectKind.RESIN_STUMP

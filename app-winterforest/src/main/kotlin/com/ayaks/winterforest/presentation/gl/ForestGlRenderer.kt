@@ -1140,6 +1140,27 @@ class ForestGlRenderer(
                     metal.addBox(node.x, y + 0.66f, node.z, 1.28f, 0.16f, 0.90f, 1.0f, 0.88f, 0.55f)
                     bark.addTaperedCylinder(node.x + 0.78f, y, node.z, node.x + 0.78f, y + 1.85f, node.z, 0.05f, 0.04f, 6)
                 }
+                // Лиственные деревья и полевые кусты пака Trees & Bushes (модель пользователя)
+                WorldObjectKind.OAK_TREE -> {
+                    foliage.addShadowDisc(node.x, y, node.z, 1.55f, 0.36f)
+                    val oakId = OAK_MODELS[idx % OAK_MODELS.size]
+                    nodeRockSpots.getOrPut(oakId) { mutableListOf() }
+                        .add(floatArrayOf(node.x, y, node.z, idx * 1.71f, 0.92f + (idx % 3) * 0.12f, 0.94f, 0.97f, 1f))
+                }
+                WorldObjectKind.SCRUB_BUSH -> {
+                    foliage.addShadowDisc(node.x, y, node.z, 1.05f, 0.34f)
+                    val bushId = SCRUB_MODELS[idx % SCRUB_MODELS.size]
+                    nodeRockSpots.getOrPut(bushId) { mutableListOf() }
+                        .add(floatArrayOf(node.x, y, node.z, idx * 2.13f, 0.94f + (idx % 3) * 0.10f, 0.96f, 0.97f, 1f))
+                    // Ягоды утоплены в крону куста — признак добычи
+                    for (b in 0 until 5) {
+                        val ba = b * 1.1f + idx
+                        cloth.addSculptedBoulder(
+                            node.x + cos(ba) * 0.28f, y + 0.30f + (b % 3) * 0.10f, node.z + sin(ba) * 0.28f,
+                            0.07f, 0.07f, 0.07f, 60 + b, r = 1.0f, g = 0.16f, b = 0.20f, snowCapTint = false
+                        )
+                    }
+                }
             }
         }
 
@@ -2220,6 +2241,12 @@ class ForestGlRenderer(
     companion object {
         /** Окно интерполяции позиции = период тика симуляции (20 Гц). */
         private const val TICK_INTERP_WINDOW_NS = 50_000_000L
+
+        /** Лиственные деревья пака Trees & Bushes (модель пользователя). */
+        private val OAK_MODELS = arrayOf("oak_a", "oak_b", "oak_c")
+
+        /** Полевые кусты пака Trees & Bushes (модель пользователя). */
+        private val SCRUB_MODELS = arrayOf("bush_green", "bush_dry", "bush_thicket")
 
         /** Скачок больше этой дистанции считается телепортом. */
         private const val SNAP_DISTANCE_M = 4.0f

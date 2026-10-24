@@ -51,6 +51,9 @@ object WorldCollision {
                 WorldObjectKind.COAL_SEAM -> 1.0f
                 WorldObjectKind.IRON_VEIN -> 1.0f
                 WorldObjectKind.SPECIAL_CACHE -> 0.48f
+                // Лиственное дерево и полевой куст (модель пользователя) — непроходимые
+                WorldObjectKind.OAK_TREE -> 0.70f
+                WorldObjectKind.SCRUB_BUSH -> 0.62f
                 // ICE_HOLE — лунка для рыбалки, GAME_CARCASS — туша: не мешают
                 else -> continue
             }
@@ -79,6 +82,12 @@ object WorldCollision {
                 circles.add(Circle(4.2f, -3.6f, 0.62f)) // тайник-ящик
                 circles.add(Circle(-12.6f, 10.6f, 0.55f)) // сухие деревья
                 circles.add(Circle(13.2f, -8.4f, 0.55f))
+                // деревья и кусты пака Trees & Bushes — непроходимые
+                circles.add(Circle(-11.5f, -9.5f, 0.70f))
+                circles.add(Circle(10.8f, 6.2f, 0.65f))
+                circles.add(Circle(7.9f, 3.1f, 0.62f))
+                circles.add(Circle(-4.2f, 8.9f, 0.62f))
+                circles.add(Circle(12.4f, -3.2f, 0.58f))
             }
             LocationId.HUNTERS_CABIN -> {
                 addCabin(rects, HUNTER_CABIN)
@@ -86,16 +95,30 @@ object WorldCollision {
                 circles.add(Circle(8.45f, 5.45f, 0.5f)) // ящик
                 circles.add(Circle(9.0f, 9.5f, 0.62f)) // тайник
                 circles.add(Circle(14.6f, 5.9f, 0.6f)) // зимнее дерево (тории)
+                // деревья и кусты пака Trees & Bushes — непроходимые
+                circles.add(Circle(1.2f, 12.8f, 0.70f))
+                circles.add(Circle(12.3f, 2.4f, 0.60f))
+                circles.add(Circle(5.1f, 4.15f, 0.62f))
+                circles.add(Circle(-2.8f, 9.6f, 0.62f))
             }
             LocationId.DENSE_SPRUCE -> {
                 circles.add(Circle(-12.9f, 8.1f, 0.6f))
                 circles.add(Circle(11.7f, -14.3f, 0.6f))
                 circles.add(Circle(-9.5f, -11.0f, 0.62f))
                 circles.add(Circle(-8.15f, -9.65f, 0.5f))
+                // деревья и кусты пака Trees & Bushes — непроходимые
+                circles.add(Circle(-6.7f, 2.9f, 0.70f))
+                circles.add(Circle(8.6f, -6.4f, 0.70f))
+                circles.add(Circle(2.2f, -3.6f, 0.65f))
+                circles.add(Circle(-11.2f, -6.8f, 0.58f))
             }
             LocationId.FROZEN_LAKE -> {
                 circles.add(Circle(10.5f, -8.5f, 0.62f))
                 circles.add(Circle(-7.65f, -5.25f, 0.72f))
+                // дерево и кусты пака Trees & Bushes — непроходимые
+                circles.add(Circle(-16.5f, -2.2f, 0.65f))
+                circles.add(Circle(-13.8f, 5.5f, 0.62f))
+                circles.add(Circle(14.9f, 6.8f, 0.58f))
             }
             LocationId.ABANDONED_MINE -> {
                 // Каменные крепи штольни + глыбы
@@ -107,6 +130,8 @@ object WorldCollision {
                 }
                 circles.add(Circle(-8.0f, 10.0f, 0.62f))
                 circles.add(Circle(-9.45f, 12.05f, 0.5f))
+                // сухой куст пака Trees & Bushes — непроходимый
+                circles.add(Circle(-2.4f, -8.2f, 0.62f))
             }
         }
         return circles to rects
