@@ -67,16 +67,21 @@ import com.ayaks.winterforest.presentation.gl.ForestGlSurfaceView
 import com.ayaks.winterforest.presentation.gl.RenderSceneSnapshot
 import com.ayaks.winterforest.presentation.navigation.AppDestination
 import com.ayaks.winterforest.presentation.ui.components.CrosshairOverlay
+import com.ayaks.winterforest.presentation.ui.components.GlassChip
+import com.ayaks.winterforest.presentation.ui.components.GlassMenuButton
+import com.ayaks.winterforest.presentation.ui.components.GlassStatRow
 import com.ayaks.winterforest.presentation.ui.components.HealthBarColor
 import com.ayaks.winterforest.presentation.ui.components.HungerBarColor
 import com.ayaks.winterforest.presentation.ui.components.MainMenuAdaptiveBanner
 import com.ayaks.winterforest.presentation.ui.components.MiniRadarHud
+import com.ayaks.winterforest.presentation.ui.components.PrimaryGameButton
 import com.ayaks.winterforest.presentation.ui.components.QuickEquipmentHotbar
 import com.ayaks.winterforest.presentation.ui.components.StaminaBarColor
 import com.ayaks.winterforest.presentation.ui.components.SurvivalStatBar
 import com.ayaks.winterforest.presentation.ui.components.VirtualJoystick
 import com.ayaks.winterforest.presentation.ui.components.WarmthBarColor
 import com.ayaks.winterforest.presentation.ui.components.XpBarColor
+import com.ayaks.winterforest.presentation.ui.components.rememberAssetIcon
 import com.ayaks.winterforest.presentation.ui.theme.CrimsonDanger
 import com.ayaks.winterforest.presentation.ui.theme.DeepPineNight
 import com.ayaks.winterforest.presentation.ui.theme.FrostedCardSurface
@@ -146,16 +151,17 @@ fun MainMenuScreen(
         // Живая 3D-панорама лагеря отрисовывается корневым PersistentForestScene
         // (режим орбиты меню) — сцена остаётся тёплой и не гаснет при переходах.
 
-        // Лёгкая кинематографическая виньетка для идеальной читаемости текста поверх 3D-сцены
+        // Лёгкая кинематографическая виньетка для читаемости: фон ПОЛУПРОЗРАЧНЫЙ,
+        // живая 3D-сцена лагеря просвечивает сквозь стекло меню
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .background(
                     Brush.horizontalGradient(
                         colors = listOf(
-                            Color(0xCC06111B),
-                            Color(0x66081521),
-                            Color(0xBF07131E)
+                            Color(0xA606111B),
+                            Color(0x3D081521),
+                            Color(0x9407131E)
                         )
                     )
                 )
@@ -178,11 +184,11 @@ fun MainMenuScreen(
                 // Левая колонка: логотип, атмосфера и сводка мета-прогресса выжившего
                 Column(
                     modifier = Modifier.weight(1.15f),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     Text(
                         text = "WINTER FOREST",
-                        fontSize = 36.sp,
+                        fontSize = 38.sp,
                         fontWeight = FontWeight.ExtraBold,
                         color = SnowCrispText,
                         letterSpacing = 3.sp
@@ -194,84 +200,95 @@ fun MainMenuScreen(
                         fontWeight = FontWeight.Medium
                     )
 
-                    Card(
-                        colors = CardDefaults.cardColors(containerColor = Color(0xC40B1926)),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 14.dp, vertical = 12.dp),
-                            horizontalArrangement = Arrangement.SpaceAround
-                        ) {
-                            StatPill("Рекорд", "${state.baseProgress.bestDaysSurvived} дн.")
-                            StatPill("Ур. базы", "${state.baseProgress.totalBaseLevel}/15")
-                            StatPill(
-                                "Реликвии",
-                                "${state.baseProgress.persistentSpecialLoot.size}/${SpecialLootId.entries.size}"
+                    GlassStatRow(
+                        items = listOf(
+                            Triple(
+                                rememberAssetIcon("glyphs/glyph_timer.png"),
+                                "${state.baseProgress.bestDaysSurvived}",
+                                "Рекорд, дн."
+                            ),
+                            Triple(
+                                rememberAssetIcon("glyphs/glyph_home.png"),
+                                "${state.baseProgress.totalBaseLevel}/20",
+                                "Уровень базы"
+                            ),
+                            Triple(
+                                rememberAssetIcon("glyphs/glyph_backpack.png"),
+                                "${state.baseProgress.persistentSpecialLoot.size}/${SpecialLootId.entries.size}",
+                                "Реликвии"
+                            ),
+                            Triple(
+                                rememberAssetIcon("glyphs/glyph_xp.png"),
+                                "${state.baseProgress.totalWildlifeHunted}",
+                                "Охота"
                             )
-                            StatPill("Охота", "${state.baseProgress.totalWildlifeHunted}")
-                        }
-                    }
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    )
 
-                    Text(
-                        text = "Снаряжение: «${state.baseProgress.selectedLoadout.titleRu}» • Графика: ${state.settings.graphicsQuality.titleRu}",
-                        color = MistMutedText,
-                        fontSize = 12.sp
+                    GlassChip(
+                        text = "Снаряжение: «${state.baseProgress.selectedLoadout.titleRu}»  •  Графика: ${state.settings.graphicsQuality.titleRu}",
+                        fill = Color(0x7AFFFFFF),
+                        textColor = MistMutedText,
+                        fontSize = 11
                     )
                 }
 
-                // Правая колонка: кнопки навигации под горизонтальный хват
+                // Правая колонка: один крупный CTA + стеклянные кнопки навигации с иконками
                 Column(
                     modifier = Modifier.weight(0.95f),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     if (state.hasActiveSave) {
-                        Button(
+                        PrimaryGameButton(
+                            text = "Продолжить • День ${state.activeRun?.dayNumberDisplay ?: 1}",
+                            icon = rememberAssetIcon("glyphs/glyph_map.png"),
                             onClick = { viewModel.continueSavedGame() },
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(46.dp)
                                 .testTag("btn_continue")
-                        ) {
-                            val day = state.activeRun?.dayNumberDisplay ?: 1
-                            val loc = state.activeRun?.currentLocation?.titleRu.orEmpty()
-                            Text("Продолжить (День $day • $loc)", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-                        }
+                        )
+                        GlassMenuButton(
+                            text = "Новая экспедиция",
+                            icon = rememberAssetIcon("glyphs/glyph_snowfall.png"),
+                            onClick = { viewModel.startNewGame() },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("btn_new_game")
+                        )
+                    } else {
+                        PrimaryGameButton(
+                            text = "Новая экспедиция",
+                            icon = rememberAssetIcon("glyphs/glyph_snowfall.png"),
+                            onClick = { viewModel.startNewGame() },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("btn_new_game")
+                        )
                     }
 
-                    Button(
-                        onClick = { viewModel.startNewGame() },
-                        colors = ButtonDefaults.buttonColors(containerColor = HearthAmberAccent),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(46.dp)
-                            .testTag("btn_new_game")
-                    ) {
-                        Text("Новая экспедиция", color = Color(0xFF1A1006), fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                    }
-
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                        OutlinedButton(
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+                        GlassMenuButton(
+                            text = "База и крафт",
+                            icon = rememberAssetIcon("glyphs/glyph_home.png"),
                             onClick = { viewModel.navigateTo(AppDestination.BASE_INVENTORY) },
-                            modifier = Modifier.weight(1.25f).height(42.dp)
-                        ) {
-                            Text("База, крафт и карта", fontSize = 12.sp)
-                        }
-                        OutlinedButton(
+                            modifier = Modifier.weight(1.15f)
+                        )
+                        GlassMenuButton(
+                            text = "Настройки",
+                            icon = rememberAssetIcon("glyphs/glyph_settings.png"),
                             onClick = { viewModel.navigateTo(AppDestination.SETTINGS) },
-                            modifier = Modifier.weight(0.85f).height(42.dp)
-                        ) {
-                            Text("Настройки", fontSize = 12.sp)
-                        }
+                            modifier = Modifier.weight(0.85f)
+                        )
                     }
 
-                    OutlinedButton(
+                    GlassMenuButton(
+                        text = "Об игре и управлении",
                         onClick = { viewModel.navigateTo(AppDestination.ABOUT) },
-                        modifier = Modifier.fillMaxWidth().height(38.dp)
-                    ) {
-                        Text("Об игре и управлении", fontSize = 12.sp)
-                    }
+                        modifier = Modifier.fillMaxWidth(),
+                        height = 40.dp,
+                        fontSize = 12
+                    )
                 }
             }
 
@@ -388,12 +405,12 @@ fun GameScreen(
             }
         }
 
-        // 4. Верхняя центральная строка живых событий + пропуск активного таймера
+        // 4. Строка активного таймера — под верхней панелью, чтобы не перекрывать «Меню»
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             modifier = Modifier
                 .align(Alignment.TopCenter)
-                .padding(top = 8.dp)
+                .padding(top = 64.dp)
                 .width(340.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
@@ -557,26 +574,14 @@ fun GameScreen(
                 modifier = Modifier.width(120.dp)
             )
 
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                com.ayaks.winterforest.presentation.ui.components.CooldownButton(
-                    label = "Еда / Тепло",
-                    cooldownRemainingSec = state.cooldowns["quick_use"] ?: 0f,
-                    cooldownTotalSec = 0.9f,
-                    onClick = { viewModel.onActionQuickUse() },
-                    modifier = Modifier.width(128.dp).height(42.dp)
-                )
-
-                com.ayaks.winterforest.presentation.ui.components.CooldownButton(
-                    label = primaryLabel,
-                    cooldownRemainingSec = state.cooldowns["strike"] ?: 0f,
-                    cooldownTotalSec = 1.0f,
-                    onClick = { viewModel.onActionStrike() },
-                    modifier = Modifier.width(150.dp).height(54.dp)
-                )
-            }
+            // Еда/Костёр живут в хотбаре (слоты 5–6) — дублирующая кнопка «Еда / Тепло» убрана
+            com.ayaks.winterforest.presentation.ui.components.CooldownButton(
+                label = primaryLabel,
+                cooldownRemainingSec = state.cooldowns["strike"] ?: 0f,
+                cooldownTotalSec = 1.0f,
+                onClick = { viewModel.onActionStrike() },
+                modifier = Modifier.width(150.dp).height(54.dp)
+            )
         }
     }
 }
@@ -743,7 +748,10 @@ private fun BaseStructuresTab(
                     if (cost != null) {
                         val costStr = cost.entries.joinToString(", ") { "${it.key.titleRu}: ${it.value}" }
                         Button(onClick = { viewModel.onUpgradeBase(upgrade) }) {
-                            Text("Улучшить ($costStr)", fontSize = 11.sp)
+                            Text(
+                                "${if (lvl == 0) "Построить" else "Улучшить"} ($costStr)",
+                                fontSize = 11.sp
+                            )
                         }
                     } else {
                         Text("Максимум", color = SpruceEmerald, fontWeight = FontWeight.Bold, fontSize = 12.sp)
@@ -772,6 +780,58 @@ private fun BaseStructuresTab(
             }
         }
     }
+
+    // Плавка железа в Каменной печи: руда + уголь → слитки (потом крафт железных инструментов)
+    Card(colors = CardDefaults.cardColors(containerColor = FrostedCardSurface)) {
+        Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Каменная печь — плавка металла", fontWeight = FontWeight.Bold, color = SnowCrispText)
+            if (base.furnaceLevel < 1) {
+                Text(
+                    "Постройте «Каменную печь» выше, чтобы плавить железную руду в слитки для железных крафтов.",
+                    color = MistMutedText,
+                    fontSize = 11.5.sp
+                )
+            } else {
+                val smeltCost = BaseProgress.smeltCost(base.furnaceLevel)
+                val smeltOut = BaseProgress.smeltYield(base.furnaceLevel)
+                val costStr = smeltCost.entries.joinToString(" + ") { "${it.key.titleRu} ×${it.value}" }
+                Text(
+                    "Печь ур. ${base.furnaceLevel}: $costStr → Железо ×$smeltOut за плавку" +
+                        if (base.furnaceLevel >= 4) " (двойной выход!)" else "",
+                    color = IceCyanPrimary,
+                    fontSize = 11.5.sp
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        onClick = { viewModel.onSmeltIron(1) },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("Выплавить слиток", fontSize = 11.sp)
+                    }
+                    Button(
+                        onClick = { viewModel.onSmeltIron(5) },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("Выплавить ×5", fontSize = 11.sp)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** Иконка рецепта в assets/icons (как в мобильных крафт-играх — сразу видно результат). */
+private fun recipeIconPath(recipe: WorkbenchRecipe): String = when (recipe) {
+    WorkbenchRecipe.CRAFT_RESIN_TORCH -> "icons/icon_recipe_torch.png"
+    WorkbenchRecipe.CRAFT_BERRY_TEA -> "icons/icon_recipe_berry_tea.png"
+    WorkbenchRecipe.CRAFT_ROAST_FEAST -> "icons/icon_recipe_roast_feast.png"
+    WorkbenchRecipe.CRAFT_HUNTING_SPEAR -> "icons/icon_recipe_hunting_spear.png"
+    WorkbenchRecipe.CRAFT_WARM_COMPRESS -> "icons/icon_recipe_warm_compress.png"
+    WorkbenchRecipe.CRAFT_FUR_BOOTS -> "icons/icon_recipe_fur_boots.png"
+    WorkbenchRecipe.CRAFT_MINERS_HEATER -> "icons/icon_recipe_miners_heater.png"
+    WorkbenchRecipe.CRAFT_IRON_AXE -> "icons/icon_axe.png"
+    WorkbenchRecipe.CRAFT_IRON_PICKAXE -> "icons/icon_pickaxe.png"
+    WorkbenchRecipe.CRAFT_IRON_SPEARHEAD -> "icons/icon_spear.png"
 }
 
 @Composable
@@ -820,7 +880,8 @@ private fun WorkbenchTab(
                     .filter { activeCategory == null || it.category == activeCategory }
                 for (recipe in visible) {
                     val missing = recipe.cost.filter { (res, need) -> run.inventory.countOf(res) < need }
-                    val canCraft = missing.isEmpty() && base.workbenchLevel >= recipe.minWorkbenchLevel
+                    val furnaceReady = !recipe.requiresFurnace || base.furnaceLevel >= 1
+                    val canCraft = missing.isEmpty() && base.workbenchLevel >= recipe.minWorkbenchLevel && furnaceReady
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -830,6 +891,16 @@ private fun WorkbenchTab(
                         verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
+                            val recipeIcon = rememberAssetIcon(recipeIconPath(recipe))
+                            if (recipeIcon != null) {
+                                androidx.compose.foundation.Image(
+                                    bitmap = recipeIcon,
+                                    contentDescription = recipe.titleRu,
+                                    modifier = Modifier.size(32.dp),
+                                    contentScale = androidx.compose.ui.layout.ContentScale.Fit
+                                )
+                                Spacer(Modifier.width(10.dp))
+                            }
                             Column(Modifier.weight(1f)) {
                                 Text(recipe.titleRu, color = HearthAmberAccent, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
                                 Text(recipe.descriptionRu, color = MistMutedText, fontSize = 11.sp)
@@ -868,6 +939,12 @@ private fun WorkbenchTab(
                         if (base.workbenchLevel < recipe.minWorkbenchLevel) {
                             Text(
                                 "Требуется верстак ${recipe.minWorkbenchLevel} ур.",
+                                color = CrimsonDanger,
+                                fontSize = 10.sp
+                            )
+                        } else if (!furnaceReady) {
+                            Text(
+                                "Требуется Каменная печь и слитки железа",
                                 color = CrimsonDanger,
                                 fontSize = 10.sp
                             )
@@ -1004,6 +1081,12 @@ private fun ExpeditionMapTab(
                 fontWeight = FontWeight.Bold,
                 color = SnowCrispText
             )
+            Text(
+                "Все районы соединены в один большой мир — между ними можно дойти пешком. " +
+                    "Кнопки ниже — быстрый переход к изученному району.",
+                color = MistMutedText,
+                fontSize = 11.5.sp
+            )
             for (loc in LocationId.entries) {
                 val status = SurvivalEngine.evaluateLocationUnlock(loc, evalRun, base)
                 Row(
@@ -1030,7 +1113,7 @@ private fun ExpeditionMapTab(
                     }
                     Spacer(Modifier.width(10.dp))
                     Button(onClick = { viewModel.onTravelToLocation(loc) }) {
-                        Text(if (status.isUnlocked) "Отправиться" else "Проверить")
+                        Text(if (status.isUnlocked) "Быстрый переход" else "Проверить")
                     }
                 }
                 HorizontalDivider(color = Color(0x22FFFFFF))

@@ -15,7 +15,9 @@ import com.ayaks.winterforest.domain.model.SpecialLootId
 import com.ayaks.winterforest.domain.model.StarterLoadout
 import com.ayaks.winterforest.domain.model.UnlockStatus
 import com.ayaks.winterforest.domain.model.WildlifeEntity
+import com.ayaks.winterforest.domain.model.WildlifeKind
 import com.ayaks.winterforest.domain.model.WorkbenchRecipe
+import com.ayaks.winterforest.domain.world.WorldCollision
 import com.ayaks.winterforest.domain.world.WorldPopulator
 import kotlin.math.atan2
 import kotlin.math.cos
@@ -162,7 +164,9 @@ object SurvivalEngine {
         } else {
             val weatherEvent = AdvancedMechanics.weatherFor(run.elapsedRealSeconds)
             val weatherMul = AdvancedMechanics.coldMultiplierFor(weatherEvent) * AdvancedMechanics.coldPerkMultiplier(base)
-            val shelterMul = if (run.shelterAt?.covers(run.playerX, run.playerZ) == true) 0.6f else 1f
+            // Внутри сруба/зимовья тепло уходит заметно медленнее
+            val insideCabin = WorldCollision.isInsideShelter(run.currentLocation, run.playerX, run.playerZ)
+            val shelterMul = if (run.shelterAt?.covers(run.playerX, run.playerZ) == true || insideCabin) 0.55f else 1f
             val baseColdPerSec = 0.32f * run.currentLocation.coldMultiplier * weatherMul * shelterMul
             val nightFactor = if (nowNight) 2.2f else 1.0f
             val moveFactor = if (isMoving) 1.28f else 1.0f
@@ -422,14 +426,30 @@ object SurvivalEngine {
                         val stepStep = (speed * deltaSeconds).coerceAtMost(2.2f)
                         val rawX = entity.x + cos(nextHeading) * stepStep
                         val rawZ = entity.z + sin(nextHeading) * stepStep
-                        val clampedX = rawX.coerceIn(-34.5f, 34.5f)
-                        val clampedZ = rawZ.coerceIn(-34.5f, 34.5f)
+                        val (rcx, rcz) = com.ayaks.winterforest.domain.world.WorldRegions.centerOf(loc)
+                        val clampedX = rawX.coerceIn(rcx - 46f, rcx + 46f)
+                        val clampedZ = rawZ.coerceIn(rcz - 46f, rcz + 46f)
                         if (clampedX != rawX || clampedZ != rawZ) {
                             nextHeading += Math.PI.toFloat() * 0.75f
                         }
+                        // Звери тоже не проходят сквозь деревья и строения
+                        val beastRadius = if (entity.kind == WildlifeKind.TIMBER_WOLF) 0.5f else 0.42f
+                        val resolved = WorldCollision.resolveFor(
+                            loc,
+                            run.currentLocationNodes(),
+                            clampedX,
+                            clampedZ,
+                            beastRadius
+                        )
+                        val finalX = resolved[0]
+                        val finalZ = resolved[1]
+                        if (finalX != clampedX || finalZ != clampedZ) {
+                            // упёрлись в препятствие — плавный разворот в сторону
+                            nextHeading += Math.PI.toFloat() * 0.42f
+                        }
                         entity.copy(
-                            x = clampedX,
-                            z = clampedZ,
+                            x = finalX,
+                            z = finalZ,
                             headingRad = nextHeading,
                             fleeTimerSec = nextFlee,
                             attackCooldownSec = nextAtkCd
@@ -470,17 +490,28 @@ object SurvivalEngine {
 
         val clampedX = rawX.coerceIn(-bound, bound)
         val clampedZ = rawZ.coerceIn(-bound, bound)
-        val groundY = WorldPopulator.terrainHeight(run.currentLocation, clampedX, clampedZ)
+        // Непроходимость: деревья, валуны, ящики и стены срубов со скольжением
+        val resolved = WorldCollision.resolveFor(
+            run.currentLocation,
+            run.currentLocationNodes(),
+            clampedX,
+            clampedZ
+        )
+        val finalX = resolved[0]
+        val finalZ = resolved[1]
+        val groundY = WorldPopulator.worldHeight(finalX, finalZ)
 
         val msg = if (hitBoundary) {
-            "Граница локации: впереди заснеженный хребет. Ищите деревянные ворота тропы на севере!"
+            "Граница мира: впереди заснеженный хребет."
         } else {
             run.lastStatusMessage
         }
         return run.copy(
-            playerX = clampedX,
+            playerX = finalX,
             playerY = groundY,
-            playerZ = clampedZ,
+            playerZ = finalZ,
+            // В едином мире район определяется позицией игрока
+            currentLocation = com.ayaks.winterforest.domain.world.WorldRegions.regionAt(finalX, finalZ),
             lastStatusMessage = msg
         )
     }
@@ -577,8 +608,9 @@ object SurvivalEngine {
         target: WildlifeEntity
     ): EngineStepOutcome {
         val tool = run.equippedTool
+        val ironHeadBonus = if (base.ironSpearCrafted) 12f else 0f
         val damage = when (tool) {
-            EquippedTool.SPEAR -> if (base.masterSpearCrafted) 58f else 36f
+            EquippedTool.SPEAR -> (if (base.masterSpearCrafted) 58f else 36f) + ironHeadBonus
             EquippedTool.AXE -> 28f
             EquippedTool.PICKAXE -> 24f
             EquippedTool.TORCH -> 18f
@@ -611,7 +643,7 @@ object SurvivalEngine {
         }
 
         // Зверь повержен: выдаём трофеи охоты + опыт
-        val spearBonus = if (tool == EquippedTool.SPEAR && base.masterSpearCrafted) 1 else 0
+        val spearBonus = if (tool == EquippedTool.SPEAR && (base.masterSpearCrafted || base.ironSpearCrafted)) 1 else 0
         val primaryQty = 2 + spearBonus
         var nextInv = run.inventory.tryAddResource(target.kind.primaryDrop, primaryQty).inventory
         val secType = target.kind.secondaryDrop
@@ -734,6 +766,12 @@ object SurvivalEngine {
             0
         }
         val levelBonus = if (run.level >= 3 && (run.totalResourcesGathered % 2 == 0)) 1 else 0
+        // Кованый железный инструмент — постоянный бонус поверх профильного инструмента
+        val ironToolBonus = when {
+            base.ironPickaxeCrafted && resType in setOf(ResourceType.STONE, ResourceType.COAL, ResourceType.IRON) -> 1
+            base.ironAxeCrafted && resType == ResourceType.WOOD -> 1
+            else -> 0
+        }
         // Жёсткое правило выживания: профильный ресурс без инструмента — максимум 1 ед. руками
         val requiredToolMissing = when (resType) {
             ResourceType.WOOD -> run.equippedTool != EquippedTool.AXE
@@ -745,7 +783,7 @@ object SurvivalEngine {
         val rawYield = if (requiredToolMissing) {
             1
         } else {
-            (target.baseYield + pickaxeBonus + axeWoodBonus + levelBonus).coerceIn(1, 6)
+            (target.baseYield + pickaxeBonus + axeWoodBonus + ironToolBonus + levelBonus).coerceIn(1, 6)
         }
         val addResult = run.inventory.tryAddResource(resType, rawYield)
 
@@ -1073,23 +1111,23 @@ object SurvivalEngine {
         val discoveryXp = if (isFirstVisit) 45 else 0
         val (nextXp, nextLevel) = applyXpGain(curRun.xp, curRun.level, discoveryXp)
         val spawnZ = if (destination == LocationId.BASE_CLEARING) 5.5f else 0f
-        val groundY = WorldPopulator.terrainHeight(destination, 0f, spawnZ)
+        val (dcx, dcz) = com.ayaks.winterforest.domain.world.WorldRegions.centerOf(destination)
+        val groundY = WorldPopulator.worldHeight(dcx, dcz + spawnZ)
 
         val msg = if (isFirstVisit) {
             "Открыта новая локация: «${destination.titleRu}» (+$discoveryXp опыта)!"
         } else {
-            "Переход в локацию «${destination.titleRu}»."
+            "Быстрый переход в «${destination.titleRu}». Пешком между районами можно ходить свободно."
         }
 
         val nextRun = curRun.copy(
             currentLocation = destination,
-            playerX = 0f,
+            playerX = dcx,
             playerY = groundY,
-            playerZ = spawnZ,
+            playerZ = dcz + spawnZ,
             inventory = nextInv,
             nodesByLocation = updatedNodesMap,
             wildlifeByLocation = updatedWildlifeMap,
-            fieldCampfires = emptyList(),
             visitedLocations = curRun.visitedLocations + destination,
             mineEntranceCleared = clearedMine,
             xp = nextXp,
@@ -1162,10 +1200,15 @@ object SurvivalEngine {
             BaseUpgradeType.SHELTER -> baseAfterSpend.copy(shelterLevel = nextLevelVal)
             BaseUpgradeType.CAMPFIRE -> baseAfterSpend.copy(campfireLevel = nextLevelVal)
             BaseUpgradeType.WORKBENCH -> baseAfterSpend.copy(workbenchLevel = nextLevelVal)
+            BaseUpgradeType.FURNACE -> baseAfterSpend.copy(furnaceLevel = nextLevelVal)
         }
 
         val (nextXp, nextPlayerLevel) = applyXpGain(run.xp, run.level, 35)
-        val msg = "«${type.titleRu}» улучшено до уровня $nextLevelVal (+35 опыта)!"
+        val msg = if (type == BaseUpgradeType.FURNACE && nextLevelVal == 1) {
+            "«${type.titleRu}» построена! Открыта плавка железа (+35 опыта)!"
+        } else {
+            "«${type.titleRu}» улучшено до уровня $nextLevelVal (+35 опыта)!"
+        }
         return EngineStepOutcome(
             run.copy(
                 inventory = nextInv,
@@ -1221,6 +1264,10 @@ object SurvivalEngine {
             run.inventory.hasSpecial(SpecialLootId.PICKAXE)
         if (recipe.requiresPickaxe && !hasPickaxe) {
             val msg = "Этот рецепт открывается после нахождения «Кирки» в Заброшенной шахте."
+            return EngineStepOutcome(run.copy(lastStatusMessage = msg), base, false, msg)
+        }
+        if (recipe.requiresFurnace && base.furnaceLevel < 1) {
+            val msg = "Сначала постройте Каменную печь и выплавьте железо."
             return EngineStepOutcome(run.copy(lastStatusMessage = msg), base, false, msg)
         }
         val spent = spendResourcesAcrossInventoryAndBase(run.inventory, base, recipe.cost)
@@ -1327,7 +1374,98 @@ object SurvivalEngine {
                     msg
                 )
             }
+            WorkbenchRecipe.CRAFT_IRON_AXE -> {
+                val (nextXp, nextLvl) = applyXpGain(run.xp, run.level, 32)
+                val msg = "Выкован «Железный топор»: +1 дерева за удар навсегда!"
+                EngineStepOutcome(
+                    run.copy(
+                        inventory = invAfterCost,
+                        xp = nextXp,
+                        level = nextLvl,
+                        lastStatusMessage = msg
+                    ),
+                    baseAfterCost.copy(ironAxeCrafted = true),
+                    true,
+                    msg
+                )
+            }
+            WorkbenchRecipe.CRAFT_IRON_PICKAXE -> {
+                val (nextXp, nextLvl) = applyXpGain(run.xp, run.level, 32)
+                val msg = "Выкована «Железная кирка»: +1 руды и камня за добычу навсегда!"
+                EngineStepOutcome(
+                    run.copy(
+                        inventory = invAfterCost,
+                        xp = nextXp,
+                        level = nextLvl,
+                        lastStatusMessage = msg
+                    ),
+                    baseAfterCost.copy(ironPickaxeCrafted = true),
+                    true,
+                    msg
+                )
+            }
+            WorkbenchRecipe.CRAFT_IRON_SPEARHEAD -> {
+                val (nextXp, nextLvl) = applyXpGain(run.xp, run.level, 32)
+                val msg = "Насажен «Железный наконечник»: урон зверю и добыча охоты выше навсегда!"
+                EngineStepOutcome(
+                    run.copy(
+                        inventory = invAfterCost,
+                        xp = nextXp,
+                        level = nextLvl,
+                        lastStatusMessage = msg
+                    ),
+                    baseAfterCost.copy(ironSpearCrafted = true),
+                    true,
+                    msg
+                )
+            }
         }
+    }
+
+    /** Плавка железной руды в слитки в Каменной печи базы (можно плавить партиями). */
+    fun smeltAtFurnace(
+        run: GameRunState,
+        base: BaseProgress,
+        batches: Int
+    ): EngineStepOutcome {
+        if (base.furnaceLevel < 1) {
+            val msg = "Каменная печь ещё не построена."
+            return EngineStepOutcome(run.copy(lastStatusMessage = msg), base, false, msg)
+        }
+        val batchesSafe = batches.coerceIn(1, 10)
+        val perBatch = BaseProgress.smeltCost(base.furnaceLevel)
+        val totalCost = perBatch.mapValues { it.value * batchesSafe }
+        val spent = spendResourcesAcrossInventoryAndBase(run.inventory, base, totalCost)
+        if (spent == null) {
+            val needed = totalCost.entries.joinToString(", ") { "${it.key.titleRu}: ${it.value}" }
+            val msg = "Не хватает руды и угля для плавки ($needed)."
+            return EngineStepOutcome(run.copy(lastStatusMessage = msg), base, false, msg)
+        }
+        val (invAfterCost, baseAfterCost) = spent
+        val ingots = BaseProgress.smeltYield(base.furnaceLevel) * batchesSafe
+        val addResult = invAfterCost.tryAddResource(ResourceType.IRON_INGOT, ingots)
+        if (addResult.isFullBlocked) {
+            val msg = "Инвентарь полон — освободите место под слитки!"
+            return EngineStepOutcome(run.copy(lastStatusMessage = msg), base, false, msg)
+        }
+        val added = addResult.addedAmount
+        val msg = if (ingots > 1 && added == ingots) {
+            "Печь выплавила $ingots слитков железа!"
+        } else {
+            "Печь выплавила $added слитков железа!"
+        }
+        val (nextXp, nextLvl) = applyXpGain(run.xp, run.level, 16 * added)
+        return EngineStepOutcome(
+            run.copy(
+                inventory = addResult.inventory,
+                xp = nextXp,
+                level = nextLvl,
+                lastStatusMessage = msg
+            ),
+            baseAfterCost,
+            true,
+            msg
+        )
     }
 
     fun startCookingOnCampfire(run: GameRunState, base: BaseProgress): EngineStepOutcome {
@@ -1557,10 +1695,14 @@ object SurvivalEngine {
         location: LocationId,
         replacement: ResourceNode
     ): Map<LocationId, List<ResourceNode>> {
-        val updatedList = map[location].orEmpty().map { existing ->
-            if (existing.id == replacement.id) replacement else existing
+        // В едином мире узел может принадлежать соседнему району — ищем по id во всех списках
+        var result = map
+        for ((loc, list) in map) {
+            if (list.any { it.id == replacement.id }) {
+                result = result + (loc to list.map { if (it.id == replacement.id) replacement else it })
+            }
         }
-        return map + (location to updatedList)
+        return result
     }
 
     private fun replaceWildlife(
@@ -1568,9 +1710,12 @@ object SurvivalEngine {
         location: LocationId,
         replacement: WildlifeEntity
     ): Map<LocationId, List<WildlifeEntity>> {
-        val updatedList = map[location].orEmpty().map { existing ->
-            if (existing.id == replacement.id) replacement else existing
+        var result = map
+        for ((loc, list) in map) {
+            if (list.any { it.id == replacement.id }) {
+                result = result + (loc to list.map { if (it.id == replacement.id) replacement else it })
+            }
         }
-        return map + (location to updatedList)
+        return result
     }
 }

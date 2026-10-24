@@ -102,7 +102,7 @@ data class ResourceNode(
 enum class ActiveTimerType(val titleRu: String) {
     COOKING("Приготовление горячего пайка"),
     SHELTER_REST("Восстановление сил в укрытии"),
-    NODE_RESPAWN("Восстановление ресурсного узла")
+    NODE_RESPAWN("Восстановить ресурсы на карте")
 }
 
 @Serializable
@@ -226,11 +226,13 @@ data class GameRunState(
         return null
     }
 
+    /** Все узлы единого мира (районы сложены в одну карту). */
     fun currentLocationNodes(): List<ResourceNode> =
-        nodesByLocation[currentLocation].orEmpty()
+        nodesByLocation.values.asSequence().flatten().toList()
 
+    /** Вся фауна единого мира. */
     fun currentWildlife(): List<WildlifeEntity> =
-        wildlifeByLocation[currentLocation].orEmpty()
+        wildlifeByLocation.values.asSequence().flatten().toList()
 
     fun nearestInteractableNode(): ResourceNode? {
         val reachSq = maxOf(INTERACT_RADIUS, equippedTool.reachMeters).let { it * it }
@@ -359,7 +361,7 @@ data class GameRunState(
         const val FIELD_CAMPFIRE_WOOD_COST = 2
         const val FIELD_CAMPFIRE_DURATION_SECONDS = 95f
 
-        const val WORLD_HALF_BOUND = 52f
+        const val WORLD_HALF_BOUND = 165f
         const val SHELTER_WOOD_COST = 4
         const val SHELTER_CLOTH_COST = 2
         const val SHELTER_DURATION_SECONDS = 420f

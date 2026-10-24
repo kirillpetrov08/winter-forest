@@ -120,11 +120,60 @@ def field_width(dna, f):
     return tlen * array_count(name)
 
 
+_PTR_LISTS_BY_DNA = {}
+
+
+def _register_ptr_lists(dna, blocks):
+    lists = {}
+    for b in blocks:
+        if b.old_ptr:
+            lists.setdefault(b.old_ptr, []).append(b)
+    _PTR_LISTS_BY_DNA[id(dna)] = lists
+
+
+def ptr_candidates(dna, ptr):
+    return _PTR_LISTS_BY_DNA.get(id(dna), {}).get(ptr, [])
+
+
 def parse_file(path):
     buf = decompress_blend(path)
     hdr = buf[:12]
     if not hdr.startswith(b"BLENDER"):
         raise RuntimeError("not a .blend: " + path)
+
+    # Blender 5.x "BLENDER17-01" format: 17-byte header (magic12 + endian +
+    # 4-digit version) and 32-byte block heads:
+    #   code(4) sdna_idx(u32) old_ptr(u64) size(u64) count(u64).
+    if hdr.startswith(b"BLENDER17-01"):
+        endian_char = chr(buf[12])
+        version = int(buf[13:17])
+        ptr_size = 8
+        little = endian_char == "v"
+        end = "<" if little else ">"
+        blocks = []
+        pos_try = 17
+        while pos_try + 32 <= len(buf):
+            code = buf[pos_try:pos_try + 4]
+            dna_idx = struct.unpack_from(end + "I", buf, pos_try + 4)[0]
+            old_ptr = struct.unpack_from(end + "Q", buf, pos_try + 8)[0]
+            size, count = struct.unpack_from(end + "QQ", buf, pos_try + 16)
+            data_off = pos_try + 32
+            if data_off + size > len(buf):
+                blocks = None
+                break
+            data = buf[data_off:data_off + size]
+            blocks.append(Block(code, size, old_ptr, dna_idx, count, data, data_off))
+            pos_try += 32 + size
+            if code == b"ENDB":
+                break
+        if not blocks or blocks[-1].code != b"ENDB" or not any(
+                b.code == b"DNA1" for b in blocks):
+            raise RuntimeError("cannot locate 5.x block structure in " + path)
+        dna_block = next((b for b in blocks if b.code == b"DNA1"), None)
+        dna = parse_dna(dna_block.data, end, ptr_size)
+        _register_ptr_lists(dna, blocks)
+        return buf, blocks, dna, end, ptr_size
+
     ptr_char = chr(hdr[7])
     endian_char = chr(hdr[8])
     version = int(hdr[9:12])
@@ -171,6 +220,7 @@ def parse_file(path):
 
     dna_block = next((b for b in blocks if b.code == b"DNA1"), None)
     dna = parse_dna(dna_block.data, end, ptr_size)
+    _register_ptr_lists(dna, blocks)
     return buf, blocks, dna, end, ptr_size
 
 
@@ -333,6 +383,319 @@ def material_names(mb, dna, blocks_by_ptr, end, ptr_size):
     return out
 
 
+def read_attribute_storage(mb, dna, blocks_by_ptr, end, ptr_size, counts=None):
+    """Blender 5.x mesh attributes (AttributeStorage) -> name -> entry dict.
+
+    Blender 5.x writers may reuse memory addresses, so several blocks can
+    share one old_ptr. Entries are resolved by size-matching against the mesh
+    counts when provided: {"position": totvert*12, ".corner_vert": totloop*4,
+    "UVMap": totloop*8, "material_index": totpoly*4}.
+
+    Each entry: {"count": int, "elem": bytes_per_elem, "data": raw bytes or None,
+    "single": raw bytes of the constant element or None}.
+    """
+    offs = field_offsets(dna, "Mesh")
+    if "attribute_storage" not in offs:
+        return {}
+    ast = field_offsets(dna, "AttributeStorage")
+    if "dna_attributes" not in ast:
+        return {}
+    d = mb.data
+    astor_off = offs["attribute_storage"][0]
+
+    def rp(base, off):
+        return struct.unpack_from(end + ("Q" if ptr_size == 8 else "I"), base, off)[0]
+
+    num = i32(d, end, astor_off + ast["dna_attributes_num"][0])
+    arr_ptr = rp(d, astor_off + ast["dna_attributes"][0])
+    if num <= 0 or num > 4096:
+        return {}
+    at = field_offsets(dna, "Attribute")
+    t_idx = next(i for i, t in enumerate(dna.types) if t == "Attribute")
+    stride = dna.tlens[t_idx]
+    aa = field_offsets(dna, "AttributeArray")
+
+    def arr_size(data_blk):
+        sf = aa.get("size")
+        if sf is None:
+            return 0
+        w = dna.tlens[sf[1]["type_idx"]]
+        raw = data_blk.data[sf[0]: sf[0] + w]
+        return int.from_bytes(raw, "little") if raw else 0
+
+    def resolve_data(data_ptr, want_bytes, want_count):
+        """Find AttributeArray header + inner values matching expected size."""
+        for hdr in ptr_candidates(dna, data_ptr):
+            if hdr.size < 24:
+                continue
+            inner = rp(hdr.data, aa["data"][0])
+            count = arr_size(hdr)
+            iso_off = aa.get("is_single")
+            is_single = hdr.data[iso_off[0]] if iso_off and iso_off[0] < hdr.size else 0
+            if is_single:
+                single_blk = blocks_by_ptr.get(inner) or hdr
+                return {"count": 1, "elem": 0, "data": None, "single": single_blk.data}
+            for vblk in ptr_candidates(dna, inner):
+                if want_bytes and vblk.size == want_bytes:
+                    return {"count": want_count or count, "elem": (vblk.size // (want_count or count)) if (want_count or count) else 0,
+                            "data": vblk.data, "single": None}
+            if not want_bytes:
+                vblk = blocks_by_ptr.get(inner)
+                if vblk is not None:
+                    n = want_count or count
+                    return {"count": n, "elem": (vblk.size // n) if n else 0, "data": vblk.data, "single": None}
+        return None
+
+    counts = counts or {}
+    arr_candidates = [b for b in ptr_candidates(dna, arr_ptr)
+                      if b.size == num * stride] or \
+                     [b for b in ptr_candidates(dna, arr_ptr) if b.size >= num * stride]
+    if not arr_candidates:
+        arr_blk = blocks_by_ptr.get(arr_ptr)
+        arr_candidates = [arr_blk] if arr_blk is not None else []
+    best = {}
+    for arr_blk in arr_candidates:
+        out = {}
+        for i in range(num):
+            b = i * stride
+            if b + stride > arr_blk.size:
+                break
+            name_ptr = rp(arr_blk.data, b + at["name"][0])
+            name_blk = blocks_by_ptr.get(name_ptr)
+            if name_blk is None:
+                continue
+            nm = name_blk.data.split(b"\x00")[0].decode(errors="replace")
+            data_ptr = rp(arr_blk.data, b + at["data"][0])
+            want = counts.get(nm)
+            entry = resolve_data(data_ptr, want[0] if want else 0, want[1] if want else 0)
+            if entry is not None:
+                out[nm] = entry
+        needed = ("position", ".corner_vert")
+        if all(k in out for k in needed):
+            return out
+        if len(out) > len(best):
+            best = out
+    return best
+
+
+def parse_mesh_attrs5(mb, dna, blocks_by_ptr, end, ptr_size, verbose):
+    """Assemble mesh arrays from Blender 5.x Mesh.attribute_storage."""
+    offs = field_offsets(dna, "Mesh")
+    d = mb.data
+
+    def read_ptr(off):
+        return struct.unpack_from(end + ("Q" if ptr_size == 8 else "I"), d, off)[0]
+
+    totvert = i32(d, end, offs["totvert"][0]) if "totvert" in offs else 0
+    totpoly = i32(d, end, offs["totpoly"][0]) if "totpoly" in offs else 0
+    totloop = i32(d, end, offs["totloop"][0]) if "totloop" in offs else 0
+
+    counts = {
+        "position": (totvert * 12, totvert),
+        ".corner_vert": (totloop * 4, totloop),
+        "UVMap": (totloop * 8, totloop),
+        "material_index": (totpoly * 4, totpoly),
+    }
+    attrs = read_attribute_storage(mb, dna, blocks_by_ptr, end, ptr_size, counts)
+    if not attrs:
+        return None
+
+    def take(name, want, width):
+        """-> (bytes, n) of a packed array attribute, or (None, 0)."""
+        a = attrs.get(name)
+        if a is None or a.get("data") is None:
+            return None, 0
+        n = a["count"] or want
+        n = min(n, want, len(a["data"]) // width) if want else min(n, len(a["data"]) // width)
+        return a["data"], n
+
+    # ---- positions (vec3f per point) ----
+    pdata, nvert = take("position", totvert, 12)
+    if pdata is None or nvert <= 0:
+        return None
+    pstride = attrs["position"]["elem"] or 12
+    verts = [struct.unpack_from(end + "3f", pdata, i * pstride) for i in range(nvert)]
+    totvert = len(verts)
+
+    # ---- corner -> vertex (int per loop) ----
+    ldata, nloop = take(".corner_vert", totloop, 4)
+    if ldata is None or nloop <= 0:
+        return None
+    lstride = attrs[".corner_vert"]["elem"] or 4
+    loops = [struct.unpack_from(end + "I", ldata, i * lstride)[0] for i in range(nloop)]
+    totloop = len(loops)
+
+    # ---- uvs (vec2f per corner): "UVMap" or first non-reserved 8-byte attr ----
+    uvs = [(0.0, 0.0)] * totloop
+    uv_name = None
+    if "UVMap" in attrs:
+        uv_name = "UVMap"
+    else:
+        for nm, a in attrs.items():
+            if not nm.startswith(".") and a.get("data") is not None and \
+                    (a["elem"] or 0) == 8 and (a["count"] or 0) >= totloop:
+                uv_name = nm
+                break
+    if uv_name:
+        udata, nuv = take(uv_name, totloop, 8)
+        ustride = attrs[uv_name]["elem"] or 8
+        for i in range(min(nuv, totloop)):
+            u, v = struct.unpack_from(end + "2f", udata, i * ustride)
+            uvs[i] = (u, 1.0 - v)
+
+    # ---- polys from poly_offset_indices + material_index ----
+    polys = []
+    off_blk = None
+    if "poly_offset_indices" in offs:
+        poi_ptr = read_ptr(offs["poly_offset_indices"][0])
+        want = (totpoly + 1) * 4
+        for cand in ptr_candidates(dna, poi_ptr):
+            if cand.size == want:
+                off_blk = cand
+                break
+        if off_blk is None:
+            off_blk = blocks_by_ptr.get(poi_ptr)
+    mats_a = attrs.get("material_index")
+    mat_single = 0
+    if mats_a is not None and mats_a.get("single") is not None and len(mats_a["single"]) >= 4:
+        mat_single = struct.unpack_from(end + "i", mats_a["single"])[0]
+    mat_arr, nmat = take("material_index", totpoly, 4) if mats_a is not None else (None, 0)
+    if off_blk is not None:
+        n = min(totpoly + 1, off_blk.size // 4)
+        offsets = [struct.unpack_from(end + "i", off_blk.data, i * 4)[0] for i in range(n)]
+        for i in range(totpoly):
+            if i + 1 >= len(offsets):
+                break
+            ls, le = offsets[i], offsets[i + 1]
+            if mat_arr is not None and i < nmat:
+                mn = struct.unpack_from(end + "i", mat_arr, i * 4)[0]
+            else:
+                mn = mat_single
+            polys.append((ls, le - ls, mn))
+    else:
+        for i in range(totloop // 3):
+            polys.append((i * 3, 3, mat_single))
+    totpoly = len(polys)
+
+    tris = []
+    for ls, tl, mn in polys:
+        if tl < 3 or ls + tl > totloop:
+            continue
+        for k in range(1, tl - 1):
+            a, b, c = loops[ls], loops[ls + k], loops[ls + k + 1]
+            tris.append((a, b, c, (ls, ls + k, ls + k + 1), mn))
+    return {"verts": verts, "loops": loops, "uvs": uvs, "tris": tris, "totvert": totvert,
+            "totloop": totloop, "totpoly": totpoly}
+
+
+def compose_matrix4(loc, rot, size, quat, rotmode):
+    """Blender-5.x local object matrix in stored/row form (translation row 3).
+
+    v' = v · M  (same convention as legacy Object.obmat). rotmode 1..6 =
+    Euler orders XYZ..ZYX, 0 = quaternion, else Euler XYZ.
+    """
+    import math
+
+    def mul(a, b):
+        return [[sum(a[i][k] * b[k][j] for k in range(4)) for j in range(4)]
+                for i in range(4)]
+
+    def euler_mat(order, rx, ry, rz):
+        cx, sx = math.cos(rx), math.sin(rx)
+        cy, sy = math.cos(ry), math.sin(ry)
+        cz, sz = math.cos(rz), math.sin(rz)
+        rx_m = [[1, 0, 0, 0], [0, cx, sx, 0], [0, -sx, cx, 0], [0, 0, 0, 1]]
+        ry_m = [[cy, 0, -sy, 0], [0, 1, 0, 0], [sy, 0, cy, 0], [0, 0, 0, 1]]
+        rz_m = [[cz, sz, 0, 0], [-sz, cz, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]]
+        mats = {"x": rx_m, "y": ry_m, "z": rz_m}
+        out = [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]]
+        for ax in order.lower():  # first axis applied first -> left-multiply
+            out = mul(out, mats[ax])
+        return out
+
+    if rotmode == 0:
+        w, x, y, z = quat
+        n = (w * w + x * x + y * y + z * z) ** 0.5
+        if n > 1e-8:
+            w, x, y, z = w / n, x / n, y / n, z / n
+            r = [[1 - 2 * (y * y + z * z), 2 * (x * y + w * z), 2 * (x * z - w * y), 0],
+                 [2 * (x * y - w * z), 1 - 2 * (x * x + z * z), 2 * (y * z + w * x), 0],
+                 [2 * (x * z + w * y), 2 * (y * z - w * x), 1 - 2 * (x * x + y * y), 0],
+                 [0, 0, 0, 1]]
+        else:
+            r = euler_mat("xyz", *rot)
+    else:
+        order = {1: "xyz", 2: "xzy", 3: "yxz", 4: "yzx", 5: "zxy", 6: "zyx"}.get(rotmode, "xyz")
+        r = euler_mat(order, *rot)
+
+    sx, sy, sz = size
+    m = [[r[0][0] * sx, r[0][1] * sx, r[0][2] * sx, 0],
+         [r[1][0] * sy, r[1][1] * sy, r[1][2] * sy, 0],
+         [r[2][0] * sz, r[2][1] * sz, r[2][2] * sz, 0],
+         [loc[0], loc[1], loc[2], 1]]
+    return m
+
+
+def object_world_matrices(blocks, dna, end, ptr_size):
+    """{block_id(ob): world matrix rows} for every Object in a 5.x file.
+
+    Handles parent chains: world = local · parentinv · parent_world.
+    Falls back to identity-ish local when the legacy obmat field exists.
+    """
+    offs = field_offsets(dna, "Object")
+
+    def rd(data, off, fmt, n):
+        return struct.unpack_from(end + fmt, data, off)[:n]
+
+    local = {}
+    parent_of = {}
+    parentinv_of = {}
+    for ob in blocks:
+        if ob.code[:2] != b"OB":
+            continue
+        if "obmat" in offs:
+            rows = [list(rd(ob.data, offs["obmat"][0] + i * 16, "4f", 4)) for i in range(4)]
+        else:
+            loc = rd(ob.data, offs["loc"][0], "3f", 3)
+            rot = rd(ob.data, offs["rot"][0], "3f", 3)
+            size = rd(ob.data, offs["size"][0], "3f", 3)
+            quat = rd(ob.data, offs["quat"][0], "4f", 4)
+            rotmode = rd(ob.data, offs["rotmode"][0], "h", 1)[0]
+            rows = compose_matrix4(loc, rot, size, quat, rotmode)
+        local[id(ob)] = rows
+        p = rd(ob.data, offs["parent"][0], "Q" if ptr_size == 8 else "I", 1)[0]
+        parent_of[id(ob)] = p
+        if "parentinv" in offs:
+            parentinv_of[id(ob)] = [list(rd(ob.data, offs["parentinv"][0] + i * 16, "4f", 4))
+                                    for i in range(4)]
+        else:
+            parentinv_of[id(ob)] = [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]]
+
+    by_ptr = {b.old_ptr: b for b in blocks if b.old_ptr}
+
+    def mul(a, b):
+        return [[sum(a[i][k] * b[k][j] for k in range(4)) for j in range(4)]
+                for i in range(4)]
+
+    memo = {}
+
+    def world(ob_id, stack=()):
+        if ob_id in memo:
+            return memo[ob_id]
+        if ob_id in stack:
+            return local[ob_id]
+        m = local[ob_id]
+        p = parent_of.get(ob_id, 0)
+        if p:
+            pob = by_ptr.get(p)
+            if pob is not None and id(pob) in local:
+                m = mul(mul(m, parentinv_of[ob_id]), world(id(pob), stack + (ob_id,)))
+        memo[ob_id] = m
+        return m
+
+    return {oid: world(oid) for oid in local}
+
+
 def parse_mesh(mb, dna, blocks_by_ptr, end, ptr_size, verbose):
     offs = field_offsets(dna, "Mesh")
     d = mb.data
@@ -393,6 +756,10 @@ def parse_mesh(mb, dna, blocks_by_ptr, end, ptr_size, verbose):
     mat_layer = find_layer("pdata", ("material_index",), None)
 
     if mv is None or ml is None:
+        # Blender 5.x: geometry lives in Mesh.attribute_storage
+        result = parse_mesh_attrs5(mb, dna, blocks_by_ptr, end, ptr_size, verbose)
+        if result is not None:
+            return result
         if verbose:
             print("layers found:", {k: block_type(dna, v[1]) for k, v in layers.items()})
         return None
