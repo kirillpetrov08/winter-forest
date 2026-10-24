@@ -30,7 +30,8 @@ object AssetProps {
         "cabin_wood", "cabin_bark", "cabin_stone", "cabin_shingle", "cabin_burned",
         "wolf_body", "deer_body",
         "spear", "pickaxe", "fence", "winter_tree", "workbench", "barrel",
-        "gate", "lantern", "cache_crate", "woodstack", "crate", "fish"
+        "gate", "lantern", "cache_crate", "woodstack", "crate", "fish",
+        "oak_a", "oak_b", "oak_c", "bush_green", "bush_dry", "bush_thicket"
     )
 
     /** Модели животных: VBO частей строится в начале координат, позицию задаёт model-матрица. */
@@ -57,7 +58,13 @@ object AssetProps {
             Placement("woodstack", -7.5f, -4.7f, 2.05f, 1.0f),
             Placement("fence", -9.3f, -2.7f, 1.42f, 1.0f),
             Placement("fence", -10.2f, -4.7f, 1.55f, 1.0f),
-            Placement("winter_tree", -16.8f, 13.2f, 0.55f, 0.95f)
+            Placement("winter_tree", -16.8f, 13.2f, 0.55f, 0.95f),
+            // листва и кусты пака Trees & Bushes (модель пользователя)
+            Placement("oak_a", -11.5f, -9.5f, 0.7f, 1.0f, 0.94f, 0.97f, 1.0f),
+            Placement("oak_b", 10.8f, 6.2f, 2.2f, 0.9f, 0.96f, 0.97f, 1.0f),
+            Placement("bush_green", 7.9f, 3.1f, 1.3f, 1.0f, 0.96f, 0.98f, 1.0f),
+            Placement("bush_dry", -4.2f, 8.9f, 0.4f, 1.0f, 0.97f, 0.97f, 1.0f),
+            Placement("bush_thicket", 12.4f, -3.2f, 1.9f, 1.0f, 0.97f, 0.97f, 1.0f)
         )
         LocationId.HUNTERS_CABIN -> listOf(
             Placement("cabin_wood", 7.2f, 8.8f, 3.6f, 0.78f),
@@ -81,7 +88,12 @@ object AssetProps {
             Placement("fence", 3.55f, 6.05f, 1.18f, 1.0f),
             Placement("fence", 2.85f, 4.35f, 1.32f, 1.0f),
             Placement("crate", 8.45f, 5.45f, 0.4f, 1.0f),
-            Placement("winter_tree", 14.6f, 5.9f, 2.25f, 0.85f)
+            Placement("winter_tree", 14.6f, 5.9f, 2.25f, 0.85f),
+            // листва и кусты пака Trees & Bushes (модель пользователя)
+            Placement("oak_c", 1.2f, 12.8f, 1.1f, 1.0f, 0.96f, 0.97f, 1.0f),
+            Placement("oak_a", 12.3f, 2.4f, 2.8f, 0.85f, 0.94f, 0.97f, 1.0f),
+            Placement("bush_green", 5.1f, 4.15f, 0.9f, 1.0f, 0.96f, 0.98f, 1.0f),
+            Placement("bush_dry", -2.8f, 9.6f, 1.7f, 1.0f, 0.97f, 0.97f, 1.0f)
         )
         LocationId.DENSE_SPRUCE -> listOf(
             Placement("dry_branches_a", -6.4f, -9.2f, 0.9f, 1.0f),
@@ -98,7 +110,12 @@ object AssetProps {
             Placement("fence", 1.75f, 10.55f, 1.08f, 1.0f),
             Placement("woodstack", 6.45f, -9.15f, 1.35f, 1.0f),
             Placement("barrel", -13.55f, -2.25f, 2.1f, 1.0f),
-            Placement("crate", -8.15f, -9.65f, 1.6f, 1.0f)
+            Placement("crate", -8.15f, -9.65f, 1.6f, 1.0f),
+            // листва и кусты пака Trees & Bushes (модель пользователя)
+            Placement("oak_b", -6.7f, 2.9f, 1.4f, 1.0f, 0.96f, 0.97f, 1.0f),
+            Placement("oak_c", 8.6f, -6.4f, 0.6f, 1.0f, 0.96f, 0.97f, 1.0f),
+            Placement("bush_green", 2.2f, -3.6f, 2.1f, 1.05f, 0.96f, 0.98f, 1.0f),
+            Placement("bush_thicket", -11.2f, -6.8f, 1.2f, 1.0f, 0.97f, 0.97f, 1.0f)
         )
         LocationId.FROZEN_LAKE -> listOf(
             Placement("rock_09", -19.5f, 12.2f, 0.6f, 1.2f),
@@ -112,7 +129,11 @@ object AssetProps {
             Placement("lantern", 9.25f, -7.55f, 1.4f, 1.0f),
             Placement("fence", -12.15f, 4.85f, 1.62f, 1.0f),
             Placement("woodstack", -18.35f, 9.45f, 0.42f, 1.0f),
-            Placement("barrel", -20.55f, -7.15f, 1.15f, 1.0f)
+            Placement("barrel", -20.55f, -7.15f, 1.15f, 1.0f),
+            // листва и кусты пака Trees & Bushes (модель пользователя)
+            Placement("oak_a", -16.5f, -2.2f, 1.9f, 0.9f, 0.94f, 0.97f, 1.0f),
+            Placement("bush_dry", -13.8f, 5.5f, 0.8f, 1.0f, 0.97f, 0.97f, 1.0f),
+            Placement("bush_thicket", 14.9f, 6.8f, 2.4f, 1.0f, 0.97f, 0.97f, 1.0f)
         )
         LocationId.ABANDONED_MINE -> listOf(
             Placement("rock_moss_b", -5.2f, -14.8f, 0.7f, 1.0f),
@@ -128,7 +149,9 @@ object AssetProps {
             Placement("fence", 2.25f, 21.55f, 0.38f, 1.0f),
             Placement("fence", 3.45f, 23.05f, 0.52f, 1.0f),
             Placement("crate", -9.45f, 12.05f, 1.05f, 1.0f),
-            Placement("woodstack", -3.15f, 8.75f, 2.85f, 1.0f)
+            Placement("woodstack", -3.15f, 8.75f, 2.85f, 1.0f),
+            // сухой куст пака Trees & Bushes у штольни (модель пользователя)
+            Placement("bush_dry", -2.4f, -8.2f, 2.6f, 1.0f, 0.97f, 0.97f, 1.0f)
         )
     }
 

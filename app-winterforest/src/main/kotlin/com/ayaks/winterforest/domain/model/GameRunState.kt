@@ -16,7 +16,11 @@ enum class WorldObjectKind {
     COAL_SEAM,
     IRON_VEIN,
     GAME_CARCASS,
-    SPECIAL_CACHE
+    SPECIAL_CACHE,
+    /** Лиственное дерево из пака Trees & Bushes (модель пользователя) — даёт Дерево. */
+    OAK_TREE,
+    /** Полевой куст из пака Trees & Bushes (модель пользователя) — даёт Ягоды. */
+    SCRUB_BUSH
 }
 
 @Serializable
