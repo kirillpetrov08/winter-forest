@@ -1876,8 +1876,10 @@ class ForestGlRenderer(
 
     /**
      * Нога зверя: меш + «шар» тазобедренного/коленного сустава на верхнем срезе.
-     * Шар вращается вместе с ногой и закрывает стык с телом при любом размахе —
-     * текстуры больше не «разрываются».
+     * Шар вращается вместе с ногой и закрывает стык с телом при любом размахе.
+     * Радиус — от центроида среза ноги (не от оси мира!), шар компактный и
+     * утоплен в стык; UV каждого шипа шара берётся у ближайшей вершины среза —
+     * шар продолжает текстуру ноги и не «выпирает» пятном.
      */
     private fun buildLegPart(floats: FloatArray): LegPart {
         var maxY = Float.NEGATIVE_INFINITY
@@ -1887,22 +1889,15 @@ class ForestGlRenderer(
             i += 12
         }
         val bandY = maxY - (maxY * 0.28f).coerceAtLeast(0.05f)
+        // 1-й проход: центроид верхнего среза
         var sx = 0f
         var sz = 0f
-        var su = 0f
-        var sv = 0f
-        var rad = 0.06f
         var n = 0
         i = 0
         while (i + 11 < floats.size) {
             if (floats[i + 1] > bandY) {
                 sx += floats[i]; sz += floats[i + 2]
-                su += floats[i + 6]; sv += floats[i + 7]
                 n++
-                val dx = floats[i] - 0f
-                val dz = floats[i + 2] - 0f
-                val rr = sqrt(dx * dx + dz * dz)
-                if (rr > rad) rad = rr
             }
             i += 12
         }
@@ -1913,24 +1908,50 @@ class ForestGlRenderer(
         }
         val px = sx / n
         val pz = sz / n
+        // 2-й проход: радиус поперечного среза ОТ ЦЕНТРОИДА + опорные вершины среза
+        var rad = 0.03f
+        val topX = FloatArray(n)
+        val topY = FloatArray(n)
+        val topZ = FloatArray(n)
+        val topU = FloatArray(n)
+        val topV = FloatArray(n)
+        var ti = 0
+        i = 0
+        while (i + 11 < floats.size) {
+            if (floats[i + 1] > bandY) {
+                val dx = floats[i] - px
+                val dz = floats[i + 2] - pz
+                val rr = sqrt(dx * dx + dz * dz)
+                if (rr > rad) rad = rr
+                topX[ti] = floats[i]; topY[ti] = floats[i + 1]; topZ[ti] = floats[i + 2]
+                topU[ti] = floats[i + 6]; topV[ti] = floats[i + 7]
+                ti++
+            }
+            i += 12
+        }
         val pivotY = maxY * 0.92f
-        val ballR = (rad * 1.25f).coerceIn(0.055f, 0.16f)
+        // Компактный шар строго в стыке: чуть больше среза, но не выпирает из силуэта
+        val ballR = (rad * 1.15f).coerceIn(0.035f, 0.10f)
         val builder = floatsToBuilder(floats)
-        appendJointBall(builder, px, pivotY, pz, ballR, su / n, sv / n)
+        appendJointBall(builder, px, pivotY - ballR * 0.2f, pz, ballR, topX, topY, topZ, topU, topV, ti)
         val vbo = GlVbo()
         vbo.uploadStatic(builder)
         return LegPart(vbo, px, pivotY, pz)
     }
 
-    /** UV-шар сустава в пространстве модели (перекрывает стык ноги и туловища). */
+    /** UV-шар сустава: каждый шип получает UV ближайшей вершины верхнего среза ноги. */
     private fun appendJointBall(
         builder: MeshBuilder,
         cx: Float,
         cy: Float,
         cz: Float,
         r: Float,
-        u: Float,
-        v: Float
+        topX: FloatArray,
+        topY: FloatArray,
+        topZ: FloatArray,
+        topU: FloatArray,
+        topV: FloatArray,
+        topN: Int
     ) {
         val rings = 5
         val segs = 8
@@ -1957,7 +1978,20 @@ class ForestGlRenderer(
                     val nx = (p[0] - cx) / r
                     val ny = (p[1] - cy) / r
                     val nz = (p[2] - cz) / r
-                    builder.addVertex(p[0], p[1], p[2], nx, ny, nz, u, v, 0.94f, 0.94f, 0.94f, 1f)
+                    // UV — ближайшая вершина среза ноги: шар без шва продолжает мех
+                    var best = 0
+                    var bestD = Float.MAX_VALUE
+                    for (k in 0 until topN) {
+                        val ddx = topX[k] - p[0]
+                        val ddy = topY[k] - p[1]
+                        val ddz = topZ[k] - p[2]
+                        val dd = ddx * ddx + ddy * ddy + ddz * ddz
+                        if (dd < bestD) {
+                            bestD = dd
+                            best = k
+                        }
+                    }
+                    builder.addVertex(p[0], p[1], p[2], nx, ny, nz, topU[best], topV[best], 1f, 1f, 1f, 1f)
                 }
                 emit(a); emit(b); emit(c)
                 emit(a); emit(c); emit(d)
