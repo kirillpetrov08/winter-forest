@@ -134,11 +134,7 @@ class ForestGlRenderer(
     private fun syncBeasts(value: RenderSceneSnapshot) {
         val now = System.nanoTime()
         synchronized(beastSmooth) {
-            val loc = value.run.currentLocation
-            if (beastSmoothLoc != loc) {
-                beastSmooth.clear()
-                beastSmoothLoc = loc
-            }
+            // В едином мире фауна всех районов видна сразу — сглаживание не сбрасываем
             val seen = HashSet<String>(beastSmooth.size + 4)
             for (beast in value.run.currentWildlife()) {
                 if (!beast.isAlive) continue
@@ -248,7 +244,7 @@ class ForestGlRenderer(
     private val assetMeshCache = HashMap<String, FloatArray>()
     private val assetTextures = HashMap<String, Int>()
     private val assetPropBatches = HashMap<String, GlVbo>()
-    private var assetPropsBuiltLoc: LocationId? = null
+    private var assetPropsBuiltQuality: GraphicsQuality? = null
     private var assetTexturesQuality: GraphicsQuality? = null
 
     // Камни-ресурсы (камень/руда/уголь) рисуются МОДЕЛЯМИ автора (rock_09 / rock_moss_*),
@@ -302,7 +298,8 @@ class ForestGlRenderer(
         }
         // При пересоздании EGL-контекста сбрасываем старые GPU-хэндлы
         uploadedPaletteLocation = null
-        staticBuiltLocation = null
+        staticBuiltQuality = null
+        staticBuiltBaseSig = -1
         cachedNodeStateHash = Int.MIN_VALUE
         textures.clear()
         terrainVbo.release()
@@ -324,7 +321,7 @@ class ForestGlRenderer(
         assetTextures.values.forEach { id -> if (id != 0) GLES20.glDeleteTextures(1, intArrayOf(id), 0) }
         assetTextures.clear()
         assetTexturesQuality = null
-        assetPropsBuiltLoc = null
+        assetPropsBuiltQuality = null
 
         GLES20.glEnable(GLES20.GL_DEPTH_TEST)
         GLES20.glEnable(GLES20.GL_BLEND)
@@ -398,8 +395,8 @@ class ForestGlRenderer(
             val radius = 12.5f + 1.8f * sin(animTimeSec * 0.25f)
             camX = sin(orbitAngle) * radius
             camZ = cos(orbitAngle) * radius + 1.5f
-            camY = WorldPopulator.terrainHeight(LocationId.BASE_CLEARING, camX, camZ) + 3.1f + 0.35f * sin(animTimeSec * 0.4f)
-            val lookTargetY = WorldPopulator.terrainHeight(LocationId.BASE_CLEARING, -2.0f, -2.0f) + 1.5f
+            camY = WorldPopulator.worldHeight(camX, camZ) + 3.1f + 0.35f * sin(animTimeSec * 0.4f)
+            val lookTargetY = WorldPopulator.worldHeight(-2.0f, -2.0f) + 1.5f
             val dx = -2.0f - camX
             val dy = lookTargetY - camY
             val dz = -2.0f - camZ
@@ -445,7 +442,7 @@ class ForestGlRenderer(
         var rad1 = 0f
         if (loc == LocationId.BASE_CLEARING) {
             ptLight1[0] = 0f
-            ptLight1[1] = WorldPopulator.terrainHeight(loc, 0f, 0f) + 1.35f
+            ptLight1[1] = WorldPopulator.worldHeight(0f, 0f) + 1.35f
             ptLight1[2] = 0f
             rad1 = (16f + base.campfireLevel * 2.8f) * fireFlicker
         } else if (loc == LocationId.ABANDONED_MINE) {
@@ -458,17 +455,17 @@ class ForestGlRenderer(
         val activeFieldFire = run.fieldCampfires.lastOrNull()
         if (activeFieldFire != null) {
             ptLight2[0] = activeFieldFire.x
-            ptLight2[1] = WorldPopulator.terrainHeight(loc, activeFieldFire.x, activeFieldFire.z) + 1.1f
+            ptLight2[1] = MeshBuilder.sampleWorldHeight(activeFieldFire.x, activeFieldFire.z, worldTerrainSteps(quality)) + 1.1f
             ptLight2[2] = activeFieldFire.z
             rad2 = 15.5f * fireFlicker
         } else if (loc == LocationId.HUNTERS_CABIN) {
             ptLight2[0] = 7.2f
-            ptLight2[1] = WorldPopulator.terrainHeight(loc, 7.2f, 8.8f) + 1.8f
-            ptLight2[2] = 6.2f
+            ptLight2[1] = MeshBuilder.sampleWorldHeight(7.2f, 128.8f, worldTerrainSteps(quality)) + 1.8f
+            ptLight2[2] = 126.2f
             rad2 = 13.5f * fireFlicker
         } else if (loc == LocationId.BASE_CLEARING) {
             ptLight2[0] = -6.5f
-            ptLight2[1] = WorldPopulator.terrainHeight(loc, -6.5f, -5.5f) + 1.5f
+            ptLight2[1] = WorldPopulator.worldHeight(-6.5f, -5.5f) + 1.5f
             ptLight2[2] = -3.2f
             rad2 = 9.5f
         }
@@ -580,24 +577,28 @@ class ForestGlRenderer(
                 buildToolHandVbo(id)
             }
         }
-        if (assetPropsBuiltLoc != loc) {
-            rebuildAssetPropsVbo(loc)
-            assetPropsBuiltLoc = loc
+        if (assetPropsBuiltQuality != quality) {
+            rebuildAssetPropsVbo(quality)
+            assetPropsBuiltQuality = quality
         }
     }
 
-    private fun rebuildAssetPropsVbo(loc: LocationId) {
+    private fun rebuildAssetPropsVbo(quality: GraphicsQuality) {
         val ctx = appContext ?: return
         assetPropBatches.values.forEach { it.release() }
         assetPropBatches.clear()
 
+        // Все районы большого мира: расстановки + авторские камни смещены в глобальные координаты
         val byModel = HashMap<String, MutableList<AssetProps.Placement>>()
-        for (p in AssetProps.forLocation(loc)) {
-            byModel.getOrPut(p.modelId) { mutableListOf() }.add(p)
-        }
-        // Валуны кольца и породы штольни — модели автора (камни-«булыжники» больше не генерятся)
-        for (p in generatedRockPlacements(loc)) {
-            byModel.getOrPut(p.modelId) { mutableListOf() }.add(p)
+        for (region in com.ayaks.winterforest.domain.world.WorldRegions.REGIONS) {
+            for (p0 in AssetProps.forLocation(region.id)) {
+                val p = p0.copy(x = p0.x + region.cx, z = p0.z + region.cz)
+                byModel.getOrPut(p.modelId) { mutableListOf() }.add(p)
+            }
+            for (p0 in generatedRockPlacements(region.id)) {
+                val p = p0.copy(x = p0.x + region.cx, z = p0.z + region.cz)
+                byModel.getOrPut(p.modelId) { mutableListOf() }.add(p)
+            }
         }
         // Модели животных НЕ пекутся в статику: они рисуются по месту через entityParts
         for ((modelId, spots0) in byModel) {
@@ -613,7 +614,7 @@ class ForestGlRenderer(
             if (floats.isEmpty()) continue
             val builder = MeshBuilder(floats.size * spots.size + 64)
             for (p in spots) {
-                val groundY = WorldPopulator.terrainHeight(loc, p.x, p.z)
+                val groundY = MeshBuilder.sampleWorldHeight(p.x, p.z, worldTerrainSteps(quality))
                 val cos = kotlin.math.cos(p.yawRad)
                 val sin = kotlin.math.sin(p.yawRad)
                 val cp = kotlin.math.cos(p.pitchRad)
@@ -657,16 +658,18 @@ class ForestGlRenderer(
     ) {
         val loc = run.currentLocation
 
-        // 1. Текстуры биома + Mipmap-цепочка
-        if (uploadedPaletteLocation != loc || uploadedQuality != quality || textures.isEmpty()) {
+        // 1. Текстуры биома + Mipmap-цепочка (одна палитра на весь единый мир —
+        //    без перезаливки текстур при переходе между районами)
+        if (uploadedQuality != quality || textures.isEmpty()) {
             textures.values.forEach { id ->
                 if (id != 0) GLES20.glDeleteTextures(1, intArrayOf(id), 0)
             }
             textures.clear()
             val texRes = quality.textureSize
-            val snowTintR = ((loc.palette.snowTintHex ushr 16) and 0xFF) / 255f
-            val snowTintG = ((loc.palette.snowTintHex ushr 8) and 0xFF) / 255f
-            val snowTintB = (loc.palette.snowTintHex and 0xFF) / 255f
+            val snowTintHex = LocationId.BASE_CLEARING.palette.snowTintHex
+            val snowTintR = ((snowTintHex ushr 16) and 0xFF) / 255f
+            val snowTintG = ((snowTintHex ushr 8) and 0xFF) / 255f
+            val snowTintB = (snowTintHex and 0xFF) / 255f
             for (kind in ProceduralTextureId.entries) {
                 val texHandle = IntArray(1)
                 GLES20.glGenTextures(1, texHandle, 0)
@@ -705,69 +708,116 @@ class ForestGlRenderer(
             uploadedQuality = quality
         }
 
-        // 2. Статическая геометрия мира (рельеф + архитектура + два кольца векового леса)
+        // 2. Статическая геометрия ЕДИНОГО большого мира (рельеф + архитектура всех районов + лес)
         val baseSig = base.shelterLevel * 31 + base.campfireLevel * 7 + base.workbenchLevel * 3 +
             base.furnaceLevel * 13 + (if (base.thermosInstalledOnBase) 1000 else 0)
-        if (staticBuiltLocation != loc || staticBuiltQuality != quality || staticBuiltBaseSig != baseSig) {
-            // На Базовой поляне — высокая сетка (128 шагов) под импортированный ландшафт
-            val terrainSteps = if (loc == LocationId.BASE_CLEARING) 128 else quality.terrainSteps
-            val terrainBuilder = MeshBuilder.buildTerrainIntoBuilder(loc, halfExtent = 48f, steps = terrainSteps)
+        if (staticBuiltQuality != quality || staticBuiltBaseSig != baseSig) {
+            val terrainSteps = worldTerrainSteps(quality)
+            val terrainBuilder = MeshBuilder.buildWorldTerrainIntoBuilder(steps = terrainSteps)
             terrainVbo.uploadStatic(terrainBuilder)
 
-            if (loc == LocationId.FROZEN_LAKE) {
-                val iceBuilder = MeshBuilder(512).apply {
-                    val segs = 12
-                    val half = 23.2f
-                    val step = (half * 2f) / segs
-                    for (iz in 0 until segs) {
-                        for (ix in 0 until segs) {
-                            val x0 = -half + ix * step; val x1 = x0 + step
-                            val z0 = -half + iz * step; val z1 = z0 + step
-                            addQuad(
-                                x0, -0.16f, z1, x1, -0.16f, z1, x1, -0.16f, z0, x0, -0.16f, z0,
-                                0f, 1f, 0f, 1.35f, 1.35f, 0.90f, 0.97f, 1.0f, 0.94f
-                            )
-                        }
+            // Лёд Замёрзшего озера — в глобальных координатах района (120, 0)
+            val iceBuilder = MeshBuilder(512).apply {
+                val segs = 12
+                val half = 23.2f
+                val step = (half * 2f) / segs
+                for (iz in 0 until segs) {
+                    for (ix in 0 until segs) {
+                        val x0 = -half + ix * step; val x1 = x0 + step
+                        val z0 = -half + iz * step; val z1 = z0 + step
+                        addQuad(
+                            120f + x0, -0.16f, z1, 120f + x1, -0.16f, z1, 120f + x1, -0.16f, z0, 120f + x0, -0.16f, z0,
+                            0f, 1f, 0f, 1.35f, 1.35f, 0.90f, 0.97f, 1.0f, 0.94f
+                        )
                     }
                 }
-                lakeIceVbo.uploadStatic(iceBuilder)
-            } else {
-                lakeIceVbo.release()
             }
+            lakeIceVbo.uploadStatic(iceBuilder)
 
-            rebuildStaticLocationArchitecture(loc, base, quality)
-            staticBuiltLocation = loc
+            rebuildStaticWorldArchitecture(base, quality)
             staticBuiltQuality = quality
             staticBuiltBaseSig = baseSig
             cachedNodeStateHash = Int.MIN_VALUE
         }
 
-        // 3. Интерактивные ресурсные узлы (перезаливаются ТОЛЬКО при изменении их доступности!)
+        // 3. Интерактивные ресурсные узлы (перезаливаются при изменении доступности ИЛИ смене района)
         val nodes = run.currentLocationNodes()
-        val nodeSig = computeNodeAvailabilitySignature(loc, nodes)
+        val nodeSig = computeNodeAvailabilitySignature(run.playerX, run.playerZ, nodes)
         if (nodeSig != cachedNodeStateHash) {
-            rebuildInteractiveNodesVbo(loc, nodes)
+            rebuildInteractiveNodesVbo(nodes, run.playerX, run.playerZ, quality)
             cachedNodeStateHash = nodeSig
         }
     }
 
-    private fun computeNodeAvailabilitySignature(loc: LocationId, nodes: List<ResourceNode>): Int {
-        var h = loc.ordinal * 92821 + nodes.size * 31
+    private fun worldTerrainSteps(quality: GraphicsQuality): Int = when (quality) {
+        GraphicsQuality.LOW -> 140
+        GraphicsQuality.MEDIUM -> 180
+        GraphicsQuality.HIGH -> 220
+        GraphicsQuality.ULTRA -> 260
+    }
+
+    private fun computeNodeAvailabilitySignature(px: Float, pz: Float, nodes: List<ResourceNode>): Int {
+        // Смена района игрока = новая выборка дальних узлов
+        var h = (px / 32f).toInt() * 73856093 xor (pz / 32f).toInt() * 19349663
+        h = h * 31 + nodes.size
         for (i in nodes.indices) {
             h = h * 31 + (if (nodes[i].isAvailable) 1 else 0)
         }
         return h
     }
 
-    private fun rebuildStaticLocationArchitecture(
+    /** Собирает архитектуру всех пяти районов большого мира со сдвигом в глобальные координаты. */
+    private fun rebuildStaticWorldArchitecture(base: BaseProgress, quality: GraphicsQuality) {
+        val shared = EnumMap<ProceduralTextureId, MeshBuilder>(ProceduralTextureId::class.java)
+        for (mat in ProceduralTextureId.entries) {
+            shared[mat] = MeshBuilder(32768)
+        }
+        val temp = EnumMap<ProceduralTextureId, MeshBuilder>(ProceduralTextureId::class.java)
+        for (mat in ProceduralTextureId.entries) {
+            temp[mat] = MeshBuilder(16384)
+        }
+        for (region in com.ayaks.winterforest.domain.world.WorldRegions.REGIONS) {
+            for (mat in ProceduralTextureId.entries) {
+                temp[mat]?.clear()
+            }
+            buildLocationArchitecture(region.id, base, quality, temp)
+            for (mat in ProceduralTextureId.entries) {
+                val src = temp[mat] ?: continue
+                shared[mat]?.appendTranslatedFrom(src, region.cx, region.cz)
+            }
+        }
+        // Вековой лес по краю всего мира — сплошная живая стена
+        val bark = shared[ProceduralTextureId.WOOD_BARK]!!
+        val foliage = shared[ProceduralTextureId.PINE_FOLIAGE]!!
+        val ringCount = quality.perimeterTrees
+        for (i in 0 until ringCount) {
+            val ang = (i.toFloat() / ringCount.toFloat()) * Math.PI.toFloat() * 2f
+            val rad = 158.5f + (i % 3) * 1.7f
+            val bx = sin(ang) * rad
+            val bz = -cos(ang) * rad
+            val by = MeshBuilder.sampleWorldHeight(bx, bz, worldTerrainSteps(quality))
+            addDetailedPineTree(bark, foliage, bx, by, bz, scale = 1.6f + (i % 4) * 0.18f, seed = i * 17, drawShadow = false)
+        }
+        val outerCount = (ringCount * 3) / 4
+        for (i in 0 until outerCount) {
+            val ang = (i.toFloat() / outerCount.toFloat()) * Math.PI.toFloat() * 2f + 0.09f
+            val rad = 164.5f + (i % 2) * 1.9f
+            val bx = sin(ang) * rad
+            val bz = -cos(ang) * rad
+            val by = MeshBuilder.sampleWorldHeight(bx, bz, worldTerrainSteps(quality))
+            addDetailedPineTree(bark, foliage, bx, by, bz, scale = 1.9f + (i % 3) * 0.2f, seed = 900 + i, drawShadow = false)
+        }
+        for ((mat, builder) in shared) {
+            staticBatches[mat]?.uploadStatic(builder)
+        }
+    }
+
+    private fun buildLocationArchitecture(
         loc: LocationId,
         base: BaseProgress,
-        quality: GraphicsQuality
+        quality: GraphicsQuality,
+        builders: EnumMap<ProceduralTextureId, MeshBuilder>
     ) {
-        val builders = EnumMap<ProceduralTextureId, MeshBuilder>(ProceduralTextureId::class.java)
-        for (mat in ProceduralTextureId.entries) {
-            builders[mat] = MeshBuilder(16384)
-        }
         val bark = builders[ProceduralTextureId.WOOD_BARK]!!
         val foliage = builders[ProceduralTextureId.PINE_FOLIAGE]!!
         val stone = builders[ProceduralTextureId.STONE]!!
@@ -777,7 +827,7 @@ class ForestGlRenderer(
         val fire = builders[ProceduralTextureId.FIRE_EMBER]!!
 
         if (loc == LocationId.BASE_CLEARING) {
-            val baseY = WorldPopulator.terrainHeight(loc, 0f, 0f)
+            val baseY = WorldPopulator.worldHeight(0f, 0f)
             // Детальное кострище из валунов, углей, перекрещенных поленьев и треноги с котелком
             foliage.addShadowDisc(0f, baseY, 0f, 1.85f, 0.42f)
             for (i in 0 until 10) {
@@ -848,7 +898,35 @@ class ForestGlRenderer(
         } else if (loc == LocationId.HUNTERS_CABIN) {
             val cabX = 7.2f; val cabZ = 8.8f
             val cabY = WorldPopulator.terrainHeight(loc, cabX, cabZ)
-            // Зимовье рисуется импортированной 3D-моделью (cabin_wood/bark/stone/shingle/burned)
+            // Зимовье рисуется импортированной 3D-моделью (cabin_wood/bark/stone/shingle/burned),
+            // её поворот — 3.6 рад. Внутренность достроена ВДОЛЬ этой оси, чтобы пол перекрывал
+            // снег, а стены и мебель не «вылазили» сквозь импортную оболочку.
+            val cabYaw = 3.6f
+            val cy = kotlin.math.cos(cabYaw)
+            val sy = kotlin.math.sin(cabYaw)
+            fun cabAt(dx: Float, dz: Float): FloatArray =
+                floatArrayOf(cabX + dx * cy + dz * sy, cabZ - dx * sy + dz * cy)
+            // Сплошной деревянный пол (снег больше не «вылазит» сквозь избу)
+            val floor = cabAt(0f, 0f)
+            timber.addOrientedBox(floor[0], cabY + 0.22f, floor[1], 2.75f, 0.14f, 7.1f, cabYaw, 0f, 0f, 0.72f, 0.58f, 0.42f)
+            // Кровать охотника у дальней стены
+            val bed = cabAt(-1.02f, 2.45f)
+            timber.addOrientedBox(bed[0], cabY + 0.42f, bed[1], 1.18f, 0.34f, 2.15f, cabYaw, 0f, 0f)
+            cloth.addOrientedBox(bed[0], cabY + 0.62f, bed[1], 1.12f, 0.14f, 1.75f, cabYaw, 0f, 0f, 0.62f, 0.42f, 0.34f)
+            // Обеденный стол со скамьёй
+            val table = cabAt(1.02f, -0.25f)
+            timber.addOrientedBox(table[0], cabY + 0.74f, table[1], 0.95f, 0.09f, 1.45f, cabYaw, 0f, 0f)
+            timber.addOrientedBox(table[0], cabY + 0.38f, table[1], 0.16f, 0.72f, 0.16f, cabYaw, 0f, 0f)
+            val bench = cabAt(1.02f, -1.35f)
+            timber.addOrientedBox(bench[0], cabY + 0.44f, bench[1], 0.42f, 0.10f, 1.35f, cabYaw, 0f, 0f)
+            // Чугунная печка с трубой и тёплым светом из топки
+            val stove = cabAt(-1.18f, -2.55f)
+            metal.addOrientedBox(stove[0], cabY + 0.62f, stove[1], 0.72f, 0.80f, 0.72f, cabYaw, 0f, 0f, 0.35f, 0.36f, 0.38f)
+            metal.addBox(stove[0], cabY + 1.72f, stove[1], 0.22f, 1.5f, 0.22f, 0.32f, 0.33f, 0.35f)
+            fire.addBox(stove[0] + 0.38f, cabY + 0.58f, stove[1], 0.05f, 0.30f, 0.28f, 1.0f, 0.62f, 0.26f, 1f)
+            // Тёплое свечение внутри избы (видно в проёме двери)
+            val glowWall = cabAt(0f, 3.28f)
+            fire.addOrientedBox(glowWall[0], cabY + 1.15f, glowWall[1], 1.7f, 0.95f, 0.05f, cabYaw, 0f, 0f, 1.0f, 0.76f, 0.34f, 1f)
             // Сушильные козлы охотника возле зимовья
             bark.addTaperedCylinder(cabX - 4.2f, cabY, cabZ - 1.2f, cabX - 4.2f, cabY + 2.0f, cabZ - 0.2f, 0.08f, 0.06f, 6)
             bark.addTaperedCylinder(cabX - 4.2f, cabY, cabZ + 0.8f, cabX - 4.2f, cabY + 2.0f, cabZ - 0.2f, 0.08f, 0.06f, 6)
@@ -909,29 +987,26 @@ class ForestGlRenderer(
             }
         }
 
-        // Два эшелона вековых елей по периметру мира (плотная живая линия леса без плоского обрыва!)
-        val ringCount = quality.perimeterTrees
+        // Ели по периметру района: живая стена с четырьмя проходами-коридорами к соседям
+        val ringCount = maxOf(8, quality.perimeterTrees / 2)
         for (i in 0 until ringCount) {
             val ang = (i.toFloat() / ringCount.toFloat()) * Math.PI.toFloat() * 2f
-            if (abs(sin(ang)) < 0.09f && cos(ang) < 0f) continue // проход у северных ворот
-            val radInner = 39.2f + (i % 3) * 1.6f
+            if (abs(sin(ang)) < 0.13f || abs(cos(ang)) < 0.13f) continue
+            val radInner = 40.2f + (i % 3) * 1.6f
             val bx = sin(ang) * radInner
             val bz = -cos(ang) * radInner
-            val by = MeshBuilder.terrainWithBorderCliff(loc, bx, bz)
+            val by = WorldPopulator.terrainHeight(loc, bx, bz)
             addDetailedPineTree(bark, foliage, bx, by, bz, scale = 1.25f + (i % 4) * 0.16f, seed = i * 13)
         }
         val outerCount = (ringCount * 3) / 4
         for (i in 0 until outerCount) {
             val ang = (i.toFloat() / outerCount.toFloat()) * Math.PI.toFloat() * 2f + 0.11f
-            val radOuter = 44.5f + (i % 2) * 1.8f
+            if (abs(sin(ang)) < 0.13f || abs(cos(ang)) < 0.13f) continue
+            val radOuter = 45.5f + (i % 2) * 1.8f
             val bx = sin(ang) * radOuter
             val bz = -cos(ang) * radOuter
-            val by = MeshBuilder.terrainWithBorderCliff(loc, bx, bz)
+            val by = WorldPopulator.terrainHeight(loc, bx, bz)
             addDetailedPineTree(bark, foliage, bx, by, bz, scale = 1.55f + (i % 3) * 0.18f, seed = 500 + i, drawShadow = false)
-        }
-
-        for ((mat, builder) in builders) {
-            staticBatches[mat]?.uploadStatic(builder)
         }
     }
 
@@ -960,13 +1035,19 @@ class ForestGlRenderer(
         return out
     }
 
-    private fun rebuildInteractiveNodesVbo(loc: LocationId, nodes: List<ResourceNode>) {
+    private fun rebuildInteractiveNodesVbo(
+        nodes: List<ResourceNode>,
+        playerX: Float,
+        playerZ: Float,
+        quality: GraphicsQuality
+    ) {
         val builders = EnumMap<ProceduralTextureId, MeshBuilder>(ProceduralTextureId::class.java)
         for (mat in ProceduralTextureId.entries) {
             builders[mat] = MeshBuilder(12288)
         }
         // [x, y, z, yaw, scale, tintR, tintG, tintB] — камни-ресурсы моделями автора
         val nodeRockSpots = HashMap<String, MutableList<FloatArray>>()
+        val terrainSteps = worldTerrainSteps(quality)
         val bark = builders[ProceduralTextureId.WOOD_BARK]!!
         val foliage = builders[ProceduralTextureId.PINE_FOLIAGE]!!
         val stone = builders[ProceduralTextureId.STONE]!!
@@ -979,7 +1060,11 @@ class ForestGlRenderer(
 
         for ((idx, node) in nodes.withIndex()) {
             if (!node.isAvailable) continue
-            val y = WorldPopulator.terrainHeight(loc, node.x, node.z)
+            // Дальние узлы не пекутся: VBO пересобирается при смене района игрока
+            val ndx = node.x - playerX
+            val ndz = node.z - playerZ
+            if (ndx * ndx + ndz * ndz > 118f * 118f) continue
+            val y = MeshBuilder.sampleWorldHeight(node.x, node.z, terrainSteps)
             when (node.kind) {
                 WorldObjectKind.PINE_TREE -> {
                     addDetailedPineTree(bark, foliage, node.x, y, node.z, scale = 0.94f + (idx % 4) * 0.11f, seed = 90 + idx)
@@ -1108,7 +1193,7 @@ class ForestGlRenderer(
 
         // 1. Живое пламя и искры базового костра + дым из печной трубы зимовья
         if (loc == LocationId.BASE_CLEARING) {
-            val baseY = WorldPopulator.terrainHeight(loc, 0f, 0f)
+            val baseY = WorldPopulator.worldHeight(0f, 0f)
             val flick = 0.86f + 0.20f * sin(animTimeSec * 10.5f)
             fire.addCrossedFlame(
                 0f, baseY + 0.16f, 0f,
@@ -1123,7 +1208,7 @@ class ForestGlRenderer(
                 fire.addBox(sx, baseY + 0.45f + rise, sz, 0.045f, 0.045f, 0.045f, 1f, 0.80f, 0.28f, (1f - rise / 2.6f) * 0.9f)
             }
             // Клубы тёплого дыма из трубы сруба
-            val chY = WorldPopulator.terrainHeight(loc, -6.8f, -5.8f) + 3.9f
+            val chY = WorldPopulator.worldHeight(-6.8f, -5.8f) + 3.9f
             for (p in 0 until 5) {
                 val rise = ((animTimeSec * 0.75f + p * 0.7f) % 3.5f)
                 val rad = 0.16f + rise * 0.14f
@@ -1132,7 +1217,7 @@ class ForestGlRenderer(
             // Каменная печь: живое пламя в топке и дым из трубы
             if (base.furnaceLevel >= 1) {
                 val fx = 6.3f; val fz = -5.3f
-                val fy = WorldPopulator.terrainHeight(loc, fx, fz)
+                val fy = WorldPopulator.worldHeight(fx, fz)
                 val flick2 = 0.86f + 0.20f * sin(animTimeSec * 9.2f)
                 fire.addCrossedFlame(fx - 0.88f, fy + 0.62f, fz, 0.15f, 0.28f * flick2, 0f)
                 for (p in 0 until 3) {
@@ -1149,7 +1234,7 @@ class ForestGlRenderer(
 
         // 2. Полевые костры игрока + маяки несобранных уникальных находок
         for (fc in run.fieldCampfires) {
-            val fy = WorldPopulator.terrainHeight(loc, fc.x, fc.z)
+            val fy = MeshBuilder.sampleWorldHeight(fc.x, fc.z, worldTerrainSteps(quality))
             stone.addSculptedBoulder(fc.x + 0.35f, fy, fc.z, 0.18f, 0.14f, 0.16f, 17)
             stone.addSculptedBoulder(fc.x - 0.35f, fy, fc.z + 0.12f, 0.18f, 0.14f, 0.16f, 23)
             bark.addTaperedCylinder(fc.x - 0.35f, fy + 0.04f, fc.z - 0.2f, fc.x + 0.35f, fy + 0.22f, fc.z + 0.2f, 0.07f, 0.06f, 6)
@@ -1159,7 +1244,7 @@ class ForestGlRenderer(
 
         for (node in run.currentLocationNodes()) {
             if (node.isAvailable && node.kind == WorldObjectKind.SPECIAL_CACHE) {
-                val ny = WorldPopulator.terrainHeight(loc, node.x, node.z)
+                val ny = MeshBuilder.sampleWorldHeight(node.x, node.z, worldTerrainSteps(quality))
                 val hover = ny + 1.05f + 0.16f * sin(animTimeSec * 3.1f)
                 fire.addCrossedFlame(node.x, hover, node.z, 0.24f, 0.42f, 0f, 1f, 0.92f, 0.42f, 0.85f)
             }
@@ -1202,7 +1287,7 @@ class ForestGlRenderer(
                 val dotFwd = (dx * invD) * fwdX + (dz * invD) * fwdZ
                 if (dotFwd < -0.35f) continue // Frustum culling за спиной камеры!
             }
-            val gy = WorldPopulator.terrainHeight(loc, bx, bz)
+            val gy = MeshBuilder.sampleWorldHeight(bx, bz, worldTerrainSteps(quality))
             if (beast.kind == WildlifeKind.TIMBER_WOLF || beast.kind == WildlifeKind.NORTHERN_DEER) {
                 // Импортированные модели волка и оленя: тело + качающиеся ноги (draw ниже)
                 fur.addShadowDisc(bx, gy, bz, if (beast.kind == WildlifeKind.TIMBER_WOLF) 1.05f else 1.3f, 0.34f)
@@ -1734,30 +1819,122 @@ class ForestGlRenderer(
         for (k in 0..3) {
             val floats = readAssetFloats(ctx, "models/$modelId/mesh_leg$k.obj")
             if (floats.isEmpty()) continue
-            var maxY = Float.NEGATIVE_INFINITY
-            var i = 1
-            while (i < floats.size) {
-                if (floats[i] > maxY) maxY = floats[i]
-                i += 12
+            legs.add(buildLegPart(floats))
+            // Низкополигональный олень смоделирован с двумя ногами — рисуем
+            // зеркальную пару (дальняя сторона), шаг идёт диагональю
+            if (k == 0 && readAssetFloats(ctx, "models/$modelId/mesh_leg2.obj").isEmpty()) {
+                legs.add(buildLegPart(mirrorX(floats)))
             }
-            var sx = 0f
-            var sz = 0f
-            var n = 0
-            i = 0
-            while (i + 11 < floats.size) {
-                if (floats[i + 1] > maxY - (maxY * 0.28f).coerceAtLeast(0.05f)) {
-                    sx += floats[i]; sz += floats[i + 2]; n++
-                }
-                i += 12
+            if (k == 1 && readAssetFloats(ctx, "models/$modelId/mesh_leg3.obj").isEmpty()) {
+                legs.add(buildLegPart(mirrorX(floats)))
             }
-            if (n == 0) continue
-            val vbo = GlVbo()
-            vbo.uploadStatic(floatsToBuilder(floats))
-            legs.add(LegPart(vbo, sx / n, maxY * 0.92f, sz / n))
         }
         // диагональные пары шага: сортируем «вперёд-назад, слева-направо»
         val sorted = legs.sortedWith(compareByDescending<LegPart> { it.pivotZ }.thenBy { it.pivotX })
         entityParts[modelId] = EntityParts(bodyVbo, sorted)
+    }
+
+    /** Зеркальная копия ноги через ось X (дальняя сторона туловища). */
+    private fun mirrorX(floats: FloatArray): FloatArray {
+        val out = floats.copyOf()
+        var i = 0
+        while (i + 11 < out.size) {
+            out[i] = -out[i]
+            out[i + 3] = -out[i + 3]
+            i += 12
+        }
+        return out
+    }
+
+    /**
+     * Нога зверя: меш + «шар» тазобедренного/коленного сустава на верхнем срезе.
+     * Шар вращается вместе с ногой и закрывает стык с телом при любом размахе —
+     * текстуры больше не «разрываются».
+     */
+    private fun buildLegPart(floats: FloatArray): LegPart {
+        var maxY = Float.NEGATIVE_INFINITY
+        var i = 1
+        while (i < floats.size) {
+            if (floats[i] > maxY) maxY = floats[i]
+            i += 12
+        }
+        val bandY = maxY - (maxY * 0.28f).coerceAtLeast(0.05f)
+        var sx = 0f
+        var sz = 0f
+        var su = 0f
+        var sv = 0f
+        var rad = 0.06f
+        var n = 0
+        i = 0
+        while (i + 11 < floats.size) {
+            if (floats[i + 1] > bandY) {
+                sx += floats[i]; sz += floats[i + 2]
+                su += floats[i + 6]; sv += floats[i + 7]
+                n++
+                val dx = floats[i] - 0f
+                val dz = floats[i + 2] - 0f
+                val rr = sqrt(dx * dx + dz * dz)
+                if (rr > rad) rad = rr
+            }
+            i += 12
+        }
+        if (n == 0) {
+            val vbo0 = GlVbo()
+            vbo0.uploadStatic(floatsToBuilder(floats))
+            return LegPart(vbo0, 0f, maxY * 0.92f, 0f)
+        }
+        val px = sx / n
+        val pz = sz / n
+        val pivotY = maxY * 0.92f
+        val ballR = (rad * 1.25f).coerceIn(0.055f, 0.16f)
+        val builder = floatsToBuilder(floats)
+        appendJointBall(builder, px, pivotY, pz, ballR, su / n, sv / n)
+        val vbo = GlVbo()
+        vbo.uploadStatic(builder)
+        return LegPart(vbo, px, pivotY, pz)
+    }
+
+    /** UV-шар сустава в пространстве модели (перекрывает стык ноги и туловища). */
+    private fun appendJointBall(
+        builder: MeshBuilder,
+        cx: Float,
+        cy: Float,
+        cz: Float,
+        r: Float,
+        u: Float,
+        v: Float
+    ) {
+        val rings = 5
+        val segs = 8
+        for (ring in 0 until rings) {
+            val phi0 = Math.PI.toFloat() * (ring.toFloat() / rings)
+            val phi1 = Math.PI.toFloat() * ((ring + 1).toFloat() / rings)
+            for (seg in 0 until segs) {
+                val th0 = Math.PI.toFloat() * 2f * (seg.toFloat() / segs)
+                val th1 = Math.PI.toFloat() * 2f * ((seg + 1).toFloat() / segs)
+                fun pt(phi: Float, th: Float): FloatArray {
+                    val sy = kotlin.math.cos(phi)
+                    val sr = kotlin.math.sin(phi)
+                    return floatArrayOf(
+                        cx + r * sr * kotlin.math.cos(th),
+                        cy + r * sy,
+                        cz + r * sr * kotlin.math.sin(th)
+                    )
+                }
+                val a = pt(phi0, th0)
+                val b = pt(phi0, th1)
+                val c = pt(phi1, th1)
+                val d = pt(phi1, th0)
+                fun emit(p: FloatArray) {
+                    val nx = (p[0] - cx) / r
+                    val ny = (p[1] - cy) / r
+                    val nz = (p[2] - cz) / r
+                    builder.addVertex(p[0], p[1], p[2], nx, ny, nz, u, v, 0.94f, 0.94f, 0.94f, 1f)
+                }
+                emit(a); emit(b); emit(c)
+                emit(a); emit(c); emit(d)
+            }
+        }
     }
 
     /**

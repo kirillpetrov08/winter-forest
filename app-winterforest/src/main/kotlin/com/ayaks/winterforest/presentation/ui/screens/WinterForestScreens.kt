@@ -1081,6 +1081,12 @@ private fun ExpeditionMapTab(
                 fontWeight = FontWeight.Bold,
                 color = SnowCrispText
             )
+            Text(
+                "Все районы соединены в один большой мир — между ними можно дойти пешком. " +
+                    "Кнопки ниже — быстрый переход к изученному району.",
+                color = MistMutedText,
+                fontSize = 11.5.sp
+            )
             for (loc in LocationId.entries) {
                 val status = SurvivalEngine.evaluateLocationUnlock(loc, evalRun, base)
                 Row(
@@ -1107,7 +1113,7 @@ private fun ExpeditionMapTab(
                     }
                     Spacer(Modifier.width(10.dp))
                     Button(onClick = { viewModel.onTravelToLocation(loc) }) {
-                        Text(if (status.isUnlocked) "Отправиться" else "Проверить")
+                        Text(if (status.isUnlocked) "Быстрый переход" else "Проверить")
                     }
                 }
                 HorizontalDivider(color = Color(0x22FFFFFF))

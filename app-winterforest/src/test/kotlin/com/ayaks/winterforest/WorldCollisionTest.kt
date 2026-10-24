@@ -66,7 +66,7 @@ class WorldCollisionTest {
     fun `inside shelter detection`() {
         assertTrue(WorldCollision.isInsideShelter(LocationId.BASE_CLEARING, -6.8f, -5.8f))
         assertFalse(WorldCollision.isInsideShelter(LocationId.BASE_CLEARING, 2.5f, 1.5f))
-        assertTrue(WorldCollision.isInsideShelter(LocationId.HUNTERS_CABIN, 7.2f, 8.8f))
+        assertTrue(WorldCollision.isInsideShelter(LocationId.HUNTERS_CABIN, 7.2f, 128.8f))
         assertFalse(WorldCollision.isInsideShelter(LocationId.DENSE_SPRUCE, 0f, 0f))
     }
 

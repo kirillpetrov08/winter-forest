@@ -73,8 +73,8 @@ class EdgeCasesTest {
     fun `world border clamps player strictly within bounds and notifies user`() {
         val base = BaseProgress()
         val nearEdge = SurvivalEngine.createNewRun(base).copy(
-            playerX = 37.5f,
-            playerZ = -37.5f,
+            playerX = 162.5f,
+            playerZ = -162.5f,
             yawDeg = 90f
         )
 

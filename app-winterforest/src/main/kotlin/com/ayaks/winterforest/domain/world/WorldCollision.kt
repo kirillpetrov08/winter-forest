@@ -37,6 +37,8 @@ object WorldCollision {
     fun obstacles(loc: LocationId, nodes: List<ResourceNode>): Pair<List<Circle>, List<Rect>> {
         val circles = ArrayList<Circle>(nodes.size + 24)
         val rects = ArrayList<Rect>(8)
+        // Узлы приходят в глобальных координатах единого мира — переводим в локальные
+        val (ox, oz) = WorldRegions.centerOf(loc)
 
         for (node in nodes) {
             if (!node.isAvailable) continue
@@ -52,7 +54,7 @@ object WorldCollision {
                 // ICE_HOLE — лунка для рыбалки, GAME_CARCASS — туша: не мешают
                 else -> continue
             }
-            circles.add(Circle(node.x, node.z, r))
+            circles.add(Circle(node.x - ox, node.z - oz, r))
         }
 
         // Поваленные стволы + валуны (та же формула, что у декора в рендере)
@@ -186,7 +188,7 @@ object WorldCollision {
         return floatArrayOf(px, pz)
     }
 
-    /** Удобный обёртка: собрать препятствия и разрешить позицию за один вызов. */
+    /** Удобный обёртка: собрать препятствия и разрешить позицию за один вызов (координаты глобальные). */
     fun resolveFor(
         loc: LocationId,
         nodes: List<ResourceNode>,
@@ -194,21 +196,26 @@ object WorldCollision {
         z: Float,
         radius: Float = PLAYER_RADIUS
     ): FloatArray {
+        val (ox, oz) = WorldRegions.centerOf(loc)
         val (circles, rects) = obstacles(loc, nodes)
-        return resolve(x, z, radius, circles, rects)
+        val r = resolve(x - ox, z - oz, radius, circles, rects)
+        return floatArrayOf(r[0] + ox, r[1] + oz)
     }
 
-    /** Игрок внутри сруба/зимовья (тепло расходуется медленнее). */
+    /** Игрок внутри сруба/зимовья (тепло расходуется медленнее). Координаты глобальные. */
     fun isInsideShelter(loc: LocationId, x: Float, z: Float): Boolean {
         val def = when (loc) {
             LocationId.BASE_CLEARING -> BASE_SHELTER
             LocationId.HUNTERS_CABIN -> HUNTER_CABIN
             else -> return false
         }
+        val (ox, oz) = WorldRegions.centerOf(loc)
+        val lx = x - ox
+        val lz = z - oz
         val cx = def[0]
         val cz = def[1]
         val hw = def[2]
         val hd = def[3]
-        return x > cx - hw + 0.3f && x < cx + hw - 0.3f && z > cz - hd + 0.3f && z < cz + hd - 0.3f
+        return lx > cx - hw + 0.3f && lx < cx + hw - 0.3f && lz > cz - hd + 0.3f && lz < cz + hd - 0.3f
     }
 }

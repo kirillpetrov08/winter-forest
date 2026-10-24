@@ -426,15 +426,16 @@ object SurvivalEngine {
                         val stepStep = (speed * deltaSeconds).coerceAtMost(2.2f)
                         val rawX = entity.x + cos(nextHeading) * stepStep
                         val rawZ = entity.z + sin(nextHeading) * stepStep
-                        val clampedX = rawX.coerceIn(-34.5f, 34.5f)
-                        val clampedZ = rawZ.coerceIn(-34.5f, 34.5f)
+                        val (rcx, rcz) = com.ayaks.winterforest.domain.world.WorldRegions.centerOf(loc)
+                        val clampedX = rawX.coerceIn(rcx - 46f, rcx + 46f)
+                        val clampedZ = rawZ.coerceIn(rcz - 46f, rcz + 46f)
                         if (clampedX != rawX || clampedZ != rawZ) {
                             nextHeading += Math.PI.toFloat() * 0.75f
                         }
                         // Звери тоже не проходят сквозь деревья и строения
                         val beastRadius = if (entity.kind == WildlifeKind.TIMBER_WOLF) 0.5f else 0.42f
                         val resolved = WorldCollision.resolveFor(
-                            curLoc,
+                            loc,
                             run.currentLocationNodes(),
                             clampedX,
                             clampedZ,
@@ -498,10 +499,10 @@ object SurvivalEngine {
         )
         val finalX = resolved[0]
         val finalZ = resolved[1]
-        val groundY = WorldPopulator.terrainHeight(run.currentLocation, finalX, finalZ)
+        val groundY = WorldPopulator.worldHeight(finalX, finalZ)
 
         val msg = if (hitBoundary) {
-            "Граница локации: впереди заснеженный хребет. Ищите деревянные ворота тропы на севере!"
+            "Граница мира: впереди заснеженный хребет."
         } else {
             run.lastStatusMessage
         }
@@ -509,6 +510,8 @@ object SurvivalEngine {
             playerX = finalX,
             playerY = groundY,
             playerZ = finalZ,
+            // В едином мире район определяется позицией игрока
+            currentLocation = com.ayaks.winterforest.domain.world.WorldRegions.regionAt(finalX, finalZ),
             lastStatusMessage = msg
         )
     }
@@ -1108,23 +1111,23 @@ object SurvivalEngine {
         val discoveryXp = if (isFirstVisit) 45 else 0
         val (nextXp, nextLevel) = applyXpGain(curRun.xp, curRun.level, discoveryXp)
         val spawnZ = if (destination == LocationId.BASE_CLEARING) 5.5f else 0f
-        val groundY = WorldPopulator.terrainHeight(destination, 0f, spawnZ)
+        val (dcx, dcz) = com.ayaks.winterforest.domain.world.WorldRegions.centerOf(destination)
+        val groundY = WorldPopulator.worldHeight(dcx, dcz + spawnZ)
 
         val msg = if (isFirstVisit) {
             "Открыта новая локация: «${destination.titleRu}» (+$discoveryXp опыта)!"
         } else {
-            "Переход в локацию «${destination.titleRu}»."
+            "Быстрый переход в «${destination.titleRu}». Пешком между районами можно ходить свободно."
         }
 
         val nextRun = curRun.copy(
             currentLocation = destination,
-            playerX = 0f,
+            playerX = dcx,
             playerY = groundY,
-            playerZ = spawnZ,
+            playerZ = dcz + spawnZ,
             inventory = nextInv,
             nodesByLocation = updatedNodesMap,
             wildlifeByLocation = updatedWildlifeMap,
-            fieldCampfires = emptyList(),
             visitedLocations = curRun.visitedLocations + destination,
             mineEntranceCleared = clearedMine,
             xp = nextXp,
@@ -1692,10 +1695,14 @@ object SurvivalEngine {
         location: LocationId,
         replacement: ResourceNode
     ): Map<LocationId, List<ResourceNode>> {
-        val updatedList = map[location].orEmpty().map { existing ->
-            if (existing.id == replacement.id) replacement else existing
+        // В едином мире узел может принадлежать соседнему району — ищем по id во всех списках
+        var result = map
+        for ((loc, list) in map) {
+            if (list.any { it.id == replacement.id }) {
+                result = result + (loc to list.map { if (it.id == replacement.id) replacement else it })
+            }
         }
-        return map + (location to updatedList)
+        return result
     }
 
     private fun replaceWildlife(
@@ -1703,9 +1710,12 @@ object SurvivalEngine {
         location: LocationId,
         replacement: WildlifeEntity
     ): Map<LocationId, List<WildlifeEntity>> {
-        val updatedList = map[location].orEmpty().map { existing ->
-            if (existing.id == replacement.id) replacement else existing
+        var result = map
+        for ((loc, list) in map) {
+            if (list.any { it.id == replacement.id }) {
+                result = result + (loc to list.map { if (it.id == replacement.id) replacement else it })
+            }
         }
-        return map + (location to updatedList)
+        return result
     }
 }
