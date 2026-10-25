@@ -46,7 +46,11 @@ object WorldCollision {
                 WorldObjectKind.PINE_TREE -> 0.55f
                 WorldObjectKind.BERRY_BUSH -> 0.72f
                 WorldObjectKind.STONE_OUTCROP -> 1.25f
-                WorldObjectKind.SUPPLY_CRATE -> 0.78f
+                // Ящики рисуются моделью автора (cache_crate, 0.95×0.63 м):
+                // радиус коллизии — по полуширине модели, иначе «невидимая стена» в 60 см
+                WorldObjectKind.SUPPLY_CRATE -> 0.55f
+                // Военный ящик раньше выпадал из when → игрок проходил сквозь него
+                WorldObjectKind.MILITARY_CRATE -> 0.55f
                 WorldObjectKind.RESIN_STUMP -> 0.55f
                 WorldObjectKind.COAL_SEAM -> 1.0f
                 WorldObjectKind.IRON_VEIN -> 1.0f

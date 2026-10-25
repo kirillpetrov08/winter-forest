@@ -29,7 +29,7 @@ object AssetProps {
         "dry_branches_a", "dry_branches_b", "tree_bark",
         "cabin_wood", "cabin_bark", "cabin_stone", "cabin_shingle", "cabin_burned",
         "wolf_body", "deer_body", "rat_body",
-        "spear", "pickaxe", "fence", "winter_tree", "workbench", "barrel",
+        "spear", "pickaxe", "winter_tree", "workbench", "barrel",
         "gate", "lantern", "cache_crate", "cache_crate_open", "woodstack", "crate",
         "oak_a", "oak_b", "oak_c", "bush_green", "bush_dry", "bush_thicket"
     )

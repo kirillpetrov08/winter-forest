@@ -570,9 +570,12 @@ class ForestGlRenderer(
         if (assetTexturesQuality != quality) {
             assetTextures.values.forEach { id -> if (id != 0) GLES20.glDeleteTextures(1, intArrayOf(id), 0) }
             assetTextures.clear()
-            val texRes = quality.textureSize
+            // Текстуры пропов грузим в НАТИВНОМ размере источника (512×512, часть 512×256):
+            // апскейл до 1024/2048 не добавлял деталей, но стоил 4–16× видеопамяти
+            // (34 модели × 16 МБ = 544 МБ на ULTRA — гарантированный OOM).
+            val texCap = quality.textureSize
             for (id in AssetProps.ALL_MODEL_IDS) {
-                val buf = AssetTextureLibrary.loadRgbaFromAsset(ctx, "models/$id/diff.png", texRes)
+                val tex = AssetTextureLibrary.loadModelTexture(ctx, "models/$id/diff.png", texCap)
                     ?: continue
                 val texHandle = IntArray(1)
                 GLES20.glGenTextures(1, texHandle, 0)
@@ -583,7 +586,7 @@ class ForestGlRenderer(
                 GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_REPEAT)
                 GLES20.glTexImage2D(
                     GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA,
-                    texRes, texRes, 0, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, buf
+                    tex.width, tex.height, 0, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, tex.buffer
                 )
                 GLES20.glGenerateMipmap(GLES20.GL_TEXTURE_2D)
                 assetTextures[id] = texHandle[0]
@@ -1993,14 +1996,36 @@ class ForestGlRenderer(
         entityParts[modelId] = EntityParts(bodyVbo, sorted)
     }
 
-    /** Зеркальная копия ноги через ось X (дальняя сторона туловища). */
+    /**
+     * Зеркальная копия ноги через ось X (дальняя сторона туловища).
+     *
+     * Отражение меняет ориентацию граней: нормаль отражённого треугольника
+     * равна (nx, −ny, −nz), а не (−nx, ny, nz). Раньше нормали просто
+     * инвертировались по X, из-за чего дальние ноги оленя и волка освещались
+     * «изнутри» и выглядели чёрными. Здесь нормаль приводится к реальной
+     * геометрической ориентации, а обход вершин в каждом треугольнике
+     * меняется (1↔2), чтобы сохранить лицевую сторону при включённом
+     * back-face culling.
+     */
     private fun mirrorX(floats: FloatArray): FloatArray {
         val out = floats.copyOf()
         var i = 0
         while (i + 11 < out.size) {
-            out[i] = -out[i]
-            out[i + 3] = -out[i + 3]
+            out[i] = -out[i]          // позиция X отражается
+            out[i + 4] = -out[i + 4]  // нормаль Y меняет знак
+            out[i + 5] = -out[i + 5]  // нормаль Z меняет знак
             i += 12
+        }
+        // смена обхода: меняем местами углы 1 и 2 каждого треугольника
+        val tri = 36
+        var t = 0
+        while (t + tri <= out.size) {
+            for (k in 0 until 12) {
+                val a = out[t + 12 + k]
+                out[t + 12 + k] = out[t + 24 + k]
+                out[t + 24 + k] = a
+            }
+            t += tri
         }
         return out
     }
