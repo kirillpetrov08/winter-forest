@@ -352,7 +352,8 @@ fun CrosshairOverlay(
 fun QuickEquipmentHotbar(
     run: GameRunState,
     onUseSlot: (Int) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    slotSizeDp: Int = 56
 ) {
     Row(
         horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -368,6 +369,7 @@ fun QuickEquipmentHotbar(
             HotbarSlotChip(
                 indexLabel = (slotIdx + 1).toString(),
                 entry = entry,
+                slotSizeDp = slotSizeDp,
                 onClick = { onUseSlot(slotIdx) }
             )
         }
@@ -387,6 +389,7 @@ private fun toolIcon(tool: EquippedTool): String = when (tool) {
 private fun HotbarSlotChip(
     indexLabel: String,
     entry: com.ayaks.winterforest.domain.model.HotbarEntry?,
+    slotSizeDp: Int = 56,
     onClick: () -> Unit
 ) {
     val bg = FrostedCardSurface.copy(alpha = 0.72f)
@@ -399,7 +402,7 @@ private fun HotbarSlotChip(
             .background(bg)
             .border(1.2.dp, borderCol, RoundedCornerShape(10.dp))
             .clickable(enabled = true, onClick = onClick)
-            .size(56.dp)
+            .size(slotSizeDp.dp)
     ) {
         if (entry != null) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {

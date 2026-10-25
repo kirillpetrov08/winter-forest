@@ -7,6 +7,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -53,6 +54,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import com.ayaks.winterforest.presentation.ui.HudZones
 import com.ayaks.winterforest.domain.model.BaseProgress
 import com.ayaks.winterforest.domain.model.BaseUpgradeType
 import com.ayaks.winterforest.domain.model.GraphicsQuality
@@ -325,7 +327,18 @@ fun GameScreen(
     val context = LocalContext.current
     val activity = context as? Activity
 
-    Box(modifier = Modifier.fillMaxSize().testTag("screen_game_3d")) {
+    // Единая сетка HUD (§7.14): ВЕРХНЯЯ и НИЖНЯЯ строки собраны структурными Row,
+    // поэтому зоны физически не могут наехать друг на друга — ширина каждой
+    // колонки известна заранее (HudZones), остатки распределяют Spacer(weight).
+    // Компактный профиль включается на узких ландшафтных экранах (< 760 dp):
+    // радар прячется, слоты и джойстик уменьшаются, надписи короче.
+    BoxWithConstraints(modifier = Modifier.fillMaxSize().testTag("screen_game_3d")) {
+        val compact = maxWidth < HudZones.COMPACT_WIDTH_DP.dp
+        val statsWidth = if (compact) HudZones.COMPACT_STATS_WIDTH_DP.dp else HudZones.STATS_WIDTH_DP.dp
+        val slotSize = if (compact) HudZones.COMPACT_HOTBAR_SLOT_DP else HudZones.HOTBAR_SLOT_DP
+        val joystickSize = if (compact) HudZones.COMPACT_JOYSTICK_DP else HudZones.JOYSTICK_DP
+        val actionsWidth = if (compact) HudZones.COMPACT_ACTIONS_WIDTH_DP else HudZones.ACTIONS_WIDTH_DP
+
         // 1. Живая 3D-сцена уже отрисовывается корневым PersistentForestScene —
         // здесь только прозрачный слой свайп-обзора камеры поверх неё.
         Box(
@@ -348,18 +361,19 @@ fun GameScreen(
             modifier = Modifier.align(Alignment.Center)
         )
 
-        // 3. Левый верхний компактный HUD показателей и текущей цели дня (не закрывает обзор!)
-        Column(
+        // 3. ВЕРХНЯЯ строка: статы | таймеры | меню+радар
+        Row(
             modifier = Modifier
-                .align(Alignment.TopStart)
+                .fillMaxWidth()
+                .align(Alignment.TopCenter)
                 .displayCutoutPadding()
-                .padding(start = 12.dp, top = 8.dp)
-                .width(268.dp),
-            verticalArrangement = Arrangement.spacedBy(5.dp)
+                .padding(horizontal = 10.dp, top = 8.dp),
+            verticalAlignment = Alignment.Top
         ) {
+            // 3a. Панель показателей и текущей цели дня (не закрывает обзор)
             Column(
                 modifier = Modifier
-                    .fillMaxWidth()
+                    .width(statsWidth)
                     .clip(RoundedCornerShape(12.dp))
                     .background(Color(0xBA091520))
                     .border(1.dp, Color(0x327CC6FE), RoundedCornerShape(12.dp))
@@ -375,7 +389,7 @@ fun GameScreen(
                         text = run.currentLocation.titleRu,
                         color = SnowCrispText,
                         fontWeight = FontWeight.Bold,
-                        fontSize = 13.sp
+                        fontSize = if (compact) 12.sp else 13.sp
                     )
                     val phaseLabel = if (run.isNight) "Полярная ночь" else "День"
                     val weatherLabel = if (run.isSnowing) "Метель" else "Мороз"
@@ -403,45 +417,26 @@ fun GameScreen(
                     Modifier.fillMaxWidth()
                 )
             }
-        }
 
-        // 4. Кнопка «Восстановить ресурсы» — кверху экрана, освобождает игровую зону
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            modifier = Modifier
-                .align(Alignment.TopCenter)
-                .padding(top = 8.dp)
-                .width(340.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            Button(
-                onClick = { viewModel.onRestoreResources() },
-                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
-                modifier = Modifier.width(220.dp).height(40.dp)
-            ) {
-                Text("Восстановить ресурсы", fontSize = 12.sp)
-            }
+            Spacer(Modifier.weight(1f))
 
-            // Строка активного таймера — под кнопкой восстановления
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier.width(340.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-            val activeTimer = run.activeSkippableTimer()
-            if (activeTimer != null) {
-                Row(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(9.dp))
-                        .background(Color(0xCC162D40))
-                        .padding(horizontal = 9.dp, vertical = 4.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
+            // 3b. Строка активного таймера (статус, НЕ действие): «Ресурс
+            // восстановится через N с» + реклама-пропуск. Кнопки восстановления
+            // здесь больше нет — она одна, внизу, в панели действий (§7.2).
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                val activeTimer = run.activeSkippableTimer()
+                if (activeTimer != null) {
+                    // Чип статуса и кнопка рекламы — СТОЛБИКОМ: в ландшафте каждая
+                    // лишняя сотня dp ширины сверху съедает место статов и меню
+                    // (бюджеты зон посчитаны в HudZones).
                     Text(
                         text = "${activeTimer.first.titleRu}: ${activeTimer.second.roundToInt()} с",
                         color = HearthAmberAccent,
-                        fontSize = 10.sp
+                        fontSize = 10.sp,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(9.dp))
+                            .background(Color(0xCC162D40))
+                            .padding(horizontal = 9.dp, vertical = 4.dp)
                     )
                     if (state.isSkipTimerAdButtonVisible) {
                         Button(
@@ -454,106 +449,109 @@ fun GameScreen(
                     }
                 }
             }
-        }
-        }
 
-        // 5. Правый верхний узел: кнопки Лагеря / Меню + опциональный FPS + круговой 3D-радар
-        Row(
-            verticalAlignment = Alignment.Top,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .displayCutoutPadding()
-                .padding(end = 12.dp, top = 8.dp)
-        ) {
-            Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Button(
-                        onClick = { viewModel.navigateTo(AppDestination.BASE_INVENTORY) },
-                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                        modifier = Modifier.height(34.dp)
-                    ) {
-                        Text("База / Рюкзак (${run.inventory.occupiedSlots}/${Inventory.MAX_SLOTS})", fontSize = 11.sp)
+            Spacer(Modifier.weight(1f))
+
+            // 3c. Меню-кластер + круговой радар
+            Row(
+                verticalAlignment = Alignment.Top,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.End,
+                    verticalArrangement = Arrangement.spacedBy(5.dp)
+                ) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Button(
+                            onClick = { viewModel.navigateTo(AppDestination.BASE_INVENTORY) },
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                            modifier = Modifier.height(32.dp)
+                        ) {
+                            Text(
+                                text = if (compact) {
+                                    "База (${run.inventory.occupiedSlots}/${Inventory.MAX_SLOTS})"
+                                } else {
+                                    "База / Рюкзак (${run.inventory.occupiedSlots}/${Inventory.MAX_SLOTS})"
+                                },
+                                fontSize = 11.sp
+                            )
+                        }
+                        OutlinedButton(
+                            onClick = { viewModel.navigateTo(AppDestination.MAIN_MENU) },
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                            modifier = Modifier.height(32.dp)
+                        ) {
+                            Text("Меню", fontSize = 11.sp)
+                        }
                     }
-                    OutlinedButton(
-                        onClick = { viewModel.navigateTo(AppDestination.MAIN_MENU) },
-                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                        modifier = Modifier.height(34.dp)
-                    ) {
-                        Text("Меню", fontSize = 11.sp)
+                    if (state.settings.showFpsCounter) {
+                        Text(
+                            text = "${state.measuredFps} FPS • VBO",
+                            color = SpruceEmerald,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(Color(0xBA091520))
+                                .padding(horizontal = 7.dp, vertical = 2.dp)
+                        )
+                    }
+                    if (run.currentLocation != LocationId.BASE_CLEARING) {
+                        OutlinedButton(
+                            onClick = { viewModel.onReturnToBase() },
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                            modifier = Modifier.height(30.dp)
+                        ) {
+                            Text("← В лагерь", fontSize = 10.sp)
+                        }
                     }
                 }
-                if (state.settings.showFpsCounter) {
-                    Text(
-                        text = "${state.measuredFps} FPS • VBO",
-                        color = SpruceEmerald,
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(Color(0xBA091520))
-                            .padding(horizontal = 7.dp, vertical = 2.dp)
-                    )
-                }
-                if (run.currentLocation != LocationId.BASE_CLEARING) {
-                    OutlinedButton(
-                        onClick = { viewModel.onReturnToBase() },
-                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
-                        modifier = Modifier.height(30.dp)
-                    ) {
-                        Text("← В лагерь", fontSize = 10.sp)
-                    }
+
+                if (HudZones.radarVisible(maxWidth.value)) {
+                    MiniRadarHud(run = run)
                 }
             }
-
-            MiniRadarHud(run = run)
         }
 
-        // 6. Левый нижний плавающий джойстик
-        VirtualJoystick(
-            onJoystickChanged = { fwd, str -> viewModel.updateJoystick(fwd, str) },
-            modifier = Modifier
-                .align(Alignment.BottomStart)
-                .displayCutoutPadding()
-                .padding(start = 14.dp, bottom = 10.dp)
-        )
-
-        // 7. Нижний центральный хотбар: 6 пустых слотов, заполняются из рюкзака
-        QuickEquipmentHotbar(
-            run = run,
-            onUseSlot = { viewModel.onUseHotbar(it) },
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(bottom = 10.dp)
-        )
-
-        // 8. Правый нижний кластер действий под большой палец правой руки
+        // 4. НИЖНЯЯ строка: джойстик | хотбар | действия
         val targetPrompt = run.activeTargetPrompt()
         val primaryLabel = when {
             targetPrompt?.isSpecialRelic == true -> "Забрать находку"
             targetPrompt != null -> targetPrompt.actionVerbRu
             else -> "Удар (${run.equippedTool.shortLabelRu})"
         }
-        val primaryColor = when {
-            targetPrompt?.isSpecialRelic == true -> HearthAmberAccent
-            targetPrompt?.isHostile == true -> CrimsonDanger
-            targetPrompt != null -> SpruceEmerald
-            else -> IceCyanPrimary
-        }
-
-        Column(
-            horizontalAlignment = Alignment.End,
-            verticalArrangement = Arrangement.spacedBy(7.dp),
+        Row(
             modifier = Modifier
-                .align(Alignment.BottomEnd)
+                .fillMaxWidth()
+                .align(Alignment.BottomCenter)
                 .displayCutoutPadding()
-                .padding(end = 14.dp, bottom = 10.dp)
+                .padding(horizontal = 10.dp, bottom = 10.dp),
+            verticalAlignment = Alignment.Bottom
         ) {
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            VirtualJoystick(
+                sizeDp = joystickSize,
+                onJoystickChanged = { fwd, str -> viewModel.updateJoystick(fwd, str) }
+            )
+
+            Spacer(Modifier.weight(1f))
+
+            QuickEquipmentHotbar(
+                run = run,
+                slotSizeDp = slotSize,
+                onUseSlot = { viewModel.onUseHotbar(it) }
+            )
+
+            Spacer(Modifier.weight(1f))
+
+            Column(
+                horizontalAlignment = Alignment.End,
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+                modifier = Modifier.width(actionsWidth)
+            ) {
                 OutlinedButton(
                     onClick = { viewModel.onToggleSprint() },
-                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                    modifier = Modifier.height(34.dp)
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                    modifier = Modifier.height(30.dp)
                 ) {
                     Text(
                         text = if (run.isSprinting) "Бег: ВКЛ" else "Бег",
@@ -561,39 +559,48 @@ fun GameScreen(
                         fontSize = 11.sp
                     )
                 }
+
+                // Действия с перезарядкой: внутри кнопки прогресс слева направо
+                com.ayaks.winterforest.presentation.ui.components.CooldownButton(
+                    label = "Добыть",
+                    cooldownRemainingSec = state.cooldowns["gather"] ?: 0f,
+                    cooldownTotalSec = 1.2f,
+                    onClick = { viewModel.onActionGather() },
+                    modifier = Modifier.width(actionsWidth)
+                )
+                com.ayaks.winterforest.presentation.ui.components.CooldownButton(
+                    label = "Рыбалка",
+                    cooldownRemainingSec = state.cooldowns["fish"] ?: 0f,
+                    cooldownTotalSec = 6.0f,
+                    onClick = { viewModel.onFishAtHole() },
+                    modifier = Modifier.width(actionsWidth)
+                )
+                com.ayaks.winterforest.presentation.ui.components.CooldownButton(
+                    label = "Укрытие",
+                    cooldownRemainingSec = state.cooldowns["shelter"] ?: 0f,
+                    cooldownTotalSec = 6.0f,
+                    onClick = { viewModel.onPlaceSnowShelter() },
+                    modifier = Modifier.width(actionsWidth)
+                )
+
+                com.ayaks.winterforest.presentation.ui.components.CooldownButton(
+                    label = primaryLabel,
+                    cooldownRemainingSec = state.cooldowns["strike"] ?: 0f,
+                    cooldownTotalSec = 1.0f,
+                    onClick = { viewModel.onActionStrike() },
+                    modifier = Modifier.width(actionsWidth).height(48.dp)
+                )
+
+                // ЕДИНСТВЕННАЯ кнопка восстановления ресурсов (§7.2): внизу,
+                // в панели действий под большим пальцем; сверху её больше нет.
+                OutlinedButton(
+                    onClick = { viewModel.onRestoreResources() },
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                    modifier = Modifier.height(30.dp).testTag("btn_restore_resources")
+                ) {
+                    Text("Восстановить ресурсы", fontSize = 10.sp)
+                }
             }
-
-            // Действия с перезарядкой: внутри кнопки прогресс слева направо
-            com.ayaks.winterforest.presentation.ui.components.CooldownButton(
-                label = "Добыть",
-                cooldownRemainingSec = state.cooldowns["gather"] ?: 0f,
-                cooldownTotalSec = 1.2f,
-                onClick = { viewModel.onActionGather() },
-                modifier = Modifier.width(120.dp)
-            )
-            com.ayaks.winterforest.presentation.ui.components.CooldownButton(
-                label = "Рыбалка",
-                cooldownRemainingSec = state.cooldowns["fish"] ?: 0f,
-                cooldownTotalSec = 6.0f,
-                onClick = { viewModel.onFishAtHole() },
-                modifier = Modifier.width(120.dp)
-            )
-            com.ayaks.winterforest.presentation.ui.components.CooldownButton(
-                label = "Укрытие",
-                cooldownRemainingSec = state.cooldowns["shelter"] ?: 0f,
-                cooldownTotalSec = 6.0f,
-                onClick = { viewModel.onPlaceSnowShelter() },
-                modifier = Modifier.width(120.dp)
-            )
-
-            // Еда/Костёр живут в хотбаре (слоты 5–6) — дублирующая кнопка «Еда / Тепло» убрана
-            com.ayaks.winterforest.presentation.ui.components.CooldownButton(
-                label = primaryLabel,
-                cooldownRemainingSec = state.cooldowns["strike"] ?: 0f,
-                cooldownTotalSec = 1.0f,
-                onClick = { viewModel.onActionStrike() },
-                modifier = Modifier.width(150.dp).height(54.dp)
-            )
         }
     }
 }
