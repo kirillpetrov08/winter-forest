@@ -107,7 +107,16 @@ object SavePayloadCodec {
         // Целостность подтверждена — можно переносить устаревшие значения enum
         val body = migrateLegacyEnums(rawJson, actualCrc).first
         return try {
-            json.decodeFromString<GameRunState>(body)
+            val decoded = json.decodeFromString<GameRunState>(body)
+            // §7.3: позиционная раскладка рюкзака могла прийти из старого сейва
+            // (поля order нет → тождественная) или быть побитой руками/багом
+            // (дубли, выход за границы) — нормализуем, не считая сейв повреждённым.
+            val norm = decoded.inventory.normalizedOrder()
+            if (decoded.inventory.order != norm) {
+                decoded.copy(inventory = decoded.inventory.copy(order = norm))
+            } else {
+                decoded
+            }
         } catch (t: Throwable) {
             throw CorruptedSaveException("Ошибка чтения JSON сохранения забега: ${t.message}", t)
         }

@@ -525,6 +525,51 @@ class WinterForestViewModel(
         persistCheckpointAsync()
     }
 
+    /** §7.3: сортировка рюкзака перетаскиванием — обмен двух ячеек сетки. */
+    fun onSwapInventoryCells(a: Int, b: Int) {
+        _uiState.update { st ->
+            val run = st.activeRun ?: return@update st
+            st.copy(activeRun = run.copy(inventory = run.inventory.withSwappedCells(a, b)))
+        }
+        persistCheckpointAsync()
+    }
+
+    /** §7.3: обмен двух слотов хотбара между собой. */
+    fun onSwapHotbarSlots(a: Int, b: Int) {
+        _uiState.update { st ->
+            val run = st.activeRun ?: return@update st
+            if (a == b) return@update st
+            val ea = run.hotbarAt(a)
+            val eb = run.hotbarAt(b)
+            st.copy(
+                activeRun = run
+                    .withHotbarSlot(a, eb)
+                    .withHotbarSlot(b, ea)
+            )
+        }
+        persistCheckpointAsync()
+    }
+
+    /** §7.3: дроп ячейки рюкзака в слот хотбара (занятый слот заменяется). */
+    fun onDropInventoryOnHotbar(gridIndex: Int, hotbarIndex: Int) {
+        _uiState.update { st ->
+            val run = st.activeRun ?: return@update st
+            val slot = run.inventory.gridSlot(gridIndex) ?: return@update st
+            val entry = com.ayaks.winterforest.domain.model.HotbarEntry(
+                titleRu = slot.type.titleRu,
+                iconPath = "",
+                resourceType = slot.type
+            )
+            st.copy(activeRun = run.withHotbarSlot(hotbarIndex, entry))
+        }
+        persistCheckpointAsync()
+    }
+
+    /** §7.3: дроп записи хотбара обратно в рюкзак — слот очищается. */
+    fun onDropHotbarToInventory(hotbarIndex: Int) {
+        onClearHotbar(hotbarIndex)
+    }
+
     /** Убрать запись из слота хотбара. */
     fun onClearHotbar(index: Int) {
         _uiState.update { st ->
