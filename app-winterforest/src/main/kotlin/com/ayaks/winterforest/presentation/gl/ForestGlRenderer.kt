@@ -1360,9 +1360,16 @@ class ForestGlRenderer(
                 if (dotFwd < -0.35f) continue // Frustum culling за спиной камеры!
             }
             val gy = MeshBuilder.sampleWorldHeight(bx, bz, worldTerrainSteps(quality))
-            if (beast.kind == WildlifeKind.TIMBER_WOLF || beast.kind == WildlifeKind.NORTHERN_DEER) {
-                // Импортированные модели волка и оленя: тело + качающиеся ноги (draw ниже)
-                fur.addShadowDisc(bx, gy, bz, if (beast.kind == WildlifeKind.TIMBER_WOLF) 1.05f else 1.3f, 0.34f)
+            if (beast.kind == WildlifeKind.TIMBER_WOLF || beast.kind == WildlifeKind.NORTHERN_DEER ||
+                beast.kind == WildlifeKind.TAIGA_RAT
+            ) {
+                // Импортированные модели зверей (волк/олень/крыса): тело + ноги (draw ниже)
+                val shadowR = when (beast.kind) {
+                    WildlifeKind.TIMBER_WOLF -> 1.05f
+                    WildlifeKind.TAIGA_RAT -> 0.42f
+                    else -> 1.3f
+                }
+                fur.addShadowDisc(bx, gy, bz, shadowR, 0.34f)
                 importedBeasts.add(BeastDraw(beast.kind, bx, gy, bz, bh, gait, moving))
                 continue
             }
@@ -1952,7 +1959,13 @@ class ForestGlRenderer(
 
     private fun buildEntityParts(modelId: String) {
         val ctx = appContext ?: return
-        val bodyFloats = readAssetFloats(ctx, "models/$modelId/mesh_body.obj")
+        val importedBody = readAssetFloats(ctx, "models/$modelId/mesh_body.obj")
+        val bodyFloats = if (importedBody.isNotEmpty()) {
+            importedBody
+        } else {
+            // Цельная модель без разбивки на ноги (например, крыса автора)
+            readAssetFloats(ctx, "models/$modelId/mesh.obj")
+        }
         if (bodyFloats.isEmpty()) return
         val bodyVbo = GlVbo()
         bodyVbo.uploadStatic(floatsToBuilder(bodyFloats))

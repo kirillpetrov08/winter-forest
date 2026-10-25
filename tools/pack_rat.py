@@ -23,7 +23,8 @@ def main():
                          "/tmp/packed_rat/rat_diffuse.png"),
             "rat_eyes": ({ "eyes": "eyes_teeth" }, False, (26, 24, 22)),
         },
-        target=0.30, by_height=True, keep_objects=KEEP
+        # 0.219 м в холке — крупная тайга-крыса; длина с хвостом ~0.82 м
+        target=0.219, by_height=True, keep_objects=KEEP
     )
 
 if __name__ == "__main__":
