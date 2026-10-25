@@ -14,6 +14,8 @@ import com.ayaks.winterforest.domain.model.GameRunState
 import com.ayaks.winterforest.domain.model.GraphicsQuality
 import com.ayaks.winterforest.domain.model.LocationId
 import com.ayaks.winterforest.domain.model.ResourceNode
+import com.ayaks.winterforest.domain.model.SpecialLootId
+import com.ayaks.winterforest.domain.model.ResourceType
 import com.ayaks.winterforest.domain.model.WorldObjectKind
 import com.ayaks.winterforest.domain.model.WildlifeKind
 import com.ayaks.winterforest.domain.world.WorldPopulator
@@ -807,9 +809,15 @@ class ForestGlRenderer(
 
         // 3. Интерактивные ресурсные узлы (перезаливаются при изменении доступности ИЛИ смене района)
         val nodes = run.currentLocationNodes()
-        val nodeSig = computeNodeAvailabilitySignature(run.playerX, run.playerZ, nodes)
+        val nodeSig = computeNodeAvailabilitySignature(
+            run.playerX, run.playerZ, nodes, run.droppedItems
+        )
         if (nodeSig != cachedNodeStateHash) {
-            rebuildInteractiveNodesVbo(nodes, run.playerX, run.playerZ, quality)
+            rebuildInteractiveNodesVbo(
+                nodes, run.playerX, run.playerZ, quality,
+                droppedItems = run.droppedItems,
+                highlightDropId = run.nearestDroppedItem()?.id
+            )
             cachedNodeStateHash = nodeSig
         }
     }
@@ -821,12 +829,22 @@ class ForestGlRenderer(
         GraphicsQuality.ULTRA -> 260
     }
 
-    private fun computeNodeAvailabilitySignature(px: Float, pz: Float, nodes: List<ResourceNode>): Int {
+    private fun computeNodeAvailabilitySignature(
+        px: Float,
+        pz: Float,
+        nodes: List<ResourceNode>,
+        dropped: List<com.ayaks.winterforest.domain.model.DroppedItem> = emptyList()
+    ): Int {
         // Смена района игрока = новая выборка дальних узлов
         var h = (px / 32f).toInt() * 73856093 xor (pz / 32f).toInt() * 19349663
         h = h * 31 + nodes.size
         for (i in nodes.indices) {
             h = h * 31 + (if (nodes[i].isAvailable) 1 else 0)
+        }
+        // §7.12: выброшенные предметы тоже пекутся в VBO узлов
+        h = h * 31 + dropped.size
+        for (i in dropped.indices) {
+            h = h * 31 + dropped[i].id.hashCode()
         }
         return h
     }
@@ -1091,7 +1109,9 @@ class ForestGlRenderer(
         nodes: List<ResourceNode>,
         playerX: Float,
         playerZ: Float,
-        quality: GraphicsQuality
+        quality: GraphicsQuality,
+        droppedItems: List<com.ayaks.winterforest.domain.model.DroppedItem> = emptyList(),
+        highlightDropId: String? = null
     ) {
         val builders = EnumMap<ProceduralTextureId, MeshBuilder>(ProceduralTextureId::class.java)
         for (mat in ProceduralTextureId.entries) {
@@ -1253,6 +1273,25 @@ class ForestGlRenderer(
                             0.07f, 0.07f, 0.07f, 60 + b, r = 1.0f, g = 0.16f, b = 0.20f, snowCapTint = false
                         )
                     }
+                }
+            }
+        }
+
+        // §7.12: выброшенные предметы лежат процедурными модельками на снегу
+        for (item in droppedItems) {
+            val dx = item.x - playerX
+            val dz = item.z - playerZ
+            if (dx * dx + dz * dz > 118f * 118f) continue
+            val iy = MeshBuilder.sampleWorldHeight(item.x, item.z, terrainSteps)
+            addDroppedItemProp(bark, foliage, stone, cloth, metal, fire, ice, item, iy)
+            if (item.id == highlightDropId) {
+                // янтарное кольцо-подсветка предмета под прицелом
+                for (r in 0 until 8) {
+                    val a = (r / 8f) * Math.PI.toFloat() * 2f
+                    fire.addSculptedBoulder(
+                        item.x + cos(a) * 0.34f, iy + 0.03f, item.z + sin(a) * 0.34f,
+                        0.035f, 0.02f, 0.035f, 700 + r, 1f, 0.72f, 0.22f, false
+                    )
                 }
             }
         }
@@ -1565,6 +1604,119 @@ class ForestGlRenderer(
                 walkBobPhase = fpBobPhase,
                 timeSec = animTimeSec
             )
+        }
+    }
+
+    /**
+     * §7.12: процедурная моделька выброшенного предмета (≥200 полигонов суммарно:
+     * 2–4 примитива на предмет). Каждый предмет читается по силуэту: бревно,
+     * валун, связка ягод, тюк ткани, слиток, тушка рыбы, свиток, термос и т.д.
+     */
+    private fun addDroppedItemProp(
+        bark: MeshBuilder,
+        foliage: MeshBuilder,
+        stone: MeshBuilder,
+        cloth: MeshBuilder,
+        metal: MeshBuilder,
+        fire: MeshBuilder,
+        ice: MeshBuilder,
+        item: com.ayaks.winterforest.domain.model.DroppedItem,
+        y: Float
+    ) {
+        val x = item.x
+        val z = item.z
+        val yaw = item.yawRad
+        bark.addShadowDisc(x, y, z, 0.34f, 0.30f)
+        when (item.resourceType) {
+            ResourceType.WOOD -> {
+                bark.addTaperedCylinder(x - 0.18f, y + 0.07f, z, x + 0.18f, y + 0.07f, z, 0.07f, 0.06f, 10, 0.88f, 0.72f, 0.52f)
+                bark.addTaperedCylinder(x - 0.12f, y + 0.17f, z + 0.06f, x + 0.14f, y + 0.17f, z - 0.04f, 0.055f, 0.05f, 10, 0.82f, 0.66f, 0.48f)
+                foliage.addSculptedBoulder(x + 0.2f, y + 0.06f, z + 0.1f, 0.05f, 0.04f, 0.05f, 71, 0.35f, 0.5f, 0.35f, false)
+            }
+            ResourceType.STONE -> {
+                stone.addSculptedBoulder(x, y + 0.11f, z, 0.16f, 0.13f, 0.15f, 72, 0.62f, 0.66f, 0.70f, false)
+                stone.addSculptedBoulder(x + 0.14f, y + 0.06f, z - 0.1f, 0.08f, 0.06f, 0.08f, 73, 0.70f, 0.74f, 0.78f, false)
+            }
+            ResourceType.BERRIES -> {
+                foliage.addSculptedBoulder(x, y + 0.05f, z, 0.14f, 0.05f, 0.12f, 74, 0.30f, 0.45f, 0.30f, false)
+                for (b in 0 until 5) {
+                    val a = b * 1.25f
+                    cloth.addSculptedBoulder(x + cos(a) * 0.08f, y + 0.10f, z + sin(a) * 0.08f, 0.045f, 0.045f, 0.045f, 75 + b, 1.0f, 0.16f, 0.20f, false)
+                }
+            }
+            ResourceType.CLOTH -> {
+                cloth.addOrientedBox(x, y + 0.05f, z, 0.16f, 0.05f, 0.12f, yaw, 0f, 0f, 0.85f, 0.82f, 0.72f)
+                cloth.addOrientedBox(x, y + 0.11f, z, 0.12f, 0.035f, 0.09f, yaw + 0.4f, 0f, 0f, 0.80f, 0.78f, 0.70f)
+            }
+            ResourceType.RESIN -> {
+                fire.addSculptedBoulder(x, y + 0.09f, z, 0.11f, 0.10f, 0.10f, 76, 1f, 0.72f, 0.16f, false)
+                fire.addSculptedBoulder(x + 0.09f, y + 0.04f, z + 0.06f, 0.05f, 0.04f, 0.05f, 77, 1f, 0.78f, 0.22f, false)
+            }
+            ResourceType.FISH -> {
+                metal.addEllipsoid(x, y + 0.07f, z, 0.20f, 0.06f, 0.08f, yawRad = yaw, r = 0.72f, g = 0.78f, b = 0.84f, uvScale = 1.4f)
+                metal.addSculptedBoulder(x + 0.18f, y + 0.08f, z, 0.05f, 0.07f, 0.02f, 78, 0.66f, 0.72f, 0.78f, false)
+            }
+            ResourceType.ICE -> {
+                ice.addCone(x, y, z, 0.10f, 0.24f, 8)
+                ice.addSculptedBoulder(x + 0.12f, y + 0.05f, z - 0.08f, 0.06f, 0.05f, 0.06f, 79, 0.85f, 0.92f, 0.97f, false)
+            }
+            ResourceType.COAL -> {
+                stone.addSculptedBoulder(x, y + 0.09f, z, 0.13f, 0.10f, 0.12f, 80, 0.20f, 0.20f, 0.22f, false)
+                stone.addSculptedBoulder(x - 0.11f, y + 0.05f, z + 0.08f, 0.07f, 0.05f, 0.07f, 81, 0.16f, 0.16f, 0.18f, false)
+            }
+            ResourceType.IRON, ResourceType.IRON_INGOT -> {
+                if (item.resourceType == ResourceType.IRON) {
+                    stone.addSculptedBoulder(x, y + 0.10f, z, 0.14f, 0.11f, 0.13f, 82, 0.72f, 0.46f, 0.32f, false)
+                    stone.addSculptedBoulder(x + 0.10f, y + 0.05f, z + 0.09f, 0.07f, 0.06f, 0.07f, 83, 0.66f, 0.42f, 0.30f, false)
+                } else {
+                    metal.addOrientedBox(x, y + 0.05f, z, 0.13f, 0.05f, 0.08f, yaw, 0f, 0f, 0.80f, 0.82f, 0.86f)
+                    metal.addOrientedBox(x + 0.04f, y + 0.11f, z - 0.03f, 0.11f, 0.04f, 0.07f, yaw + 0.3f, 0f, 0f, 0.86f, 0.88f, 0.92f)
+                }
+            }
+            ResourceType.MEAT -> {
+                cloth.addSculptedBoulder(x, y + 0.09f, z, 0.15f, 0.09f, 0.11f, 84, 0.78f, 0.22f, 0.24f, false)
+                bark.addTaperedCylinder(x + 0.10f, y + 0.10f, z, x + 0.20f, y + 0.16f, z + 0.04f, 0.025f, 0.02f, 8, 0.92f, 0.90f, 0.86f)
+            }
+            ResourceType.HIDE -> {
+                cloth.addOrientedBox(x, y + 0.03f, z, 0.18f, 0.025f, 0.14f, yaw, 0f, 0f, 0.62f, 0.48f, 0.36f)
+                cloth.addOrientedBox(x - 0.05f, y + 0.06f, z + 0.04f, 0.12f, 0.02f, 0.09f, yaw + 0.5f, 0f, 0f, 0.68f, 0.54f, 0.42f)
+            }
+            null -> when (item.specialLootId) {
+                SpecialLootId.OLD_MAP -> {
+                    bark.addTaperedCylinder(x - 0.12f, y + 0.045f, z, x + 0.12f, y + 0.045f, z, 0.045f, 0.04f, 10, 0.86f, 0.80f, 0.66f)
+                    cloth.addOrientedBox(x + 0.02f, y + 0.02f, z + 0.08f, 0.10f, 0.015f, 0.06f, yaw, 0f, 0f, 0.88f, 0.84f, 0.72f)
+                }
+                SpecialLootId.RESIN_TORCH -> {
+                    bark.addTaperedCylinder(x, y + 0.02f, z, x + 0.10f, y + 0.30f, z - 0.04f, 0.030f, 0.024f, 8, 0.80f, 0.64f, 0.46f)
+                    fire.addSculptedBoulder(x + 0.12f, y + 0.34f, z - 0.05f, 0.06f, 0.08f, 0.06f, 85, 1f, 0.66f, 0.18f, false)
+                }
+                SpecialLootId.THERMOS -> {
+                    metal.addTaperedCylinder(x, y, z, x, y + 0.26f, z, 0.055f, 0.05f, 12, 0.72f, 0.76f, 0.80f)
+                    metal.addTaperedCylinder(x, y + 0.26f, z, x, y + 0.31f, z, 0.045f, 0.04f, 12, 0.45f, 0.48f, 0.52f)
+                }
+                SpecialLootId.PICKAXE -> {
+                    bark.addTaperedCylinder(x - 0.14f, y + 0.04f, z, x + 0.14f, y + 0.10f, z, 0.026f, 0.022f, 8, 0.84f, 0.68f, 0.50f)
+                    metal.addOrientedBox(x, y + 0.13f, z, 0.16f, 0.03f, 0.035f, yaw, 0f, 0.3f, 0.62f, 0.66f, 0.70f)
+                }
+                SpecialLootId.WARM_COAT -> {
+                    cloth.addSculptedBoulder(x, y + 0.10f, z, 0.16f, 0.11f, 0.13f, 86, 0.55f, 0.42f, 0.30f, false)
+                    cloth.addOrientedBox(x, y + 0.03f, z, 0.14f, 0.03f, 0.11f, yaw, 0f, 0f, 0.48f, 0.36f, 0.26f)
+                }
+                SpecialLootId.SOLDIER_RATION -> {
+                    cloth.addOrientedBox(x, y + 0.06f, z, 0.13f, 0.06f, 0.09f, yaw, 0f, 0f, 0.42f, 0.46f, 0.32f)
+                    metal.addTaperedCylinder(x + 0.12f, y, z + 0.06f, x + 0.12f, y + 0.12f, z + 0.06f, 0.045f, 0.042f, 10, 0.70f, 0.74f, 0.78f)
+                }
+                SpecialLootId.HUNTING_KNIFE -> {
+                    metal.addOrientedBox(x + 0.06f, y + 0.025f, z, 0.11f, 0.012f, 0.028f, yaw, 0f, 0f, 0.80f, 0.84f, 0.88f)
+                    bark.addOrientedBox(x - 0.08f, y + 0.03f, z, 0.06f, 0.02f, 0.022f, yaw, 0f, 0f, 0.42f, 0.30f, 0.20f)
+                }
+                SpecialLootId.FIRST_AID_KIT -> {
+                    cloth.addOrientedBox(x, y + 0.06f, z, 0.13f, 0.06f, 0.09f, yaw, 0f, 0f, 0.92f, 0.94f, 0.96f)
+                    fire.addOrientedBox(x, y + 0.125f, z, 0.05f, 0.008f, 0.018f, yaw, 0f, 0f, 0.85f, 0.18f, 0.16f)
+                    fire.addOrientedBox(x, y + 0.125f, z, 0.018f, 0.008f, 0.05f, yaw, 0f, 0f, 0.85f, 0.18f, 0.16f)
+                }
+                null -> Unit
+            }
         }
     }
 
