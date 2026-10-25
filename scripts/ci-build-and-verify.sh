@@ -69,9 +69,11 @@ for ln in lines:
         print(f"::error file={fpath},line={line_no},title=Kotlin compile error::{msg}")
         emitted += 1
 
-# 2) Keep error lines + tail context so annotation stays well under 8 KB limit
+# 2) Keep error lines + tail context so annotation stays well under 8 KB limit.
+# Сначала — имена упавших тестов и итоговая строка, иначе они обрезаются лимитом.
+failed_tests = [ln for ln in lines if re.search(r"> .+ FAILED$", ln.strip()) or "tests completed" in ln or "AssertionFailedError" in ln or ln.strip().startswith("Expected:") or ln.strip().startswith("Actual:")]
 interesting = [ln for ln in lines if any(k in ln for k in ("e: ", "FAILURE:", "What went wrong:", "> ", "Exception", "Error", "FAILED", "Unresolved", "Cannot"))]
-snippet = "\n".join((interesting[-45:] + ["--- TAIL ---"] + lines[-55:]))[-6500:]
+snippet = "\n".join((failed_tests[:20] + interesting[-25:] + ["--- TAIL ---"] + lines[-25:]))[-6500:]
 encoded = snippet.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
 print(f"::error title=GRADLE FAILED ({label})::{encoded}")
 PY
