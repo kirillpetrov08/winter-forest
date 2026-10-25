@@ -1375,7 +1375,7 @@ class ForestGlRenderer(
             }
         }
 
-        // 3. Живая 3D-фауна (зайцы, северные олени с рогами, таёжные волки) с отсечением по пирамиде обзора.
+        // 3. Живая 3D-фауна (таёжные крысы, северные олени с рогами, волки) с отсечением по пирамиде обзора.
         //    Позиции/повороты интерполируются между 20-герцевыми тиками — движение плавное,
         //    а фаза шага привязана к пройденному пути (лапы перебираются ровно тогда, когда зверь идёт).
         val frameNowNs = System.nanoTime()
@@ -1413,30 +1413,18 @@ class ForestGlRenderer(
                 if (dotFwd < -0.35f) continue // Frustum culling за спиной камеры!
             }
             val gy = MeshBuilder.sampleWorldHeight(bx, bz, worldTerrainSteps(quality))
-            if (beast.kind == WildlifeKind.TIMBER_WOLF || beast.kind == WildlifeKind.NORTHERN_DEER ||
-                beast.kind == WildlifeKind.TAIGA_RAT
-            ) {
-                // Импортированные модели зверей (волк/олень/крыса): тело + ноги (draw ниже)
-                val shadowR = when (beast.kind) {
-                    WildlifeKind.TIMBER_WOLF -> 1.05f
-                    WildlifeKind.TAIGA_RAT -> 0.42f
-                    else -> 1.3f
-                }
-                fur.addShadowDisc(bx, gy, bz, shadowR, 0.34f)
-                importedBeasts.add(BeastDraw(beast.kind, bx, gy, bz, bh, gait, moving))
-                continue
+            // Все виды фауны имеют собственные импортированные модели
+            // (wolf_body / deer_body / rat_body): тело + 4 ноги с шагом (draw ниже).
+            // Процедурная MeshBuilder.addWildlifeCreature здесь больше не вызывается —
+            // раньше она рисовала «дублёров» зверей, у которых модель совпадала с
+            // другим видом (заяц рисовался оленем), отсюда одинаковые олени на карте.
+            val shadowR = when (beast.kind) {
+                WildlifeKind.TIMBER_WOLF -> 1.05f
+                WildlifeKind.TAIGA_RAT -> 0.42f
+                WildlifeKind.NORTHERN_DEER -> 1.3f
             }
-            MeshBuilder.addWildlifeCreature(
-                furBuilder = fur,
-                barkHornBuilder = bark,
-                glowBuilder = fire,
-                kind = beast.kind,
-                x = bx,
-                groundY = gy,
-                z = bz,
-                headingRad = bh,
-                animPhase = if (moving) gait + idx * 1.7f else 0f
-            )
+            fur.addShadowDisc(bx, gy, bz, shadowR, 0.34f)
+            importedBeasts.add(BeastDraw(beast.kind, bx, gy, bz, bh, gait, moving))
         }
 
         // 4. Всплеск 3D-щепы / искр в точке удара по дереву, руде или зверю
@@ -1540,10 +1528,12 @@ class ForestGlRenderer(
 
         // Импортированные 3D-модели животных (волк/олень) — тело + ноги с шагом
         for (bd in importedBeasts) {
+            // Без else: когда в WildlifeKind добавят новый вид, компилятор сам
+            // потребует модель для него (прежний else молча рисовал оленя).
             val modelId = when (bd.kind) {
                 WildlifeKind.TIMBER_WOLF -> "wolf_body"
                 WildlifeKind.TAIGA_RAT -> "rat_body"
-                else -> "deer_body"
+                WildlifeKind.NORTHERN_DEER -> "deer_body"
             }
             drawAnimatedEntity(
                 modelId = modelId,

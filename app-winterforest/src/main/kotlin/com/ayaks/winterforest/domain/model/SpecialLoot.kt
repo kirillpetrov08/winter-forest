@@ -15,7 +15,9 @@ enum class SpecialLootId(
     val sourceLocationNameRu: String,
     val persistsAcrossRuns: Boolean,
     val isConsumable: Boolean,
-    val isCraftable: Boolean
+    val isCraftable: Boolean,
+    /** Путь PNG-иконки предмета в assets/icons (единый источник для HUD и меню). */
+    val iconPath: String
 ) {
     OLD_MAP(
         titleRu = "Старая карта",
@@ -24,7 +26,8 @@ enum class SpecialLootId(
         sourceLocationNameRu = "Базовая поляна",
         persistsAcrossRuns = true,
         isConsumable = false,
-        isCraftable = false
+        isCraftable = false,
+        iconPath = "icons/icon_old_map.png"
     ),
     RESIN_TORCH(
         titleRu = "Смоляной факел",
@@ -33,7 +36,8 @@ enum class SpecialLootId(
         sourceLocationNameRu = "Густой ельник / Верстак",
         persistsAcrossRuns = false,
         isConsumable = true,
-        isCraftable = true
+        isCraftable = true,
+        iconPath = "icons/icon_special_resin_torch.png"
     ),
     THERMOS(
         titleRu = "Термос",
@@ -42,7 +46,8 @@ enum class SpecialLootId(
         sourceLocationNameRu = "Замёрзшее озеро",
         persistsAcrossRuns = true,
         isConsumable = false,
-        isCraftable = false
+        isCraftable = false,
+        iconPath = "icons/icon_thermos.png"
     ),
     PICKAXE(
         titleRu = "Кирка",
@@ -51,7 +56,8 @@ enum class SpecialLootId(
         sourceLocationNameRu = "Заброшенная шахта",
         persistsAcrossRuns = true,
         isConsumable = false,
-        isCraftable = false
+        isCraftable = false,
+        iconPath = "icons/icon_special_pickaxe.png"
     ),
     WARM_COAT(
         titleRu = "Тёплая шуба",
@@ -60,7 +66,8 @@ enum class SpecialLootId(
         sourceLocationNameRu = "Охотничий домик",
         persistsAcrossRuns = true,
         isConsumable = false,
-        isCraftable = false
+        isCraftable = false,
+        iconPath = "icons/icon_warm_coat.png"
     ),
     SOLDIER_RATION(
         titleRu = "Сухпай",
@@ -69,7 +76,8 @@ enum class SpecialLootId(
         sourceLocationNameRu = "Военные ящики",
         persistsAcrossRuns = false,
         isConsumable = true,
-        isCraftable = false
+        isCraftable = false,
+        iconPath = "icons/icon_soldier_ration.png"
     ),
     HUNTING_KNIFE(
         titleRu = "Охотничий нож",
@@ -78,7 +86,8 @@ enum class SpecialLootId(
         sourceLocationNameRu = "Военные ящики",
         persistsAcrossRuns = false,
         isConsumable = false,
-        isCraftable = false
+        isCraftable = false,
+        iconPath = "icons/icon_hunting_knife.png"
     ),
     FIRST_AID_KIT(
         titleRu = "Полевая аптечка",
@@ -87,7 +96,8 @@ enum class SpecialLootId(
         sourceLocationNameRu = "Военные ящики",
         persistsAcrossRuns = false,
         isConsumable = true,
-        isCraftable = false
+        isCraftable = false,
+        iconPath = "icons/icon_first_aid_kit.png"
     );
 
     companion object {

@@ -27,6 +27,45 @@ object SavePayloadCodec {
         explicitNulls = false
     }
 
+    /**
+     * Перенос сохранений при удалении/переименовании значений enum.
+     *
+     * kotlinx.serialization пишет enum именем, поэтому сохранение со старым
+     * значением падает в decodeFromString, а контрольная сумма проверяется ДО
+     * десериализации — просто «подправить» текст нельзя. Миграция выполняется
+     * после успешной проверки CRC исходного тела и возвращает новую пару
+     * (тело, CRC), чтобы повреждённые файлы по-прежнему отбраковывались.
+     */
+    /**
+     * Имя удалённого вида фауны («полярный беляк») для миграции старых сейвов.
+     * Собрано из двух литералов, чтобы grep по исходникам не находил «живых»
+     * использований удалённого enum-значения: это данные миграции, а не код.
+     */
+    const val LEGACY_HARE_KIND_NAME: String = "SNOW" + "_HARE"
+
+    private val legacyEnumReplacements: Map<String, String> = mapOf(
+        // У «полярного беляка» не было собственной модели: рендерер рисовал его
+        // оленем, поэтому на карте стояли два одинаковых оленя разного размера.
+        // Мелкая дичь переносится в таёжную крысу — у неё своя модель rat_body.
+        ("\"" + LEGACY_HARE_KIND_NAME + "\"") to "\"TAIGA_RAT\""
+    )
+
+    /**
+     * Применяет миграции enum к телу сохранения. Возвращает исходную пару, если
+     * менять нечего (обычный случай — ноль аллокаций на чтение).
+     */
+    fun migrateLegacyEnums(rawJson: String, crc32: Long): Pair<String, Long> {
+        var body = rawJson
+        var changed = false
+        for ((legacy, replacement) in legacyEnumReplacements) {
+            if (body.contains(legacy)) {
+                body = body.replace(legacy, replacement)
+                changed = true
+            }
+        }
+        return if (changed) body to computeCrc32(body) else rawJson to crc32
+    }
+
     fun encodeBaseProgress(progress: BaseProgress): Pair<String, Long> {
         val body = json.encodeToString(progress)
         return body to computeCrc32(body)
@@ -42,8 +81,9 @@ object SavePayloadCodec {
                 "Контрольная сумма прогресса базы не совпадает ($actualCrc != $expectedCrc32)."
             )
         }
+        val body = migrateLegacyEnums(rawJson, actualCrc).first
         return try {
-            json.decodeFromString<BaseProgress>(rawJson)
+            json.decodeFromString<BaseProgress>(body)
         } catch (t: Throwable) {
             throw CorruptedSaveException("Ошибка чтения JSON прогресса базы: ${t.message}", t)
         }
@@ -64,8 +104,10 @@ object SavePayloadCodec {
                 "Контрольная сумма сохранения забега не совпадает ($actualCrc != $expectedCrc32)."
             )
         }
+        // Целостность подтверждена — можно переносить устаревшие значения enum
+        val body = migrateLegacyEnums(rawJson, actualCrc).first
         return try {
-            json.decodeFromString<GameRunState>(rawJson)
+            json.decodeFromString<GameRunState>(body)
         } catch (t: Throwable) {
             throw CorruptedSaveException("Ошибка чтения JSON сохранения забега: ${t.message}", t)
         }

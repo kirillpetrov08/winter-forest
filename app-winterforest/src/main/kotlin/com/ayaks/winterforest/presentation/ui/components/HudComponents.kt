@@ -313,17 +313,31 @@ fun CrosshairOverlay(
         }
         if (prompt != null) {
             Spacer(Modifier.height(4.dp))
-            Text(
-                text = "${prompt.actionVerbRu} • ${"%.1f".format(prompt.distanceMeters)} м",
-                color = SnowCrispText,
-                fontSize = 11.sp,
-                fontWeight = FontWeight.SemiBold,
+            val promptIcon = prompt.iconPath?.let { rememberAssetIcon(it) }
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier
                     .clip(RoundedCornerShape(8.dp))
                     .background(Color(0xC4091520))
                     .border(1.dp, reticleColor.copy(alpha = 0.6f), RoundedCornerShape(8.dp))
                     .padding(horizontal = 9.dp, vertical = 3.dp)
-            )
+            ) {
+                if (promptIcon != null) {
+                    androidx.compose.foundation.Image(
+                        bitmap = promptIcon,
+                        contentDescription = prompt.labelRu,
+                        modifier = Modifier.size(16.dp),
+                        contentScale = androidx.compose.ui.layout.ContentScale.Fit
+                    )
+                    Spacer(Modifier.width(6.dp))
+                }
+                Text(
+                    text = "${prompt.actionVerbRu} • ${"%.1f".format(prompt.distanceMeters)} м",
+                    color = SnowCrispText,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
         }
     }
 }
@@ -499,16 +513,7 @@ fun assetIconNameFor(type: ResourceType): String = when (type) {
 }
 
 /** Иконка редкого предмета в assets/icons (пустая строка, если файла ещё нет). */
-fun specialLootIconPath(id: SpecialLootId): String = when (id) {
-    SpecialLootId.OLD_MAP -> "icons/icon_old_map.png"
-    SpecialLootId.RESIN_TORCH -> "icons/icon_special_resin_torch.png"
-    SpecialLootId.THERMOS -> "icons/icon_thermos.png"
-    SpecialLootId.PICKAXE -> "icons/icon_special_pickaxe.png"
-    SpecialLootId.WARM_COAT -> "icons/icon_warm_coat.png"
-    SpecialLootId.SOLDIER_RATION -> "icons/icon_soldier_ration.png"
-    SpecialLootId.HUNTING_KNIFE -> "icons/icon_hunting_knife.png"
-    SpecialLootId.FIRST_AID_KIT -> "icons/icon_first_aid_kit.png"
-}
+fun specialLootIconPath(id: SpecialLootId): String = id.iconPath
 
 /** Загрузка PNG из assets как ImageBitmap (с кэшем через remember). */
 @Composable

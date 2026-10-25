@@ -32,6 +32,13 @@ class AssetPropsTest {
         for (id in AssetProps.ENTITY_MODEL_IDS) {
             assertTrue("entity $id missing from ALL_MODEL_IDS", id in known)
         }
+        // Дубль в списке = двойная сборка частей зверя и перезапись VBO в кэше
+        // без release() (утечка GPU-буфера). По одной записи на вид.
+        assertEquals(
+            "ENTITY_MODEL_IDS содержит дубли: ${AssetProps.ENTITY_MODEL_IDS}",
+            AssetProps.ENTITY_MODEL_IDS.size,
+            AssetProps.ENTITY_MODEL_IDS.toSet().size
+        )
     }
 
     @Test

@@ -34,8 +34,14 @@ object AssetProps {
         "oak_a", "oak_b", "oak_c", "bush_green", "bush_dry", "bush_thicket"
     )
 
-    /** Модели животных: VBO частей строится в начале координат, позицию задаёт model-матрица. */
-    val ENTITY_MODEL_IDS = listOf("wolf_body", "deer_body", "rat_body", "rat_body")
+    /**
+     * Модели животных: VBO частей строится в начале координат, позицию задаёт
+     * model-матрица. Ровно по одной записи на вид — прежний дубль `rat_body`
+     * заставлял [com.ayaks.winterforest.presentation.gl.ForestGlRenderer] дважды
+     * собирать детали крысы, причём вторая сборка перезаписывала первую в кэше
+     * без release() старого VBO (утечка GPU-буфера на каждом старте сцены).
+     */
+    val ENTITY_MODEL_IDS = listOf("wolf_body", "deer_body", "rat_body")
 
     /** Тусклые/тёплые тонировки под северную палитру (листва холоднее, кора теплее). */
     private fun placements(loc: LocationId): List<Placement> = when (loc) {

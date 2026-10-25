@@ -41,15 +41,6 @@ enum class WildlifeKind(
     val xpReward: Int,
     val isPredator: Boolean
 ) {
-    SNOW_HARE(
-        titleRu = "Полярный беляк",
-        maxHp = 24f,
-        cruiseSpeedMps = 2.6f,
-        primaryDrop = ResourceType.MEAT,
-        secondaryDrop = ResourceType.CLOTH,
-        xpReward = 22,
-        isPredator = false
-    ),
     TAIGA_RAT(
         titleRu = "Тайная крыса",
         maxHp = 12f,
@@ -141,7 +132,9 @@ data class TargetPromptInfo(
     val actionVerbRu: String,
     val distanceMeters: Float,
     val isHostile: Boolean = false,
-    val isSpecialRelic: Boolean = false
+    val isSpecialRelic: Boolean = false,
+    /** Иконка цели из assets/icons (ящики, находки); null — иконки нет. */
+    val iconPath: String? = null
 )
 
 /**
@@ -321,13 +314,29 @@ data class GameRunState(
 
     fun activeTargetPrompt(): TargetPromptInfo? {
         val nearNode = nearestInteractableNode()
+        // Ящики отвечают раньше ветки находок: у военного ящика specialLootId
+        // задан как ГАРАНТИРОВАННЫЙ лут, но подсказка должна быть «Вскрыть ящик»,
+        // а не «Забрать находку» (иначе игрок не понимает, что внутри предмет).
+        if (nearNode != null &&
+            (nearNode.kind == WorldObjectKind.SUPPLY_CRATE || nearNode.kind == WorldObjectKind.MILITARY_CRATE)
+        ) {
+            val d = hypot(nearNode.x - playerX, nearNode.z - playerZ)
+            val isMilitary = nearNode.kind == WorldObjectKind.MILITARY_CRATE
+            return TargetPromptInfo(
+                labelRu = if (isMilitary) "Военный ящик" else "Ящик припасов",
+                actionVerbRu = "Вскрыть ящик",
+                distanceMeters = d,
+                iconPath = if (isMilitary) "icons/icon_military_crate.png" else "icons/icon_supply_crate.png"
+            )
+        }
         if (nearNode?.specialLootId != null) {
             val d = hypot(nearNode.x - playerX, nearNode.z - playerZ)
             return TargetPromptInfo(
                 labelRu = nearNode.specialLootId.titleRu,
                 actionVerbRu = "Забрать находку",
                 distanceMeters = d,
-                isSpecialRelic = true
+                isSpecialRelic = true,
+                iconPath = nearNode.specialLootId.iconPath
             )
         }
         val nearBeast = nearestInteractableWildlife()

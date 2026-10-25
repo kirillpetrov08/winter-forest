@@ -198,7 +198,7 @@ object SurvivalEngine {
             }
         }
 
-        // Живая фауна (зайцы, северные олени, ночные волки)
+        // Живая фауна (таёжные крысы, северные олени, ночные волки)
         val enteredNight = !wasNight && nowNight
         val (updatedWildlifeMap, wolfBiteDamage, faunaMessage) = stepWildlifeSimulation(
             run = run,
@@ -428,7 +428,7 @@ object SurvivalEngine {
                                 nextHeading += sin(run.elapsedRealSeconds * 0.7f + idx * 1.9f) * 0.65f * deltaSeconds
                             }
                         } else {
-                            // Мирные зайцы/крысы и северные олени пасутся и стремительно убегают при приближении
+                            // Мирные крысы и северные олени пасутся и стремительно убегают при приближении
                             if (nextFlee > 0f || distToPlayer < 7.4f) {
                                 nextHeading = atan2(-dzToPlayer, -dxToPlayer)
                                 speed = entity.kind.cruiseSpeedMps * 1.75f
@@ -769,9 +769,20 @@ object SurvivalEngine {
         // После вскрытия узел уходит в перезарядку и рисуется ОТКРЫТЫМ ящиком.
         if (target.kind == WorldObjectKind.SUPPLY_CRATE || target.kind == WorldObjectKind.MILITARY_CRATE) {
             val isMilitary = target.kind == WorldObjectKind.MILITARY_CRATE
-            val seed = target.id.hashCode().toLong() * 7919L + run.totalResourcesGathered * 13L +
-                run.elapsedRealSeconds.toLong()
-            val loot = AdvancedMechanics.rollCrateLoot(isMilitary, seed)
+            // Гарантированный предмет военного ящика (specialLootId узла) важнее
+            // случайного броска: три ящика на карте несут аптечку, сухпай и нож.
+            val loot = if (isMilitary && target.specialLootId != null) {
+                listOf(
+                    AdvancedMechanics.CrateLootItem(
+                        target.specialLootId.titleRu,
+                        specialLootId = target.specialLootId
+                    )
+                )
+            } else {
+                val seed = target.id.hashCode().toLong() * 7919L + run.totalResourcesGathered * 13L +
+                    run.elapsedRealSeconds.toLong()
+                AdvancedMechanics.rollCrateLoot(isMilitary, seed)
+            }
             val looted = AdvancedMechanics.applyCrateLoot(run.copy(
                 swingAnimRemainingSec = run.equippedTool.swingDurationSec,
                 hitFeedbackTimerSec = 0.4f,

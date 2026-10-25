@@ -143,37 +143,40 @@ object WorldPopulator {
         seed: Long = 20261021L
     ): List<WildlifeEntity> {
         val rng = Random(seed)
-        // На Базовой поляне — только мирная дичь (зайцы и северный олень), без хищников!
+        // На Базовой поляне — только мирная дичь (крысы и северный олень), без хищников!
+        // «Полярный беляк» удалён: отдельной модели у него не было, рендерер рисовал
+        // его моделью оленя (wildlifeModelId), поэтому на карте стояли два одинаковых
+        // оленя разного размера. Мелкая дичь теперь одна — таёжная крыса.
         val roster: List<WildlifeKind> = when (location) {
             LocationId.BASE_CLEARING -> listOf(
-                WildlifeKind.SNOW_HARE,
                 WildlifeKind.TAIGA_RAT,
-                WildlifeKind.SNOW_HARE,
+                WildlifeKind.TAIGA_RAT,
+                WildlifeKind.TAIGA_RAT,
                 WildlifeKind.NORTHERN_DEER,
                 WildlifeKind.NORTHERN_DEER
             )
             LocationId.DENSE_SPRUCE -> listOf(
-                WildlifeKind.SNOW_HARE,
-                WildlifeKind.SNOW_HARE,
+                WildlifeKind.TAIGA_RAT,
+                WildlifeKind.TAIGA_RAT,
                 WildlifeKind.NORTHERN_DEER,
                 WildlifeKind.NORTHERN_DEER,
                 WildlifeKind.TIMBER_WOLF,
                 WildlifeKind.TIMBER_WOLF
             )
             LocationId.FROZEN_LAKE -> listOf(
-                WildlifeKind.SNOW_HARE,
+                WildlifeKind.TAIGA_RAT,
                 WildlifeKind.NORTHERN_DEER,
                 WildlifeKind.NORTHERN_DEER,
                 WildlifeKind.TIMBER_WOLF
             )
             LocationId.ABANDONED_MINE -> listOf(
-                WildlifeKind.SNOW_HARE,
+                WildlifeKind.TAIGA_RAT,
                 WildlifeKind.TIMBER_WOLF,
                 WildlifeKind.TIMBER_WOLF
             )
             LocationId.HUNTERS_CABIN -> listOf(
-                WildlifeKind.SNOW_HARE,
-                WildlifeKind.SNOW_HARE,
+                WildlifeKind.TAIGA_RAT,
+                WildlifeKind.TAIGA_RAT,
                 WildlifeKind.NORTHERN_DEER,
                 WildlifeKind.NORTHERN_DEER,
                 WildlifeKind.TIMBER_WOLF,
@@ -292,23 +295,31 @@ object WorldPopulator {
             )
         }
 
-        // 2 военных ящика с редким лутом на район (у троп и строений)
-        val militarySpots = when (location) {
-            LocationId.BASE_CLEARING -> listOf(11.4f to 8.2f, -14.2f to -12.4f)
-            LocationId.DENSE_SPRUCE -> listOf(13.6f to 14.1f, -13.2f to -6.5f)
-            LocationId.FROZEN_LAKE -> listOf(-15.4f to 12.8f, 8.9f to 14.6f)
-            LocationId.ABANDONED_MINE -> listOf(12.8f to -12.2f, -13.6f to -8.4f)
-            LocationId.HUNTERS_CABIN -> listOf(-11.8f to 13.4f, 13.2f to -6.2f)
+        // Военные ящики: ровно 3 на всю карту (раньше 2 на район = 10 — лут
+        // обесценивался, а ящики мелькали повсюду). Каждый стоит осмысленной
+        // точкой маршрута и несёт ГАРАНТИРОВАННЫЙ предмет: игроку не приходится
+        // вскрывать десяток ящиков ради шанса на аптечку.
+        val militarySpot: Pair<Float, Float>? = when (location) {
+            LocationId.BASE_CLEARING -> 11.4f to 8.2f      // у северной тропы поляны
+            LocationId.ABANDONED_MINE -> 12.8f to -12.2f   // в тупике штольни
+            LocationId.HUNTERS_CABIN -> -11.8f to 13.4f    // за зимовьем, у леса
+            else -> null
         }
-        militarySpots.forEachIndexed { mIdx, (mx, mz) ->
+        val militaryLoot: SpecialLootId? = when (location) {
+            LocationId.BASE_CLEARING -> SpecialLootId.FIRST_AID_KIT
+            LocationId.ABANDONED_MINE -> SpecialLootId.SOLDIER_RATION
+            LocationId.HUNTERS_CABIN -> SpecialLootId.HUNTING_KNIFE
+            else -> null
+        }
+        if (militarySpot != null && militaryLoot != null) {
             trimmed += ResourceNode(
-                id = "${location.name.lowercase()}_military_$mIdx",
+                id = "${location.name.lowercase()}_military_0",
                 location = location,
                 kind = WorldObjectKind.MILITARY_CRATE,
-                x = mx,
-                z = mz,
+                x = militarySpot.first,
+                z = militarySpot.second,
                 resourceType = null,
-                specialLootId = null,
+                specialLootId = militaryLoot,
                 baseYield = 1
             )
         }
