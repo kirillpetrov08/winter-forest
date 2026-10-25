@@ -3,12 +3,14 @@ package com.ayaks.winterforest
 import android.content.pm.ActivityInfo
 import android.os.Build
 import android.os.Bundle
+import android.view.Surface
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -69,8 +71,9 @@ class MainActivity : ComponentActivity() {
         requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
         enableEdgeToEdge()
         configureImmersiveLandscapeWindow()
-        // Снимаем системный лимит 60 FPS: самый быстрый режим дисплея (90/120/144 Гц)
-        requestHighRefreshRate()
+        // Целевые 60 FPS: просим у системы фиксированную частоту вместо «не троттлите
+        // меня» (см. FramePacing — прежняя разблокировка до 120 Гц давала микрофризы).
+        requestTargetFrameRate()
 
         setContent {
             WinterForestTheme {
@@ -83,36 +86,28 @@ class MainActivity : ComponentActivity() {
         super.onWindowFocusChanged(hasFocus)
         if (hasFocus) {
             configureImmersiveLandscapeWindow()
-            // Некоторые прошивки сбрасывают режим дисплея после сворачивания
-            requestHighRefreshRate()
+            // Некоторые прошивки сбрасывают запрошенную частоту после сворачивания
+            requestTargetFrameRate()
         }
     }
 
     /**
-     * Переключает окно на самый быстрый режим дисплея с текущим разрешением —
-     * иначе Android держит классический лимит в 60 FPS даже на 120-герцевых
-     * панелях. Вызывается при старте и при возврате фокуса.
+     * Фиксирует частоту кадров окна на [FramePacing.TARGET_FPS].
+     *
+     * Раньше здесь стоял запрос самого быстрого режима дисплея
+     * (preferredDisplayModeId = 90/120/144 Гц) в паре с eglSwapInterval(0).
+     * Тяжёлая сцена не успевала за панелью, SoC упиралась в термопакет и
+     * сбрасывала частоты — на Galaxy S24+ это выглядело как постоянные
+     * микрофризы. Теперь игра просит ровно 60 Гц и ждёт vsync.
      */
-    private fun requestHighRefreshRate() {
-        val targetDisplay = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            this.display
-        } else {
-            @Suppress("DEPRECATION")
-            windowManager.defaultDisplay
-        } ?: return
-        val currentMode = targetDisplay.mode ?: return
-        val mode = FramePacing.pickFastestMode(
-            modes = targetDisplay.supportedModes.map {
-                FramePacing.DisplayModeInfo(it.modeId, it.physicalWidth, it.physicalHeight, it.refreshRate)
-            },
-            currentWidth = currentMode.physicalWidth,
-            currentHeight = currentMode.physicalHeight
-        ) ?: return
-        if (mode.id != currentMode.modeId && mode.refreshRate > currentMode.refreshRate) {
-            val attrs = window.attributes
-            attrs.preferredDisplayModeId = mode.id
-            window.attributes = attrs
-        }
+    private fun requestTargetFrameRate() {
+        // rootSurfaceControl доступен с API 29, Surface.setFrameRate — с API 30
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return
+        val surface = window.decorView.rootSurfaceControl?.surface ?: return
+        surface.setFrameRate(
+            FramePacing.TARGET_SURFACE_FRAME_RATE,
+            Surface.FRAME_RATE_COMPATIBILITY_FIXED
+        )
     }
 
     private fun configureImmersiveLandscapeWindow() {
@@ -155,47 +150,66 @@ fun WinterForestAppRoot(viewModel: WinterForestViewModel) {
     // Рюкзак/настройки/меню открываются ПОВЕРХ работающей сцены — без «мёртвого»
     // чёрного экрана и повторной пересборки VBO/текстур при выходе из вкладок.
     Box(modifier = Modifier.fillMaxSize()) {
-        PersistentForestScene(state = state, viewModel = viewModel)
+        PersistentForestScene(
+            state = state,
+            viewModel = viewModel,
+            onFirstFrameReady = viewModel::onSceneReady
+        )
 
-        when (state.destination) {
-            AppDestination.MAIN_MENU -> MainMenuScreen(state = state, viewModel = viewModel)
-            AppDestination.GAME -> GameScreen(state = state, viewModel = viewModel)
-            AppDestination.BASE_INVENTORY -> BaseInventoryScreen(state = state, viewModel = viewModel)
-            AppDestination.RESULTS -> ResultsScreen(state = state, viewModel = viewModel)
-            AppDestination.SETTINGS -> SettingsScreen(state = state, viewModel = viewModel)
-            AppDestination.ABOUT -> AboutScreen(viewModel = viewModel)
-        }
-
-        // Светлый экран загрузки: пока OpenGL не отрисовал первый кадр,
-        // пользователь не видит чёрный экран.
-        if (!state.sceneReady) {
-            Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center
-            ) {
-                Column(
-                    modifier = Modifier
-                        .width(260.dp)
-                        .height(60.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Text(
-                        text = "WINTER FOREST",
-                        style = TextStyle(
-                            fontSize = 32.sp,
-                            fontWeight = FontWeight.ExtraBold,
-                            color = Color(0xFF071521)
-                        )
-                    )
-                    Text(
-                        text = "Загрузка тайги…",
-                        style = TextStyle(
-                            fontSize = 14.sp,
-                            color = Color(0xFF5B7A8A)
-                        )
-                    )
-                }
+        // Пока OpenGL не отрисовал первый кадр, НЕ КОМПОНУЕМ ни один экран:
+        // ни хотбара, ни статов, ни кнопок меню в этот момент не существует,
+        // а непрозрачный светлый оверлей закрывает чёрную поверхность GL.
+        if (state.sceneReady) {
+            when (state.destination) {
+                AppDestination.MAIN_MENU -> MainMenuScreen(state = state, viewModel = viewModel)
+                AppDestination.GAME -> GameScreen(state = state, viewModel = viewModel)
+                AppDestination.BASE_INVENTORY -> BaseInventoryScreen(state = state, viewModel = viewModel)
+                AppDestination.RESULTS -> ResultsScreen(state = state, viewModel = viewModel)
+                AppDestination.SETTINGS -> SettingsScreen(state = state, viewModel = viewModel)
+                AppDestination.ABOUT -> AboutScreen(viewModel = viewModel)
             }
+        } else {
+            TaigaLoadingOverlay()
+        }
+    }
+}
+
+/**
+ * Экран загрузки тайги: единственный момент, когда пользователь видит надпись
+ * «Загрузка тайги…». Фон непрозрачный и светлый, поэтому под ним не просвечивают
+ * ни 3D-сцена, ни интерфейс. Как только рендерер сообщает о первом кадре
+ * ([WinterForestViewModel.onSceneReady]), оверлей снимается навсегда — при
+ * возврате из меню в игру он уже не появляется.
+ */
+@Composable
+private fun TaigaLoadingOverlay() {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFFE9F2F8)),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            modifier = Modifier
+                .width(260.dp)
+                .height(60.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(
+                text = "WINTER FOREST",
+                style = TextStyle(
+                    fontSize = 32.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = Color(0xFF071521)
+                )
+            )
+            Text(
+                text = "Загрузка тайги…",
+                style = TextStyle(
+                    fontSize = 14.sp,
+                    color = Color(0xFF5B7A8A)
+                )
+            )
         }
     }
 }
@@ -207,14 +221,19 @@ fun WinterForestAppRoot(viewModel: WinterForestViewModel) {
 @Composable
 private fun PersistentForestScene(
     state: WinterForestUiState,
-    viewModel: WinterForestViewModel
+    viewModel: WinterForestViewModel,
+    onFirstFrameReady: () -> Unit
 ) {
     val orbitMode = state.destination == AppDestination.MAIN_MENU ||
         state.destination == AppDestination.SETTINGS ||
         state.destination == AppDestination.ABOUT
     AndroidView(
         factory = { ctx ->
-            ForestGlSurfaceView(ctx, onFpsSample = viewModel::onFpsMeasured).apply {
+            ForestGlSurfaceView(
+                ctx,
+                onFpsSample = viewModel::onFpsMeasured,
+                onFirstFrameReady = onFirstFrameReady
+            ).apply {
                 forestRenderer.snapshot = RenderSceneSnapshot(
                     run = state.activeRun ?: GameRunState(),
                     base = state.baseProgress,

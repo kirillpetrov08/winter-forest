@@ -23,7 +23,7 @@ enum class GraphicsQuality(
     ),
     MEDIUM(
         titleRu = "Среднее",
-        subtitleRu = "Плавный рендеринг без лимита FPS и сбалансированная дальность",
+        subtitleRu = "Плавный рендеринг на 60 FPS и сбалансированная дальность",
         textureSize = 512,
         terrainSteps = 84,
         perimeterTrees = 30,

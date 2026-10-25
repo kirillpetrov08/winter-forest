@@ -38,22 +38,30 @@ data class RenderSceneSnapshot(
 /**
  * Высокопроизводительный аппаратный 3D-движок OpenGL ES 2.0/3.0 «Winter Forest»:
  * - 3 уровня кэширования GPU VBO (Static World VBOs + Dirty-Flag Node VBOs + Zero-Alloc Dynamic VBOs);
- * - 0 аллокаций ByteBuffer/FloatArray в onDrawFrame() -> стабильные 120+ FPS без GC-фризов
- *   (лимит 60 FPS снят: eglSwapInterval(0) + быстрый режим дисплея + интерполяция тиков);
+ * - 0 аллокаций ByteBuffer/FloatArray в onDrawFrame() -> ровные 60 FPS на vsync без GC-фризов
+ *   (eglSwapInterval(1) + запрос 60 Гц у поверхности + интерполяция 20-Гц тиков);
  * - панорамный купол неба 360° с 3D-горами, звёздами и Северным сиянием;
  * - до 3 тёплых динамических источников света + блики на льду и металле + частицы удара и метели.
  */
 class ForestGlRenderer(
     private val onFpsSample: ((Int) -> Unit)? = null,
-    private val appContext: Context? = null
+    private val appContext: Context? = null,
+    /**
+     * Вызывается ОДИН раз из GL-потока после первого полностью отрисованного кадра.
+     * Это единственный честный признак «карта загружена»: до него экран загрузки
+     * скрывает интерфейс, после — снимается.
+     */
+    private val onFirstFrameReady: (() -> Unit)? = null
 ) : GLSurfaceView.Renderer {
+
+    /** Флаг первого кадра: колбэк готовности сцены не должен дёргаться каждый кадр. */
+    @Volatile private var firstFrameReported = false
 
     @Volatile
     var snapshot: RenderSceneSnapshot = RenderSceneSnapshot()
         set(value) {
-            // Окно интерполяции: тики симуляции приходят на 20 Гц, а кадры — 90/120+
-            // (лимит 60 FPS снят). Позицию игрока сглаживаем между тиками, чтобы
-            // движение на высокой частоте кадров оставалось плавным.
+            // Окно интерполяции: тики симуляции приходят на 20 Гц, а кадры — на 60 Гц.
+            // Позицию игрока сглаживаем между тиками, чтобы шаг не дёргался сеткой тиков.
             val prev = field
             val moved =
                 value.run.playerX != prev.run.playerX ||
@@ -305,14 +313,18 @@ class ForestGlRenderer(
     }
 
     override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
-        // Лимит 60 FPS снят: eglSwapInterval(0) — рендер без ожидания vsync.
-        // Контекст в этом колбэке уже current; при пересоздании поверхности
-        // вызов повторяется (интервал привязан к draw-surface).
+        // Целевые 60 FPS: eglSwapInterval(1) заставляет кадр ждать вертикальный
+        // синхроимпульс. Прежний интервал 0 разрешал 120+ полных кадров тяжёлой
+        // сцены в секунду — SoC упиралась в термопакет и роняла частоты, что
+        // на устройстве выглядело как постоянные микрофризы.
         val eglDisplay = EGL14.eglGetCurrentDisplay()
         if (eglDisplay != null && eglDisplay != EGL14.EGL_NO_DISPLAY) {
-            EGL14.eglSwapInterval(eglDisplay, 0)
+            EGL14.eglSwapInterval(eglDisplay, FramePacing.TARGET_SWAP_INTERVAL)
         }
-        // При пересоздании EGL-контекста сбрасываем старые GPU-хэндлы
+        // При пересоздании EGL-контекста сбрасываем старые GPU-хэндлы.
+        // Небо (облака/солнце/луна и quad) раньше не сбрасывалось: после каждого
+        // поворота экрана утекало 4 текстуры и один VBO.
+        releaseSkyResources()
         uploadedPaletteLocation = null
         staticBuiltQuality = null
         staticBuiltBaseSig = -1
@@ -425,7 +437,7 @@ class ForestGlRenderer(
             yawRad = kotlin.math.atan2(dx, -dz)
             pitchRad = kotlin.math.atan2(dy, flatDist)
         } else {
-            // Позиция сглаживается между 20-герцевыми тиками: на 90/120 FPS шаг
+            // Позиция сглаживается между 20-герцевыми тиками: на 60 FPS шаг
             // не дёргается сеткой тиков, а pitch/yaw (события ввода) идут как есть.
             val alpha = FramePacing.interpAlpha(nowNs - smoothStartNs, TICK_INTERP_WINDOW_NS)
             val px = FramePacing.lerpCoord(smoothPrevX, smoothCurX, alpha, SNAP_DISTANCE_M)
@@ -562,6 +574,13 @@ class ForestGlRenderer(
             animTimeSec = animTimeSec,
             menuOrbitMode = snap.menuOrbitMode
         )
+
+        // 8. Первый кадр собран и отправлен в swapchain — сообщаем UI, что тайгу
+        //    больше не нужно прятать за экраном загрузки (ровно один раз за сессию).
+        if (!firstFrameReported) {
+            firstFrameReported = true
+            onFirstFrameReady?.invoke()
+        }
     }
 
     /** Загрузка импортированных моделей и построение статических пропов локации. */
@@ -1702,6 +1721,24 @@ class ForestGlRenderer(
         glow.addBox(cx + 0.55f, baseY + 1.15f, cz - hd + wallT + 0.06f, 1.15f, 0.85f, 0.08f, 1.0f, 0.74f, 0.34f, 1f)
     }
 
+    /** Освобождает GPU-ресурсы неба (текстуры и quad) при пересоздании контекста. */
+    private fun releaseSkyResources() {
+        val doomed = skyHandlesScratch
+        var n = 0
+        if (skyTexHigh != 0) { doomed[n++] = skyTexHigh; skyTexHigh = 0 }
+        if (skyTexLow != 0) { doomed[n++] = skyTexLow; skyTexLow = 0 }
+        if (skyTexSun != 0) { doomed[n++] = skyTexSun; skyTexSun = 0 }
+        if (skyTexMoon != 0) { doomed[n++] = skyTexMoon; skyTexMoon = 0 }
+        if (n > 0) GLES20.glDeleteTextures(n, doomed, 0)
+        if (skyQuadVbo != 0) {
+            GLES20.glDeleteBuffers(1, intArrayOf(skyQuadVbo), 0)
+            skyQuadVbo = 0
+        }
+    }
+
+    /** Переиспользуемый массив для удаления текстур неба (без аллокации в кадре). */
+    private val skyHandlesScratch = IntArray(4)
+
     private fun initSkyQuadVbo() {
         val quadCoords = floatArrayOf(
             -1f, -1f,
@@ -1765,15 +1802,24 @@ class ForestGlRenderer(
         skyCloudsHighLoc = GLES20.glGetUniformLocation(skyProgram, "uCloudsHigh")
         skyCloudsLowLoc = GLES20.glGetUniformLocation(skyProgram, "uCloudsLow")
         skySunDiscLoc = GLES20.glGetUniformLocation(skyProgram, "uSunDisc")
+        skyMoonDiscLoc = GLES20.glGetUniformLocation(skyProgram, "uMoonDisc")
+        skyNightAmountLoc = GLES20.glGetUniformLocation(skyProgram, "uNightAmount")
+        skyDiscColorLoc = GLES20.glGetUniformLocation(skyProgram, "uDiscColor")
         ensureSkyTextures()
     }
 
     private var skyTexHigh = 0
     private var skyTexLow = 0
     private var skyTexSun = 0
+    private var skyTexMoon = 0
     private var skyCloudsHighLoc = -1
     private var skyCloudsLowLoc = -1
     private var skySunDiscLoc = -1
+    private var skyMoonDiscLoc = -1
+    private var skyNightAmountLoc = -1
+    private var skyDiscColorLoc = -1
+    /** Переиспользуемый буфер цвета диска светила (0 аллокаций в кадре). */
+    private val discRgb = FloatArray(3)
 
     private fun uploadSkyTexture(path: String, wrapRepeat: Boolean): Int {
         val ctx = appContext ?: return 0
@@ -1811,6 +1857,7 @@ class ForestGlRenderer(
         if (skyTexHigh == 0) skyTexHigh = uploadSkyTexture("sky/clouds_high.png", wrapRepeat = true)
         if (skyTexLow == 0) skyTexLow = uploadSkyTexture("sky/clouds_low.png", wrapRepeat = true)
         if (skyTexSun == 0) skyTexSun = uploadSkyTexture("sky/sun_disc.png", wrapRepeat = false)
+        if (skyTexMoon == 0) skyTexMoon = uploadSkyTexture("sky/moon_disc.png", wrapRepeat = false)
     }
 
     private fun drawSkyDome(
@@ -1828,6 +1875,18 @@ class ForestGlRenderer(
         GLES20.glUniform3fv(skyHorizonLoc, 1, horizonRgb, 0)
         GLES20.glUniform3fv(skyFogLoc, 1, fogRgb, 0)
         GLES20.glUniform3fv(skySunHaloLoc, 1, sunRgb, 0)
+        // Ночь/день для неба: 0 — полнодень, 1 — глубокая ночь. Плавная синусоида
+        // без ступеней, поэтому светило и его цвет меняются непрерывно.
+        val nightAmount = (0.5f - 0.5f * cos(cycleT * Math.PI.toFloat() * 2f))
+        GLES20.glUniform1f(skyNightAmountLoc, nightAmount)
+        // Цвет диска: днём тёплое солнце, ночью холодная луна (смесь по nightAmount).
+        val moonR = 0.72f
+        val moonG = 0.80f
+        val moonB = 0.95f
+        discRgb[0] = sunRgb[0] * (1f - nightAmount) + moonR * nightAmount
+        discRgb[1] = sunRgb[1] * (1f - nightAmount) + moonG * nightAmount
+        discRgb[2] = sunRgb[2] * (1f - nightAmount) + moonB * nightAmount
+        GLES20.glUniform3fv(skyDiscColorLoc, 1, discRgb, 0)
         val sunAz = cycleT * Math.PI.toFloat() * 2f - camYaw * 0.35f
         val sunX = (0.5f + 0.34f * sin(sunAz)).coerceIn(-0.4f, 1.4f)
         val sunY = (0.56f + 0.24f * sin(cycleT * Math.PI.toFloat() * 2f) - camPitch * 0.55f).coerceIn(-0.3f, 1.3f)
@@ -1848,6 +1907,10 @@ class ForestGlRenderer(
         GLES20.glActiveTexture(GLES20.GL_TEXTURE2)
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, skyTexSun)
         GLES20.glUniform1i(skySunDiscLoc, 2)
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE3)
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, skyTexMoon)
+        GLES20.glUniform1i(skyMoonDiscLoc, 3)
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
 
         GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, skyQuadVbo)
         GLES20.glEnableVertexAttribArray(skyQuadAttrLoc)
@@ -2263,7 +2326,10 @@ class ForestGlRenderer(
         Matrix.setIdentityM(modelMatrix, 0)
         Matrix.translateM(modelMatrix, 0, baseX, baseY, baseZ)
         Matrix.rotateM(modelMatrix, 0, -yawRad * 180f / Math.PI.toFloat(), 0f, 1f, 0f)
-        Matrix.rotateM(modelMatrix, 0, -theta * 180f / Math.PI.toFloat(), 1f, 0f, 0f)
+        // Инструмент привязан к голове: наклон камеры (pitch) входит в поворот вокруг
+        // локальной оси X вместе с замахом. Без pitch топор оставался горизонтальным,
+        // когда игрок смотрел вверх/вниз, и «отлипал» от рук.
+        Matrix.rotateM(modelMatrix, 0, (-pitchRad - theta) * 180f / Math.PI.toFloat(), 1f, 0f, 0f)
         Matrix.multiplyMM(mvpMatrix, 0, vpMatrix, 0, modelMatrix, 0)
         GLES20.glUniformMatrix4fv(uMvpLoc, 1, false, mvpMatrix, 0)
         GLES20.glUniformMatrix4fv(uModelLoc, 1, false, modelMatrix, 0)
@@ -2514,25 +2580,27 @@ class ForestGlRenderer(
 class ForestGlSurfaceView(
     context: Context,
     onFpsSample: ((Int) -> Unit)? = null,
-    val forestRenderer: ForestGlRenderer = ForestGlRenderer(onFpsSample, context.applicationContext)
+    onFirstFrameReady: (() -> Unit)? = null,
+    val forestRenderer: ForestGlRenderer = ForestGlRenderer(onFpsSample, context.applicationContext, onFirstFrameReady)
 ) : GLSurfaceView(context) {
     init {
         setEGLContextClientVersion(2)
         setEGLConfigChooser(8, 8, 8, 8, 16, 0)
         preserveEGLContextOnPause = true
-        // Лимит 60 FPS снят: swap interval 0 в onSurfaceCreated (без ожидания vsync),
-        // кадры уходят на панель с максимально возможной частотой (90/120/144 Гц).
+        // Целевые 60 FPS: swap interval 1 (ожидание vsync) выставляется в
+        // onSurfaceCreated, а поверхность просит фиксированные 60 Гц.
         setRenderer(forestRenderer)
         renderMode = RENDERMODE_CONTINUOUSLY
     }
 
     override fun surfaceCreated(holder: SurfaceHolder) {
         super.surfaceCreated(holder)
-        // Android 11+ (API 30): явный запрос системе — не троттлить частоту кадров.
+        // Android 11+ (API 30): FIXED вместо DEFAULT — система не поднимает
+        // частоту панели выше запрошенных 60 Гц ради этой поверхности.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             holder.surface.setFrameRate(
-                0f,
-                Surface.FRAME_RATE_COMPATIBILITY_DEFAULT
+                FramePacing.TARGET_SURFACE_FRAME_RATE,
+                Surface.FRAME_RATE_COMPATIBILITY_FIXED
             )
         }
     }

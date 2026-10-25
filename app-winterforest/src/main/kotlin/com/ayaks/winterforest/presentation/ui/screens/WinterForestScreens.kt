@@ -1449,20 +1449,9 @@ fun SettingsScreen(
                         valueRange = 0.3f..2.5f
                     )
 
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(Modifier.weight(1f)) {
-                            Text("Персонализация рекламы (РСЯ)", color = SnowCrispText, fontSize = 13.sp)
-                            Text("Геолокация отключена постоянно.", color = MistMutedText, fontSize = 11.sp)
-                        }
-                        Switch(
-                            checked = state.settings.gdprUserConsent,
-                            onCheckedChange = { viewModel.onGdprConsentSelected(it) }
-                        )
-                    }
+                    // Настройки персонализации рекламы РСЯ в меню НЕТ: согласие
+                    // запрашивается один раз юридически обязательным диалогом
+                    // первого запуска (MainMenuScreen) и меняется только там.
 
                     Button(
                         onClick = { viewModel.requestResetProgressDialog() },
@@ -1521,10 +1510,11 @@ private fun SkillsAndDailyTab(
     viewModel: WinterForestViewModel
 ) {
     val am = com.ayaks.winterforest.domain.rules.AdvancedMechanics
+    // ВАЖНО: скролл здесь запрещён. Правая область BaseInventoryScreen уже
+    // прокручивается, а вложенный verticalScroll получает бесконечную высоту
+    // и Compose падает с «infinity maximum height constraints» при открытии вкладки.
     Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .verticalScroll(rememberScrollState()),
+        modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         Card(colors = CardDefaults.cardColors(containerColor = FrostedCardSurface)) {
