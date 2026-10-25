@@ -1140,6 +1140,12 @@ class ForestGlRenderer(
                     metal.addBox(node.x, y + 0.66f, node.z, 1.28f, 0.16f, 0.90f, 1.0f, 0.88f, 0.55f)
                     bark.addTaperedCylinder(node.x + 0.78f, y, node.z, node.x + 0.78f, y + 1.85f, node.z, 0.05f, 0.04f, 6)
                 }
+                WorldObjectKind.MILITARY_CRATE -> {
+                    foliage.addShadowDisc(node.x, y, node.z, 1.15f, 0.38f)
+                    timber.addOrientedBox(node.x, y + 0.44f, node.z, 1.02f, 0.88f, 1.02f, idx * 0.35f, 0f, 0f)
+                    metal.addOrientedBox(node.x, y + 0.89f, node.z, 1.06f, 0.06f, 1.06f, idx * 0.35f, 0f, 0f)
+                    cloth.addOrientedBox(node.x, y + 0.98f, node.z, 0.72f, 0.20f, 0.62f, idx * 0.35f + 0.2f, 0f, 0f)
+                }
                 // Лиственные деревья и полевые кусты пака Trees & Bushes (модель пользователя)
                 WorldObjectKind.OAK_TREE -> {
                     foliage.addShadowDisc(node.x, y, node.z, 1.55f, 0.36f)
@@ -1436,7 +1442,11 @@ class ForestGlRenderer(
 
         // Импортированные 3D-модели животных (волк/олень) — тело + ноги с шагом
         for (bd in importedBeasts) {
-            val modelId = if (bd.kind == WildlifeKind.TIMBER_WOLF) "wolf_body" else "deer_body"
+            val modelId = when (bd.kind) {
+                WildlifeKind.TIMBER_WOLF -> "wolf_body"
+                WildlifeKind.TAIGA_RAT -> "rat_body"
+                else -> "deer_body"
+            }
             drawAnimatedEntity(
                 modelId = modelId,
                 x = bd.x, y = bd.y, z = bd.z,
@@ -1619,7 +1629,7 @@ class ForestGlRenderer(
             1f, -1f,
             -1f, 1f,
             -1f, 1f,
-            1f, 1f,
+            1f, -1f,
             1f, 1f
         )
         val buf = ByteBuffer.allocateDirect(quadCoords.size * 4)

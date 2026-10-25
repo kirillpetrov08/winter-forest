@@ -332,20 +332,19 @@ fun CrosshairOverlay(
  * Нижний хотбар быстрого переключения снаряжения и еды в 1 касание (5 слотов).
  */
 @Composable
+/**
+
+ * Нижний хотбар быстрого доступа: 6 слотов, изначально пустые.
+ * Игрок сам наполняет их едой, инструментами и расходниками из рюкзака
+ * (в меню Базы/Рюкзака). В игре слот можно использовать — экипировать
+ * инструмент или съесть/применить расходник.
+ */
+@Composable
 fun QuickEquipmentHotbar(
     run: GameRunState,
-    onSelectTool: (EquippedTool) -> Unit,
-    onIgniteOrEquipTorch: () -> Unit,
-    onQuickEat: () -> Unit,
-    onPlaceCampfire: () -> Unit,
+    onUseSlot: (Int) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val torchCount = run.inventory.specialCount(SpecialLootId.RESIN_TORCH)
-    val foodCount = run.inventory.countOf(ResourceType.MEAT) +
-        run.inventory.countOf(ResourceType.FISH) +
-        run.inventory.countOf(ResourceType.BERRIES)
-    val firesAffordable = run.inventory.countOf(ResourceType.WOOD) / GameRunState.FIELD_CAMPFIRE_WOOD_COST
-
     Row(
         horizontalArrangement = Arrangement.spacedBy(6.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -355,75 +354,37 @@ fun QuickEquipmentHotbar(
             .border(1.dp, Color(0x367CC6FE), RoundedCornerShape(14.dp))
             .padding(horizontal = 8.dp, vertical = 5.dp)
     ) {
-        HotbarSlotChip(
-            indexLabel = "1",
-            title = "Топор",
-            selected = run.equippedTool == EquippedTool.AXE,
-            badge = null,
-            onClick = { onSelectTool(EquippedTool.AXE) }
-        )
-        HotbarSlotChip(
-            indexLabel = "2",
-            title = "Кирка",
-            selected = run.equippedTool == EquippedTool.PICKAXE,
-            badge = null,
-            onClick = { onSelectTool(EquippedTool.PICKAXE) }
-        )
-        HotbarSlotChip(
-            indexLabel = "3",
-            title = "Копьё",
-            selected = run.equippedTool == EquippedTool.SPEAR,
-            badge = null,
-            onClick = { onSelectTool(EquippedTool.SPEAR) }
-        )
-        HotbarSlotChip(
-            indexLabel = "4",
-            title = "Факел",
-            selected = run.equippedTool == EquippedTool.TORCH,
-            badge = if (torchCount > 0) "×$torchCount" else null,
-            onClick = onIgniteOrEquipTorch
-        )
-        HotbarSlotChip(
-            indexLabel = "5",
-            title = "Еда",
-            selected = false,
-            badge = "×$foodCount",
-            enabled = foodCount > 0,
-            onClick = onQuickEat
-        )
-        // 6-й слот хотбара: установка походного костра прямо из хотбара (2 Дерева)
-        HotbarSlotChip(
-            indexLabel = "6",
-            title = "Костёр",
-            selected = false,
-            badge = "×$firesAffordable",
-            enabled = firesAffordable > 0,
-            accentPlacement = true,
-            onClick = onPlaceCampfire
-        )
+        for (slotIdx in 0..5) {
+            val entry = run.hotbarAt(slotIdx)
+            HotbarSlotChip(
+                indexLabel = (slotIdx + 1).toString(),
+                entry = entry,
+                selected = false,
+                onClick = { onUseSlot(slotIdx) }
+            )
+        }
     }
 }
 
+/** Иконка инструмента (Unicode-символ, пока не привезены иконки-картинки). */
+private fun toolIcon(tool: EquippedTool): String = when (tool) {
+    EquippedTool.AXE -> "🪓"
+    EquippedTool.PICKAXE -> "⛏️"
+    EquippedTool.SPEAR -> "🎯"
+    EquippedTool.TORCH -> "🔥"
+    else -> "🔧"
+}
+
+/** Ячейка слота хотбара: иконка + подпись, либо пустая ячейка. */
 @Composable
 private fun HotbarSlotChip(
     indexLabel: String,
-    title: String,
+    entry: com.ayaks.winterforest.domain.model.HotbarEntry?,
     selected: Boolean,
-    badge: String?,
-    enabled: Boolean = true,
-    accentPlacement: Boolean = false,
     onClick: () -> Unit
 ) {
-    val bg = when {
-        selected -> IceCyanPrimary.copy(alpha = 0.26f)
-        accentPlacement -> Color(0x2ED97724)
-        else -> FrostedCardSurface.copy(alpha = 0.72f)
-    }
-    val borderCol = when {
-        selected -> IceCyanPrimary
-        accentPlacement -> HearthAmberAccent.copy(alpha = 0.75f)
-        else -> Color(0x28FFFFFF)
-    }
+    val bg = FrostedCardSurface.copy(alpha = 0.72f)
+    val borderCol = Color(0x28FFFFFF)
 
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -431,35 +392,39 @@ private fun HotbarSlotChip(
             .clip(RoundedCornerShape(10.dp))
             .background(bg)
             .border(1.2.dp, borderCol, RoundedCornerShape(10.dp))
-            .clickable(enabled = enabled, onClick = onClick)
-            .padding(horizontal = 11.dp, vertical = 6.dp)
+            .clickable(enabled = true, onClick = onClick)
+            .size(56.dp)
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(text = indexLabel, color = MistMutedText, fontSize = 9.sp)
+        if (entry != null) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
+                when {
+                    entry.isTool -> Text(
+                        text = toolIcon(entry.tool!!),
+                        fontSize = 20.sp
+                    )
+                    entry.resourceType != null -> {
+                        com.ayaks.winterforest.presentation.ui.components.ResourceTypeGlyph(
+                            type = entry.resourceType!!,
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
+                    else -> Text(text = "📦", fontSize = 20.sp)
+                }
+            }
             Text(
-                text = title,
-                color = when {
-                    !enabled -> MistMutedText
-                    selected -> SnowCrispText
-                    accentPlacement -> HearthAmberAccent
-                    else -> SnowCrispText.copy(alpha = 0.88f)
-                },
-                fontSize = 11.sp,
-                fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
-            )
-        }
-        if (badge != null) {
-            Text(
-                text = badge,
-                color = if (enabled) HearthAmberAccent else MistMutedText,
+                text = entry.titleRu,
+                color = SnowCrispText,
                 fontSize = 9.sp,
-                fontWeight = FontWeight.SemiBold
+                maxLines = 1,
+                overflow = androidx.compose.foundation.layout.Overflow.Ellipsis
             )
+        } else {
+            Text(text = indexLabel, color = MistMutedText, fontSize = 10.sp)
+            Text(text = "—", color = MistMutedText.copy(alpha = 0.5f), fontSize = 16.sp)
         }
     }
-}
 
-@Composable
+
 fun MiniCompassBadge(
     playerX: Float,
     playerZ: Float,

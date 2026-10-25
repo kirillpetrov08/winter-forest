@@ -147,7 +147,7 @@ object WorldPopulator {
         val roster: List<WildlifeKind> = when (location) {
             LocationId.BASE_CLEARING -> listOf(
                 WildlifeKind.SNOW_HARE,
-                WildlifeKind.SNOW_HARE,
+                WildlifeKind.TAIGA_RAT,
                 WildlifeKind.SNOW_HARE,
                 WildlifeKind.NORTHERN_DEER,
                 WildlifeKind.NORTHERN_DEER
@@ -255,6 +255,42 @@ object WorldPopulator {
                 baseYield = yieldAmount
             )
         }
+
+        // Ящиков должно быть немного: оставляем до 4 обычных на район
+        var cratesKept = 0
+        val trimmed = result.filter { node ->
+            if (node.kind != WorldObjectKind.SUPPLY_CRATE) {
+                true
+            } else if (cratesKept >= 4) {
+                false
+            } else {
+                cratesKept += 1
+                true
+            }
+        }.toMutableList()
+
+        // 2 военных ящика с редким лутом на район (у троп и строений)
+        val militarySpots = when (location) {
+            LocationId.BASE_CLEARING -> listOf(11.4f to 8.2f, -14.2f to -12.4f)
+            LocationId.DENSE_SPRUCE -> listOf(13.6f to 14.1f, -13.2f to -6.5f)
+            LocationId.FROZEN_LAKE -> listOf(-15.4f to 12.8f, 8.9f to 14.6f)
+            LocationId.ABANDONED_MINE -> listOf(12.8f to -12.2f, -13.6f to -8.4f)
+            LocationId.HUNTERS_CABIN -> listOf(-11.8f to 13.4f, 13.2f to -6.2f)
+        }
+        militarySpots.forEachIndexed { mIdx, (mx, mz) ->
+            trimmed += ResourceNode(
+                id = "${location.name.lowercase()}_military_$mIdx",
+                location = location,
+                kind = WorldObjectKind.MILITARY_CRATE,
+                x = mx,
+                z = mz,
+                resourceType = null,
+                specialLootId = null,
+                baseYield = 1
+            )
+        }
+        result.clear()
+        result.addAll(trimmed)
 
         val specialLoot = location.uniqueLoot
         val alreadyCollectedPermanent =

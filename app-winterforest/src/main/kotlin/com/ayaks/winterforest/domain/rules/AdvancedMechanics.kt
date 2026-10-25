@@ -145,6 +145,88 @@ object AdvancedMechanics {
     fun hasIceHoleNearby(run: GameRunState): Boolean =
         run.nearestInteractableNode()?.kind == WorldObjectKind.ICE_HOLE
 
+    /**
+     * Начало рыбалки: персонаж забрасывает удочку и ВИДИМО рыбачит
+     * [GameRunState.FISHING_PROCESS_SECONDS] секунд, затем — поклёвка.
+     * Лунка бесконечная: после завершения уходит в перезарядку и снова доступна.
+     */
+    fun startFishing(run: GameRunState, base: BaseProgress): EngineStepOutcome {
+        if (run.phase == com.ayaks.winterforest.domain.model.RunPhase.DEAD) {
+            return EngineStepOutcome(run, base, false, "Персонаж мёртв.")
+        }
+        if (run.isFishing) {
+            val msg = "Уже идёт рыбалка — дождитесь поклёвки."
+            return EngineStepOutcome(run.copy(lastStatusMessage = msg), base, false, msg)
+        }
+        val hole = run.nearestInteractableNode()?.takeIf { it.kind == WorldObjectKind.ICE_HOLE }
+        if (hole == null) {
+            val msg = "Подойдите ко льдовой лунке, чтобы ловить рыбу."
+            return EngineStepOutcome(run.copy(lastStatusMessage = msg), base, false, msg)
+        }
+        if (hole.respawnRemainingSec > 0f) {
+            val msg = "Лунка на перезарядке — лёд восстановится через ${hole.respawnRemainingSec.toInt()} с."
+            return EngineStepOutcome(run.copy(lastStatusMessage = msg), base, false, msg)
+        }
+        if (run.stamina < FISHING_STAMINA_COST) {
+            val msg = "Слишком устали для рыбалки — нужен отдых."
+            return EngineStepOutcome(run.copy(lastStatusMessage = msg), base, false, msg)
+        }
+        val msg = "Удочка заброшена — ждём поклёвку…"
+        return EngineStepOutcome(
+            run.copy(
+                stamina = (run.stamina - FISHING_STAMINA_COST).coerceAtLeast(0f),
+                fishingRemainingSec = GameRunState.FISHING_PROCESS_SECONDS,
+                fishingHoleId = hole.id,
+                swingAnimRemainingSec = 1.1f,
+                lastStatusMessage = msg
+            ),
+            base,
+            true,
+            msg
+        )
+    }
+
+    /**
+     * Шаг процесса рыбалки: тикает раз в кадр; по завершении — поклёвка
+     * (через [fishAtHole]) и перезарядка лунки. Отход от лунки отменяет рыбалку.
+     */
+    fun tickFishing(run: GameRunState, base: BaseProgress, deltaSeconds: Float): EngineStepOutcome {
+        if (!run.isFishing) return EngineStepOutcome(run, base, true, run.lastStatusMessage)
+        val hole = run.currentLocationNodes().firstOrNull { it.id == run.fishingHoleId }
+        if (hole == null) {
+            return EngineStepOutcome(
+                run.copy(fishingRemainingSec = 0f, fishingHoleId = null),
+                base, false, "Рыбалка прервана."
+            )
+        }
+        val distSq = run.distSqToPlayer(hole)
+        if (distSq > (GameRunState.INTERACT_RADIUS + 1.2f) * (GameRunState.INTERACT_RADIUS + 1.2f)) {
+            return EngineStepOutcome(
+                run.copy(
+                    fishingRemainingSec = 0f,
+                    fishingHoleId = null,
+                    lastStatusMessage = "Рыбалка прервана — вы отошли от лунки."
+                ),
+                base, false, "Рыбалка прервана — вы отошли от лунки."
+            )
+        }
+        val next = (run.fishingRemainingSec - deltaSeconds).coerceAtLeast(0f)
+        if (next > 0f) {
+            return EngineStepOutcome(
+                run.copy(fishingRemainingSec = next),
+                base, true,
+                "Рыбалка… до поклёвки ${next.toInt()} с."
+            )
+        }
+        val finished = run.copy(
+            fishingRemainingSec = 0f,
+            fishingHoleId = null,
+            // Силы за рыбалку уже списаны на старте — компенсируем повторное списание в fishAtHole
+            stamina = (run.stamina + FISHING_STAMINA_COST).coerceAtMost(GameRunState.MAX_STAT)
+        )
+        return fishAtHole(finished, base)
+    }
+
     fun fishAtHole(run: GameRunState, base: BaseProgress): EngineStepOutcome {
         if (!hasIceHoleNearby(run)) {
             val msg = "Подойдите ко льдовой лунке, чтобы ловить рыбу."
@@ -160,7 +242,7 @@ object AdvancedMechanics {
         val hole = run.currentLocationNodes().first { it.kind == WorldObjectKind.ICE_HOLE }
         val nextNodes = run.nodesByLocation.toMutableMap()
         nextNodes[run.currentLocation] = run.currentLocationNodes().map {
-            if (it.id == hole.id) it.copy(respawnRemainingSec = 25f) else it
+            if (it.id == hole.id) it.copy(respawnRemainingSec = GameRunState.FISHING_HOLE_COOLDOWN_SECONDS) else it
         }
         if (failed) {
             val msg = "Поклёвка оборвалась — рыба сорвалась с крючка."
@@ -288,4 +370,144 @@ object AdvancedMechanics {
         } else {
             base
         }
+
+    // ---------- Ящики с припасами: редкий лут ----------
+
+    /** Единица лута из ящика: ресурс и/или спецпредмет. */
+    data class CrateLootItem(
+        val titleRu: String,
+        val resourceType: ResourceType? = null,
+        val specialLootId: SpecialLootId? = null,
+        val amount: Int = 1
+    )
+
+    /**
+     * Бросок лута ящика. Обычные ящики (SUPPLY_CRATE): припасы + шанс оружия.
+     * Военные ящики (MILITARY_CRATE): почти всегда редкая вещь (аптечка/нож/сухпай).
+     */
+    fun rollCrateLoot(isMilitary: Boolean, seed: Long): List<CrateLootItem> {
+        val rng = Random(seed)
+        val loot = mutableListOf<CrateLootItem>()
+        if (isMilitary) {
+            val roll = rng.nextFloat()
+            loot += when (roll) {
+                in 0f..0.42f -> CrateLootItem(
+                    "Полевая аптечка", specialLootId = SpecialLootId.FIRST_AID_KIT
+                )
+                in 0.42f..0.72f -> CrateLootItem(
+                    "Охотничий нож", specialLootId = SpecialLootId.HUNTING_KNIFE
+                )
+                else -> CrateLootItem("Сухпай", specialLootId = SpecialLootId.SOLDIER_RATION)
+            }
+            if (roll > 0.86f) {
+                loot += CrateLootItem("Ткань", resourceType = ResourceType.CLOTH, amount = 2)
+            }
+        } else {
+            loot += CrateLootItem("Ткань", resourceType = ResourceType.CLOTH, amount = 2 + rng.nextInt(2))
+            val roll = rng.nextFloat()
+            when (roll) {
+                in 0f..0.24f -> loot +=
+                    CrateLootItem("Сухпай", specialLootId = SpecialLootId.SOLDIER_RATION)
+                in 0.24f..0.36f -> loot +=
+                    CrateLootItem("Охотничий нож", specialLootId = SpecialLootId.HUNTING_KNIFE)
+                in 0.36f..0.42f -> loot +=
+                    CrateLootItem("Полевая аптечка", specialLootId = SpecialLootId.FIRST_AID_KIT)
+                else -> if (roll > 0.93f) {
+                    loot += CrateLootItem("Доп. припасы", resourceType = ResourceType.MEAT, amount = 2)
+                }
+            }
+        }
+        return loot
+    }
+
+    /** Раздаёт лут из ящика в инвентарь. */
+    fun applyCrateLoot(run: GameRunState, loot: List<CrateLootItem>): GameRunState {
+        var inv = run.inventory
+        val titles = mutableListOf<String>()
+        for (item in loot) {
+            if (item.resourceType != null) {
+                val add = inv.tryAddResource(item.resourceType, item.amount)
+                inv = add.inventory
+                if (add.addedAmount > 0) titles += "${item.resourceType.titleRu} +${add.addedAmount}"
+            } else if (item.specialLootId != null) {
+                inv = inv.grantSpecialLoot(item.specialLootId, 1)
+                titles += item.specialLootId.titleRu
+            }
+        }
+        val msg = "Ящик вскрыт: ${titles.joinToString(", ")}."
+        return run.copy(inventory = inv, lastStatusMessage = msg)
+    }
+
+    // ---------- Хотбар: использование записей ----------
+
+    /**
+     * Использование записи хотбара: инструмент — экипировать,
+     * еда/расходник — съесть/применить. Пустая или опустевшая запись очищается.
+     */
+    fun consumeHotbarEntry(run: GameRunState, base: BaseProgress, index: Int): EngineStepOutcome {
+        val entry = run.hotbarAt(index)
+            ?: return EngineStepOutcome(run, base, false, "Слот хотбара пуст.")
+        entry.tool?.let { tool ->
+            return EngineStepOutcome(
+                run.copy(equippedTool = tool, lastStatusMessage = "В руках: ${tool.titleRu}."),
+                base, true, "В руках: ${tool.titleRu}."
+            )
+        }
+        entry.resourceType?.let { type ->
+            val outcome = SurvivalEngine.useResource(run, base, type)
+            val remaining = outcome.run.inventory.countOf(type)
+            val nextRun = if (remaining <= 0) {
+                outcome.run.withHotbarSlot(index, null)
+            } else {
+                outcome.run
+            }
+            return outcome.copy(run = nextRun)
+        }
+        entry.specialLootId?.let { special ->
+            val outcome = when (special) {
+                SpecialLootId.RESIN_TORCH -> SurvivalEngine.igniteResinTorch(run, base)
+                SpecialLootId.SOLDIER_RATION -> useSpecialConsumable(run, base, special)
+                SpecialLootId.FIRST_AID_KIT -> useSpecialConsumable(run, base, special)
+                else -> EngineStepOutcome(
+                    run.copy(lastStatusMessage = "«${special.titleRu}» используется в меню реликвий."),
+                    base, false, "«${special.titleRu}» используется в меню реликвий."
+                )
+            }
+            val remaining = outcome.run.inventory.specialCount(special)
+            val nextRun = if (special.isConsumable && remaining <= 0) {
+                outcome.run.withHotbarSlot(index, null)
+            } else {
+                outcome.run
+            }
+            return outcome.copy(run = nextRun)
+        }
+        return EngineStepOutcome(run, base, false, "Слот хотбара пуст.")
+    }
+
+    /** Применение расходуемого спецпредмета (сухпай, аптечка). */
+    fun useSpecialConsumable(
+        run: GameRunState,
+        base: BaseProgress,
+        id: SpecialLootId
+    ): EngineStepOutcome {
+        val after = run.inventory.consumeSpecialLoot(id, 1)
+            ?: return EngineStepOutcome(
+                run.copy(lastStatusMessage = "Нет «${id.titleRu}» в инвентаре."),
+                base, false, "Нет «${id.titleRu}» в инвентаре."
+            )
+        val (msg, patched) = when (id) {
+            SpecialLootId.SOLDIER_RATION -> "Съеден сухпай: +50 сытости, +12 тепла." to run.copy(
+                inventory = after,
+                hunger = (run.hunger + 50f).coerceAtMost(GameRunState.MAX_STAT),
+                warmth = (run.warmth + 12f).coerceAtMost(GameRunState.MAX_STAT),
+                stamina = (run.stamina + 15f).coerceAtMost(GameRunState.MAX_STAT)
+            )
+            SpecialLootId.FIRST_AID_KIT -> "Аптечка применена: +45 здоровья." to run.copy(
+                inventory = after,
+                health = (run.health + 45f).coerceAtMost(run.maxHealth)
+            )
+            else -> "Использовано: ${id.titleRu}." to run.copy(inventory = after)
+        }
+        return EngineStepOutcome(patched.copy(lastStatusMessage = msg), base, true, msg)
+    }
 }

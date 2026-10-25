@@ -65,25 +65,25 @@ enum class EquippedTool(
     AXE(
         titleRu = "Топор лесоруба",
         shortLabelRu = "Топор",
-        reachMeters = 4.1f,
+        reachMeters = 2.0f,
         swingDurationSec = 0.34f
     ),
     PICKAXE(
         titleRu = "Горняцкое кайло",
         shortLabelRu = "Кирка",
-        reachMeters = 4.0f,
+        reachMeters = 2.0f,
         swingDurationSec = 0.36f
     ),
     SPEAR(
         titleRu = "Охотничье копьё",
         shortLabelRu = "Копьё",
-        reachMeters = 5.3f,
+        reachMeters = 2.0f,
         swingDurationSec = 0.28f
     ),
     TORCH(
         titleRu = "Смоляной факел",
         shortLabelRu = "Факел",
-        reachMeters = 3.8f,
+        reachMeters = 2.0f,
         swingDurationSec = 0.32f
     )
 }

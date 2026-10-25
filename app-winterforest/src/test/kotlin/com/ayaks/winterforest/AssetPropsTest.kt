@@ -56,7 +56,7 @@ class AssetPropsTest {
         assertTrue(cabin.contains("gate"))
         assertTrue(cabin.contains("lantern"))
         val lake = AssetProps.forLocation(LocationId.FROZEN_LAKE).map { it.modelId }
-        assertTrue(lake.contains("fish"))
+        assertTrue(lake.contains("cache_crate"))
         val mine = AssetProps.forLocation(LocationId.ABANDONED_MINE).map { it.modelId }
         assertTrue(mine.contains("gate"))
         assertTrue(mine.contains("cache_crate"))

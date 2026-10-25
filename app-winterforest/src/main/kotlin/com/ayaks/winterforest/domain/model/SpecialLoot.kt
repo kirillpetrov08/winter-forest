@@ -61,6 +61,33 @@ enum class SpecialLootId(
         persistsAcrossRuns = true,
         isConsumable = false,
         isCraftable = false
+    ),
+    SOLDIER_RATION(
+        titleRu = "Сухпай",
+        titleEn = "Soldier Ration",
+        descriptionRu = "Редкий припас из ящиков: восстанавливает много сытости и немного тепла. Расходуемый предмет.",
+        sourceLocationNameRu = "Военные ящики",
+        persistsAcrossRuns = false,
+        isConsumable = true,
+        isCraftable = false
+    ),
+    HUNTING_KNIFE(
+        titleRu = "Охотничий нож",
+        titleEn = "Hunting Knife",
+        descriptionRu = "Редкое оружие из ящиков: +3 урона по зверям в ближнем бою до конца забега.",
+        sourceLocationNameRu = "Военные ящики",
+        persistsAcrossRuns = false,
+        isConsumable = false,
+        isCraftable = false
+    ),
+    FIRST_AID_KIT(
+        titleRu = "Полевая аптечка",
+        titleEn = "First Aid Kit",
+        descriptionRu = "Редкая вещь из военных ящиков: восстанавливает 45 здоровья. Расходуемый предмет.",
+        sourceLocationNameRu = "Военные ящики",
+        persistsAcrossRuns = false,
+        isConsumable = true,
+        isCraftable = false
     );
 
     companion object {

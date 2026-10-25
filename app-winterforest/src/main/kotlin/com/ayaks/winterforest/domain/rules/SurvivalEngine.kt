@@ -16,6 +16,7 @@ import com.ayaks.winterforest.domain.model.StarterLoadout
 import com.ayaks.winterforest.domain.model.UnlockStatus
 import com.ayaks.winterforest.domain.model.WildlifeEntity
 import com.ayaks.winterforest.domain.model.WildlifeKind
+import com.ayaks.winterforest.domain.model.WorldObjectKind
 import com.ayaks.winterforest.domain.model.WorkbenchRecipe
 import com.ayaks.winterforest.domain.world.WorldCollision
 import com.ayaks.winterforest.domain.world.WorldPopulator
@@ -393,7 +394,9 @@ object SurvivalEngine {
                         var nextAtkCd = (entity.attackCooldownSec - deltaSeconds).coerceAtLeast(0f)
 
                         if (entity.kind.isPredator) {
-                            if (nextFlee > 0f || nearCampfire || (playerHasFlame && distToPlayer < 8.5f)) {
+                            // Раненый зверь-хищник убегает и не возвращается в бой
+                            val woundedFlee = entity.hp < entity.kind.maxHp * 0.28f && distToPlayer < 14f
+                            if (nextFlee > 0f || woundedFlee || nearCampfire || (playerHasFlame && distToPlayer < 8.5f)) {
                                 // Волк боится огня и факела!
                                 nextHeading = atan2(-dzToPlayer, -dxToPlayer)
                                 speed = entity.kind.cruiseSpeedMps * 1.45f
@@ -402,21 +405,34 @@ object SurvivalEngine {
                                     eventMessage = "Пламя факела отпугнуло таёжного волка!"
                                 }
                             } else if (allowPredatorEngagement && distToPlayer < (if (nowNight) 15f else 10.5f)) {
+                                // ИИ преследования: подходит вплотную и кусает НА МЕСТЕ,
+                                // не крутясь вокруг игрока (сближение до 2 м, атака с паузой)
                                 nextHeading = atan2(dzToPlayer, dxToPlayer)
-                                speed = entity.kind.cruiseSpeedMps * (if (nowNight) 1.15f else 0.92f)
-                                if (distToPlayer <= 2.35f && nextAtkCd <= 0f) {
-                                    totalWolfDamage += 7.5f
-                                    nextAtkCd = 4.2f
-                                    eventMessage = "Таёжный волк атакует! Зажгите факел, костёр или бейте копьём!"
+                                val attackRange = 2.0f
+                                if (distToPlayer <= attackRange) {
+                                    speed = 0f
+                                    if (distToPlayer < 1.15f) {
+                                        // слишком близко — короткий отскок, чтобы не «слипаться» с игроком
+                                        nextHeading = atan2(-dzToPlayer, -dxToPlayer)
+                                        speed = entity.kind.cruiseSpeedMps * 0.30f
+                                    }
+                                    if (nextAtkCd <= 0f) {
+                                        totalWolfDamage += 9f
+                                        nextAtkCd = 3.2f
+                                        eventMessage = "Таёжный волк атакует! Зажгите факел, костёр или бейте копьём!"
+                                    }
+                                } else {
+                                    speed = entity.kind.cruiseSpeedMps * (if (nowNight) 1.15f else 0.95f)
                                 }
                             } else {
                                 nextHeading += sin(run.elapsedRealSeconds * 0.7f + idx * 1.9f) * 0.65f * deltaSeconds
                             }
                         } else {
-                            // Мирные зайцы и северные олени пасутся и стремительно убегают при приближении
-                            if (nextFlee > 0f || distToPlayer < 6.2f) {
+                            // Мирные зайцы/крысы и северные олени пасутся и стремительно убегают при приближении
+                            if (nextFlee > 0f || distToPlayer < 7.4f) {
                                 nextHeading = atan2(-dzToPlayer, -dxToPlayer)
                                 speed = entity.kind.cruiseSpeedMps * 1.75f
+                                nextFlee = maxOf(nextFlee, 2.2f)
                             } else {
                                 nextHeading += sin(run.elapsedRealSeconds * 0.55f + idx * 2.3f) * 0.85f * deltaSeconds
                                 speed = entity.kind.cruiseSpeedMps * 0.38f
@@ -609,11 +625,14 @@ object SurvivalEngine {
     ): EngineStepOutcome {
         val tool = run.equippedTool
         val ironHeadBonus = if (base.ironSpearCrafted) 12f else 0f
+        // Редкий нож из ящиков: +3 урона по зверям
+        val knifeBonus =
+            if (run.inventory.specialCount(SpecialLootId.HUNTING_KNIFE) > 0) 3f else 0f
         val damage = when (tool) {
-            EquippedTool.SPEAR -> (if (base.masterSpearCrafted) 58f else 36f) + ironHeadBonus
-            EquippedTool.AXE -> 28f
-            EquippedTool.PICKAXE -> 24f
-            EquippedTool.TORCH -> 18f
+            EquippedTool.SPEAR -> (if (base.masterSpearCrafted) 58f else 36f) + ironHeadBonus + knifeBonus
+            EquippedTool.AXE -> 28f + knifeBonus
+            EquippedTool.PICKAXE -> 24f + knifeBonus
+            EquippedTool.TORCH -> 18f + knifeBonus
         }
         val hitY = WorldPopulator.terrainHeight(run.currentLocation, target.x, target.z) + 0.6f
         val remainingHp = (target.hp - damage * AdvancedMechanics.hunterDamageMultiplier(base)).coerceAtLeast(0f)
@@ -744,6 +763,40 @@ object SurvivalEngine {
                 lastStatusMessage = msg
             )
             return EngineStepOutcome(updatedRun, updatedBase, true, msg)
+        }
+
+        // Ящики с припасами: основной лут + редкий дроп (нож/сухпай/аптечка).
+        // После вскрытия узел уходит в перезарядку и рисуется ОТКРЫТЫМ ящиком.
+        if (target.kind == WorldObjectKind.SUPPLY_CRATE || target.kind == WorldObjectKind.MILITARY_CRATE) {
+            val isMilitary = target.kind == WorldObjectKind.MILITARY_CRATE
+            val seed = target.id.hashCode().toLong() * 7919L + run.totalResourcesGathered * 13L +
+                run.elapsedRealSeconds.toLong()
+            val loot = AdvancedMechanics.rollCrateLoot(isMilitary, seed)
+            val looted = AdvancedMechanics.applyCrateLoot(run.copy(
+                swingAnimRemainingSec = run.equippedTool.swingDurationSec,
+                hitFeedbackTimerSec = 0.4f,
+                hitWorldX = target.x,
+                hitWorldY = hitY,
+                hitWorldZ = target.z
+            ), loot)
+            val updatedNodes = replaceNode(
+                run.nodesByLocation,
+                run.currentLocation,
+                target.copy(respawnRemainingSec = GameRunState.NODE_RESPAWN_SECONDS)
+            )
+            val (xp, lvl) = applyXpGain(looted.xp, looted.level, 14)
+            val msg = looted.lastStatusMessage
+            return EngineStepOutcome(
+                looted.copy(
+                    nodesByLocation = updatedNodes,
+                    xp = xp,
+                    level = lvl,
+                    totalResourcesGathered = run.totalResourcesGathered + loot.sumOf { it.amount }
+                ),
+                base,
+                true,
+                msg
+            )
         }
 
         val resType = target.resourceType ?: ResourceType.WOOD

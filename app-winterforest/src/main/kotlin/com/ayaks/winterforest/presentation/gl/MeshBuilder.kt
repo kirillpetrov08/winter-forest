@@ -777,7 +777,8 @@ class MeshBuilder(initialFloatsCapacity: Int = 16384) {
         val stride = sin(animPhase) * 0.34f
 
         when (kind) {
-            WildlifeKind.SNOW_HARE -> {
+            WildlifeKind.SNOW_HARE,
+                WildlifeKind.TAIGA_RAT -> {
                 val hop = abs(sin(animPhase * 0.85f)) * 0.14f
                 val by = groundY + 0.24f + hop
                 furBuilder.addShadowDisc(x, groundY, z, 0.42f, 0.30f)

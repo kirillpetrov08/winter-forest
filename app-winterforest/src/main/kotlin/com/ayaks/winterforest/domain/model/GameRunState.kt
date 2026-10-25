@@ -20,7 +20,9 @@ enum class WorldObjectKind {
     /** Лиственное дерево из пака Trees & Bushes (модель пользователя) — даёт Дерево. */
     OAK_TREE,
     /** Полевой куст из пака Trees & Bushes (модель пользователя) — даёт Ягоды. */
-    SCRUB_BUSH
+    SCRUB_BUSH,
+    /** Военный ящик с редким лутом (аптечка/нож/сухпай) — модель старого военного ящика. */
+    MILITARY_CRATE
 }
 
 @Serializable
@@ -40,6 +42,15 @@ enum class WildlifeKind(
         primaryDrop = ResourceType.MEAT,
         secondaryDrop = ResourceType.CLOTH,
         xpReward = 22,
+        isPredator = false
+    ),
+    TAIGA_RAT(
+        titleRu = "Тайная крыса",
+        maxHp = 12f,
+        cruiseSpeedMps = 2.9f,
+        primaryDrop = ResourceType.MEAT,
+        secondaryDrop = ResourceType.CLOTH,
+        xpReward = 12,
         isPredator = false
     ),
     NORTHERN_DEER(
@@ -123,6 +134,28 @@ data class TargetPromptInfo(
     val isSpecialRelic: Boolean = false
 )
 
+/**
+ * Запись хотбара быстрого доступа. Изначально все слоты ПУСТЫЕ —
+ * игрок сам наполняет их едой, инструментами и расходниками из рюкзака.
+ */
+@Serializable
+data class HotbarEntry(
+    val titleRu: String,
+    val iconPath: String,
+    val tool: EquippedTool? = null,
+    val resourceType: ResourceType? = null,
+    val specialLootId: SpecialLootId? = null
+) {
+    init {
+        requireNotNull(tool ?: resourceType ?: specialLootId) {
+            "HotbarEntry должен ссылаться на инструмент, ресурс или спецпредмет"
+        }
+    }
+
+    val isTool: Boolean get() = tool != null
+    val isConsumable: Boolean get() = resourceType != null || (specialLootId?.isConsumable == true)
+}
+
 @Serializable
 data class GameRunState(
     val phase: RunPhase = RunPhase.PLAYING,
@@ -168,6 +201,12 @@ data class GameRunState(
     val hitWorldX: Float = 0f,
     val hitWorldY: Float = 0f,
     val hitWorldZ: Float = 0f,
+    /** Рыбалка в процессе: сколько секунд осталось до поклёвки (0 = не рыбачит). */
+    val fishingRemainingSec: Float = 0f,
+    /** Узел лунки, у которой идёт рыбалка (для отмены при отходе). */
+    val fishingHoleId: String? = null,
+    /** Хотбар быстрого доступа: 6 слотов, изначально все пустые (заполняется вручную). */
+    val hotbarSlots: List<HotbarEntry?> = List(6) { null },
     val lastStatusMessage: String = "Осмотрите Базовую поляну и соберите дрова для костра."
 ) {
     val maxHealth: Float
@@ -246,11 +285,28 @@ data class GameRunState(
     }
 
     fun nearestInteractableWildlife(): WildlifeEntity? {
-        val reach = maxOf(4.2f, equippedTool.reachMeters)
+        val reach = maxOf(INTERACT_RADIUS, equippedTool.reachMeters)
         val reachSq = reach * reach
         return currentWildlife()
             .filter { it.isAlive && distSqToWildlife(it) <= reachSq }
             .minByOrNull { distSqToWildlife(it) }
+    }
+
+    /** Идёт ли рыбалка прямо сейчас. */
+    val isFishing: Boolean
+        get() = fishingRemainingSec > 0f
+
+    /** Запись хотбара в слоте [index] (0..5) либо null. */
+    fun hotbarAt(index: Int): HotbarEntry? =
+        hotbarSlots.getOrNull(index)
+
+    /** Копия состояния с записью хотбара [entry] в слот [index]. */
+    fun withHotbarSlot(index: Int, entry: HotbarEntry?): GameRunState {
+        if (index !in 0..5) return this
+        val next = hotbarSlots.toMutableList()
+        while (next.size < 6) next.add(null)
+        next[index] = entry
+        return copy(hotbarSlots = next.toList())
     }
 
     fun activeTargetPrompt(): TargetPromptInfo? {
@@ -370,10 +426,14 @@ data class GameRunState(
         const val SHELTER_CLOTH_COST = 2
         const val SHELTER_DURATION_SECONDS = 420f
         const val SHELTER_RADIUS_SQ = 7.5f * 7.5f
-        const val INTERACT_RADIUS = 3.8f
+        const val INTERACT_RADIUS = 2.0f
         const val INTERACT_RADIUS_SQ = INTERACT_RADIUS * INTERACT_RADIUS
         const val CAMPFIRE_WARMTH_RADIUS_SQ = 5.5f * 5.5f
         const val NODE_RESPAWN_SECONDS = 90f
+        /** Длительность процесса рыбалки (персонаж рыбачит, затем поклёвка). */
+        const val FISHING_PROCESS_SECONDS = 9f
+        /** Перезарядка лунки после рыбалки (лунка бесконечная — просто ждёт). */
+        const val FISHING_HOLE_COOLDOWN_SECONDS = 30f
         const val REST_COOLDOWN_SECONDS = 60f
         const val PORTABLE_FIRE_SECONDS = 75f
     }
