@@ -311,12 +311,33 @@ data class GameRunState(
     }
 
     /** Все узлы единого мира (районы сложены в одну карту). */
-    fun currentLocationNodes(): List<ResourceNode> =
-        nodesByLocation.values.asSequence().flatten().toList()
+    // §7.17: рендерер спрашивает узлы и фауну КАЖДЫЙ кадр; flatten() пяти
+    // районов на кадр аллоцировал список за списком. Кэш живёт до изменения
+    // карты узлов/фауны или района (copy() создаёт новый экземпляр → поля
+    // сбрасываются, transient-поля в сейв не пишутся).
+    @Transient private var cachedNodes: List<ResourceNode>? = null
+    @Transient private var cachedNodesMap: Map<LocationId, List<ResourceNode>>? = null
+    @Transient private var cachedWildlife: List<WildlifeEntity>? = null
+    @Transient private var cachedWildlifeMap: Map<LocationId, List<WildlifeEntity>>? = null
+
+    fun currentLocationNodes(): List<ResourceNode> {
+        val map = nodesByLocation
+        if (cachedNodesMap === map) return cachedNodes ?: emptyList()
+        val list = map.values.asSequence().flatten().toList()
+        cachedNodesMap = map
+        cachedNodes = list
+        return list
+    }
 
     /** Вся фауна единого мира. */
-    fun currentWildlife(): List<WildlifeEntity> =
-        wildlifeByLocation.values.asSequence().flatten().toList()
+    fun currentWildlife(): List<WildlifeEntity> {
+        val map = wildlifeByLocation
+        if (cachedWildlifeMap === map) return cachedWildlife ?: emptyList()
+        val list = map.values.asSequence().flatten().toList()
+        cachedWildlifeMap = map
+        cachedWildlife = list
+        return list
+    }
 
     /** §7.12: ближайший выброшенный предмет в радиусе взаимодействия. */
     fun nearestDroppedItem(): DroppedItem? =

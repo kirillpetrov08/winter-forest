@@ -1415,7 +1415,7 @@ class ForestGlRenderer(
         //    Позиции/повороты интерполируются между 20-герцевыми тиками — движение плавное,
         //    а фаза шага привязана к пройденному пути (лапы перебираются ровно тогда, когда зверь идёт).
         val frameNowNs = System.nanoTime()
-        val importedBeasts = ArrayList<BeastDraw>(4)
+        importedBeasts.clear()
         for ((idx, beast) in run.currentWildlife().withIndex()) {
             if (!beast.isAlive) continue
             val bs = beastSmoothOf(beast.id)
@@ -1460,7 +1460,16 @@ class ForestGlRenderer(
                 WildlifeKind.NORTHERN_DEER -> 1.3f
             }
             fur.addShadowDisc(bx, gy, bz, shadowR, 0.34f)
-            importedBeasts.add(BeastDraw(beast.kind, bx, gy, bz, bh, gait, moving))
+            val slot = importedBeasts.size
+            val draw = if (slot < beastPool.size) {
+                beastPool[slot].also {
+                    it.kind = beast.kind; it.x = bx; it.y = gy; it.z = bz
+                    it.heading = bh; it.gait = gait; it.moving = moving
+                }
+            } else {
+                BeastDraw(beast.kind, bx, gy, bz, bh, gait, moving).also { beastPool.add(it) }
+            }
+            importedBeasts.add(draw)
         }
 
         // 4. Всплеск 3D-щепы / искр в точке удара по дереву, руде или зверю
@@ -2180,15 +2189,19 @@ class ForestGlRenderer(
     }
 
     /** Модель зверя: тело + 4 ноги-сегмента с маятниковым шагом (перебирают ногами). */
+    // §7.17: переиспользуемые записи отрисовки зверей — без аллокаций в кадре
     private class BeastDraw(
-        val kind: WildlifeKind,
-        val x: Float,
-        val y: Float,
-        val z: Float,
-        val heading: Float,
-        val gait: Float,
-        val moving: Boolean
+        var kind: WildlifeKind,
+        var x: Float,
+        var y: Float,
+        var z: Float,
+        var heading: Float,
+        var gait: Float,
+        var moving: Boolean
     )
+
+    private val beastPool = ArrayList<BeastDraw>(8)
+    private val importedBeasts = ArrayList<BeastDraw>(8)
 
     private class LegPart(val vbo: GlVbo, val pivotX: Float, val pivotY: Float, val pivotZ: Float)
 
