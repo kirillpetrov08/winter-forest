@@ -409,9 +409,7 @@ private fun HotbarSlotChip(
             Text(
                 text = entry.titleRu,
                 color = SnowCrispText,
-                fontSize = 9.sp,
-                maxLines = 1,
-                overflow = androidx.compose.foundation.layout.Overflow.Ellipsis
+                fontSize = 9.sp
             )
         } else {
             Text(text = indexLabel, color = MistMutedText, fontSize = 10.sp)
