@@ -160,21 +160,16 @@ object ObjParser {
         private var cornerT = IntArray(16)
         private var cornerN = IntArray(16)
 
+        /**
+         * Годен ли треугольник: критична только позиция вершины. Битые ссылки на
+         * UV/нормаль не выбрасывают грань — она рисуется с UV (0,0) или нормалью
+         * (0,1,0) по умолчанию (см. [emit]). Так модель с испорченной таблицей
+         * vt остаётся видимой, а не исчезает целиком.
+         */
         private fun valid(vi: Int, ti: Int, ni: Int): Boolean {
             val vCount = pos.size / 3
             val vIndex = if (vi > 0) vi - 1 else vCount + vi
-            if (vIndex < 0 || vIndex >= vCount) return false
-            if (ni != 0) {
-                val nCount = nrm.size / 3
-                val nIndex = if (ni > 0) ni - 1 else nCount + ni
-                if (nIndex < 0 || nIndex >= nCount) return false
-            }
-            if (ti != 0) {
-                val tCount = uv.size / 2
-                val tIndex = if (ti > 0) ti - 1 else tCount + ti
-                if (tIndex < 0 || tIndex >= tCount) return false
-            }
-            return true
+            return vIndex >= 0 && vIndex < vCount
         }
 
         private fun emit(vi: Int, ti: Int, ni: Int) {
