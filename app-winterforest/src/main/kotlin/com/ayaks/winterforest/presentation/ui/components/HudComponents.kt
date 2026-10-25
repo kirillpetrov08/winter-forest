@@ -389,14 +389,24 @@ private fun HotbarSlotChip(
     ) {
         if (entry != null) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
+                val customIcon = entry.specialLootId?.let { rememberAssetIcon(specialLootIconPath(it)) }
                 when {
                     entry.isTool -> Text(
                         text = toolIcon(entry.tool!!),
                         fontSize = 20.sp
                     )
-                    entry.resourceType != null -> {
-                        Text(text = "📦", fontSize = 20.sp)
+                    entry.resourceType != null && customIcon == null -> {
+                        ResourceTypeGlyph(
+                            type = entry.resourceType!!,
+                            modifier = Modifier.size(26.dp)
+                        )
                     }
+                    customIcon != null -> androidx.compose.foundation.Image(
+                        bitmap = customIcon,
+                        contentDescription = entry.titleRu,
+                        modifier = Modifier.size(30.dp),
+                        contentScale = androidx.compose.ui.layout.ContentScale.Fit
+                    )
                     else -> Text(text = "📦", fontSize = 20.sp)
                 }
             }
@@ -486,6 +496,18 @@ fun assetIconNameFor(type: ResourceType): String = when (type) {
     ResourceType.BERRIES -> "icon_berries"
     ResourceType.RESIN -> "icon_resin"
     ResourceType.ICE -> "icon_ice"
+}
+
+/** Иконка редкого предмета в assets/icons (пустая строка, если файла ещё нет). */
+fun specialLootIconPath(id: SpecialLootId): String = when (id) {
+    SpecialLootId.OLD_MAP -> "icons/icon_old_map.png"
+    SpecialLootId.RESIN_TORCH -> "icons/icon_special_resin_torch.png"
+    SpecialLootId.THERMOS -> "icons/icon_thermos.png"
+    SpecialLootId.PICKAXE -> "icons/icon_special_pickaxe.png"
+    SpecialLootId.WARM_COAT -> "icons/icon_warm_coat.png"
+    SpecialLootId.SOLDIER_RATION -> "icons/icon_soldier_ration.png"
+    SpecialLootId.HUNTING_KNIFE -> "icons/icon_hunting_knife.png"
+    SpecialLootId.FIRST_AID_KIT -> "icons/icon_first_aid_kit.png"
 }
 
 /** Загрузка PNG из assets как ImageBitmap (с кэшем через remember). */
