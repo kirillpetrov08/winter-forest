@@ -54,27 +54,44 @@ run_gradle_step() {
   cat /tmp/ci_gradle_step.log
   if [ "$rc" -ne 0 ]; then
     python3 - "$label" /tmp/ci_gradle_step.log << 'PY'
-import pathlib, re, sys
+import glob, pathlib, re, sys, xml.etree.ElementTree as ET
 label = sys.argv[1]
 lines = pathlib.Path(sys.argv[2]).read_text(errors="replace").splitlines()
 
-# 1) Emit each Kotlin/Java compile error as its OWN file/line annotation (survives truncation)
+# 1) Kotlin/Java compile errors — по одной аннотации на файл/строку
 error_pat = re.compile(r"^[ew]: file://.+/winter-forest/(?:winter-forest/)?(.+?):(\d+)(?::\d+)?\s+(.*)$")
 emitted = 0
 for ln in lines:
     m = error_pat.match(ln)
-    if m and emitted < 40:
+    if m and emitted < 8:
         fpath, line_no, msg = m.group(1), m.group(2), m.group(3)
         msg = msg.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
-        print(f"::error file={fpath},line={line_no},title=Kotlin compile error::{msg}")
+        print(f"::error file={fpath},line={line_no},title=Compile::{msg}")
         emitted += 1
 
-# 2) Keep error lines + tail context so annotation stays well under 8 KB limit.
-# Сначала — имена упавших тестов и итоговая строка, иначе они обрезаются лимитом.
-failed_tests = [ln for ln in lines if re.search(r"> .+ FAILED$", ln.strip()) or "tests completed" in ln or "AssertionFailedError" in ln or ln.strip().startswith("Expected:") or ln.strip().startswith("Actual:")]
-interesting = [ln for ln in lines if any(k in ln for k in ("e: ", "FAILURE:", "What went wrong:", "> ", "Exception", "Error", "FAILED", "Unresolved", "Cannot"))]
-snippet = "\n".join((failed_tests[:20] + interesting[-25:] + ["--- TAIL ---"] + lines[-25:]))[-6500:]
-encoded = snippet.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+# 2) Упавшие юнит-тесты: имя + сообщение из JUnit XML
+for xml in sorted(glob.glob("app-winterforest/build/test-results/**/*.xml", recursive=True)):
+    try:
+        tree = ET.parse(xml)
+    except Exception:
+        continue
+    for case in tree.iter("testcase"):
+        for tag in ("failure", "error"):
+            node = case.find(tag)
+            if node is None:
+                continue
+            msg = (node.get("message") or node.text or "").strip().replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+            cls = case.get("classname") or ""
+            name = case.get("name") or ""
+            f = (cls.split(".")[-1] or "test") + ".kt"
+            print(f"::error file=app-winterforest/src/test/kotlin/com/ayaks/winterforest/{f},title=TEST FAILED::{cls} > {name} -> {msg[:600]}")
+
+# 3) Итоговая сводка
+failed_tests = [ln for ln in lines if re.search(r"> .+ FAILED$", ln.strip()) or "tests completed" in ln]
+interesting = [ln for ln in lines if any(k in ln for k in ("FAILURE:", "What went wrong:", "e: ", "Unresolved", "Cannot infer"))]
+tail = [ln for ln in lines if ln.startswith("> Task") or ln.startswith("BUILD")][-6:]
+snippet = "\n".join(failed_tests[:12] + interesting[:10] + ["--- TAIL ---"] + tail)
+encoded = snippet[:6000].replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
 print(f"::error title=GRADLE FAILED ({label})::{encoded}")
 PY
     exit "$rc"
