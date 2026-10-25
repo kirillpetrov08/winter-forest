@@ -898,11 +898,9 @@ object SurvivalEngine {
         val xpEarned = resType.xpReward * added
         val (nextXp, nextLevel) = applyXpGain(run.xp, run.level, xpEarned)
         val maxHp = GameRunState.BASE_MAX_HEALTH + (nextLevel - 1) * GameRunState.HEALTH_PER_LEVEL
-        val toolNote = if (requiredToolMissing) {
-            " Без профильного инструмента руками — только 1 ед. (−7 сил)."
-        } else {
-            ""
-        }
+        // §7.11: мягкого штрафа «руками 1 ед.» больше нет — профильные узлы
+        // без инструмента просто не добываются (жёсткий гейт выше)
+        val toolNote = 
         val msg = "Собрано: ${resType.titleRu} +$added (+$xpEarned опыта)$toolNote"
 
         val updatedRun = run.copy(
@@ -913,11 +911,7 @@ object SurvivalEngine {
             xp = nextXp,
             level = nextLevel,
             health = run.health.coerceAtMost(maxHp),
-            stamina = if (requiredToolMissing) {
-                (run.stamina - 7f).coerceIn(0f, GameRunState.MAX_STAT)
-            } else {
-                run.stamina
-            },
+            stamina = run.stamina,
             swingAnimRemainingSec = run.equippedTool.swingDurationSec,
             hitFeedbackTimerSec = 0.36f,
             hitWorldX = target.x,

@@ -29,8 +29,8 @@ object HudZones {
     const val RADAR_WIDTH_DP = 106f
 
     // --- нижняя строка: джойстик | хотбар | действия ---
-    const val JOYSTICK_DP = 148f
-    const val COMPACT_JOYSTICK_DP = 120f
+    const val JOYSTICK_DP = 148
+    const val COMPACT_JOYSTICK_DP = 120
     const val HOTBAR_SLOT_DP = 56
     const val COMPACT_HOTBAR_SLOT_DP = 46
     const val ACTIONS_WIDTH_DP = 150f
@@ -54,7 +54,7 @@ object HudZones {
             if (radarVisible(widthDp)) RADAR_WIDTH_DP else 0f
 
     fun joystickWidth(widthDp: Float): Float =
-        if (isCompact(widthDp)) COMPACT_JOYSTICK_DP else JOYSTICK_DP
+        if (isCompact(widthDp)) COMPACT_JOYSTICK_DP.toFloat() else JOYSTICK_DP.toFloat()
 
     fun hotbarWidth(widthDp: Float): Float {
         val slot = if (isCompact(widthDp)) COMPACT_HOTBAR_SLOT_DP else HOTBAR_SLOT_DP

@@ -337,7 +337,9 @@ fun GameScreen(
         val statsWidth = if (compact) HudZones.COMPACT_STATS_WIDTH_DP.dp else HudZones.STATS_WIDTH_DP.dp
         val slotSize = if (compact) HudZones.COMPACT_HOTBAR_SLOT_DP else HudZones.HOTBAR_SLOT_DP
         val joystickSize = if (compact) HudZones.COMPACT_JOYSTICK_DP else HudZones.JOYSTICK_DP
-        val actionsWidth = if (compact) HudZones.COMPACT_ACTIONS_WIDTH_DP else HudZones.ACTIONS_WIDTH_DP
+        val actionsWidth =
+            if (compact) HudZones.COMPACT_ACTIONS_WIDTH_DP.dp else HudZones.ACTIONS_WIDTH_DP.dp
+        val widthDp = maxWidth.value
 
         // 1. Живая 3D-сцена уже отрисовывается корневым PersistentForestScene —
         // здесь только прозрачный слой свайп-обзора камеры поверх неё.
@@ -367,7 +369,8 @@ fun GameScreen(
                 .fillMaxWidth()
                 .align(Alignment.TopCenter)
                 .displayCutoutPadding()
-                .padding(horizontal = 10.dp, top = 8.dp),
+                .padding(horizontal = 10.dp)
+                .padding(top = 8.dp),
             verticalAlignment = Alignment.Top
         ) {
             // 3a. Панель показателей и текущей цели дня (не закрывает обзор)
@@ -507,7 +510,7 @@ fun GameScreen(
                     }
                 }
 
-                if (HudZones.radarVisible(maxWidth.value)) {
+                if (HudZones.radarVisible(widthDp)) {
                     MiniRadarHud(run = run)
                 }
             }
@@ -525,7 +528,8 @@ fun GameScreen(
                 .fillMaxWidth()
                 .align(Alignment.BottomCenter)
                 .displayCutoutPadding()
-                .padding(horizontal = 10.dp, bottom = 10.dp),
+                .padding(horizontal = 10.dp)
+                .padding(bottom = 10.dp),
             verticalAlignment = Alignment.Bottom
         ) {
             VirtualJoystick(

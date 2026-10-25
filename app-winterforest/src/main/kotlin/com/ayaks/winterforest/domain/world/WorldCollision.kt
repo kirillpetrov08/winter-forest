@@ -62,8 +62,10 @@ object WorldCollision {
     private val CABIN_DOOR = floatArrayOf(-2.45f, -1.30f) // Z-диапазон проёма
 
     /**
-     * Полный набор препятствий локации: узлы ресурсов (когда доступны),
-     * декоративные поваленные стволы с валунами и строения.
+     * Полный набор препятствий локации: узлы ресурсов (когда доступны) и
+     * строения. Декоративных «фантомных» валунов больше нет (§7.10): раньше
+     * коллизия дублировалась парой кругов в (lx, lz) и (lx+1.3, lz-0.8), а
+     * рендер рисовал камень только во второй точке — игрок упирался в пустоту.
      */
     fun obstacles(loc: LocationId, nodes: List<ResourceNode>): Pair<List<Circle>, List<Rect>> {
         val circles = ArrayList<Circle>(nodes.size + 24)
@@ -98,17 +100,6 @@ object WorldCollision {
                 else -> continue
             }
             circles.add(Circle(node.x - ox, node.z - oz, r))
-        }
-
-        // Поваленные стволы + валуны (та же формула, что у декора в рендере)
-        for (i in 0 until 7) {
-            val a = i * 0.91f + 0.4f
-            val rDist = 13.5f + (i % 3) * 7.2f
-            if (loc == LocationId.FROZEN_LAKE && rDist <= 24.5f) continue
-            val lx = kotlin.math.cos(a) * rDist
-            val lz = kotlin.math.sin(a) * rDist
-            circles.add(Circle(lx, lz, 1.05f))
-            circles.add(Circle(lx + 1.3f, lz - 0.8f, 0.68f))
         }
 
         // Архитектура локаций

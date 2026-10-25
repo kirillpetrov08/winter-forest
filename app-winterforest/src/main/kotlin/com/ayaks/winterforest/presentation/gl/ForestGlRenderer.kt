@@ -660,10 +660,6 @@ class ForestGlRenderer(
                 val p = p0.copy(x = p0.x + region.cx, z = p0.z + region.cz)
                 byModel.getOrPut(p.modelId) { mutableListOf() }.add(p)
             }
-            for (p0 in generatedRockPlacements(region.id)) {
-                val p = p0.copy(x = p0.x + region.cx, z = p0.z + region.cz)
-                byModel.getOrPut(p.modelId) { mutableListOf() }.add(p)
-            }
         }
         // Модели животных НЕ пекутся в статику: они рисуются по месту через entityParts
         for ((modelId, spots0) in byModel) {
@@ -1091,27 +1087,6 @@ class ForestGlRenderer(
      * Декоративные камни мира: раньше рисовались процедурными «булыжниками»,
      * теперь это модели автора (rock_09 — светлый, rock_moss_* — тёмный).
      */
-    private fun generatedRockPlacements(loc: LocationId): List<AssetProps.Placement> {
-        val out = ArrayList<AssetProps.Placement>(14)
-        for (i in 0 until 7) {
-            val a = i * 0.91f + 0.4f
-            val rDist = 13.5f + (i % 3) * 7.2f
-            val lx = cos(a) * rDist
-            val lz = sin(a) * rDist
-            if (loc != LocationId.FROZEN_LAKE || rDist > 24.5f) {
-                val modelId = if (i % 2 == 0) "rock_09" else "rock_moss_a"
-                out.add(AssetProps.Placement(modelId, lx + 1.3f, lz - 0.8f, a * 1.7f, 0.52f))
-            }
-        }
-        if (loc == LocationId.ABANDONED_MINE) {
-            for ((i, zStep) in listOf(-18f, -10f, -2f, 6f, 14f, 22f).withIndex()) {
-                out.add(AssetProps.Placement("rock_moss_b", -4.6f, zStep + 2.2f, 0.7f + i * 0.9f, 1.35f))
-                out.add(AssetProps.Placement("rock_moss_a", 4.6f, zStep - 1.8f, 2.1f + i * 0.7f, 1.25f))
-            }
-        }
-        return out
-    }
-
     private fun rebuildInteractiveNodesVbo(
         nodes: List<ResourceNode>,
         playerX: Float,
@@ -1216,8 +1191,11 @@ class ForestGlRenderer(
                         .add(floatArrayOf(node.x, y, node.z, idx * 0.97f, 0.40f, 0.88f, 0.90f, 0.94f))
                 }
                 WorldObjectKind.RESIN_STUMP -> {
+                    // §7.10: смоляной ствол — авторская модель tree_bark (не процедурный
+                    // цилиндр): каждое видимое дерево в мире обязано быть узлом
                     foliage.addShadowDisc(node.x, y, node.z, 0.95f, 0.34f)
-                    bark.addTaperedCylinder(node.x, y, node.z, node.x, y + 0.98f, node.z, 0.46f, 0.38f, 10)
+                    nodeRockSpots.getOrPut("tree_bark") { mutableListOf() }
+                        .add(floatArrayOf(node.x, y, node.z, idx * 0.83f, 1.0f, 1f, 1f, 1f))
                     fire.addSculptedBoulder(node.x + 0.34f, y + 0.44f, node.z + 0.12f, 0.16f, 0.22f, 0.15f, 310 + idx, 1f, 0.72f, 0.16f, false)
                     fire.addSculptedBoulder(node.x - 0.28f, y + 0.62f, node.z - 0.20f, 0.12f, 0.16f, 0.12f, 340 + idx, 1f, 0.78f, 0.22f, false)
                 }

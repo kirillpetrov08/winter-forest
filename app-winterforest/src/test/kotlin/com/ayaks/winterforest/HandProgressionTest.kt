@@ -42,8 +42,9 @@ class HandProgressionTest {
             pineHit.run.currentLocationNodes().first { it.id == pine.id }.isAvailable
         )
 
-        val seam = run0.currentLocationNodes().first { it.kind == WorldObjectKind.IRON_VEIN }
-        val oreHit = SurvivalEngine.gatherNearest(run0.copy(playerX = seam.x, playerZ = seam.z), base)
+        // на Базовой поляне нет жилы: гейт камня проверяем на выходке породы
+        val outcrop0 = run0.currentLocationNodes().first { it.kind == WorldObjectKind.STONE_OUTCROP }
+        val oreHit = SurvivalEngine.gatherNearest(run0.copy(playerX = outcrop0.x, playerZ = outcrop0.z), base)
         assertFalse(oreHit.actionSucceeded)
         assertTrue(oreHit.message.contains("Примитивную кирку"))
     }
