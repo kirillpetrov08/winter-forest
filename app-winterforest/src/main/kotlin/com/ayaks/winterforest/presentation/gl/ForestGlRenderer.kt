@@ -1537,6 +1537,9 @@ class ForestGlRenderer(
         val cloth = builders[ProceduralTextureId.CLOTH]!!
         val fire = builders[ProceduralTextureId.FIRE_EMBER]!!
         val ice = builders[ProceduralTextureId.ICE]!!
+        val fur = builders[ProceduralTextureId.FUR_HIDE]!!
+        val timber = builders[ProceduralTextureId.TIMBER]!!
+        val metal = builders[ProceduralTextureId.METAL_STEEL]!!
         when (node.kind) {
 
                 WorldObjectKind.PINE_TREE -> {
