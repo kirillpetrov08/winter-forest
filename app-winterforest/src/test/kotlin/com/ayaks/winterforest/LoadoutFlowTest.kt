@@ -5,6 +5,7 @@ import com.ayaks.winterforest.domain.model.EquippedTool
 import com.ayaks.winterforest.domain.model.StarterLoadout
 import com.ayaks.winterforest.domain.rules.SurvivalEngine
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
