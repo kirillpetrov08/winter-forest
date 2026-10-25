@@ -398,10 +398,7 @@ private fun HotbarSlotChip(
                         fontSize = 20.sp
                     )
                     entry.resourceType != null -> {
-                        com.ayaks.winterforest.presentation.ui.components.ResourceTypeGlyph(
-                            type = entry.resourceType!!,
-                            modifier = Modifier.size(24.dp)
-                        )
+                        Text(text = "📦", fontSize = 20.sp)
                     }
                     else -> Text(text = "📦", fontSize = 20.sp)
                 }
@@ -416,6 +413,7 @@ private fun HotbarSlotChip(
             Text(text = "—", color = MistMutedText.copy(alpha = 0.5f), fontSize = 16.sp)
         }
     }
+}
 
 
 @Composable

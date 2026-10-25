@@ -455,6 +455,7 @@ fun GameScreen(
                 }
             }
         }
+        }
 
         // 5. Правый верхний узел: кнопки Лагеря / Меню + опциональный FPS + круговой 3D-радар
         Row(
@@ -1105,18 +1106,25 @@ private fun InventoryStorageTab(
                                 .border(1.dp, if (current != null) Color(0xFF7CC6FE) else Color(0x33FFFFFF), RoundedCornerShape(8.dp))
                         ) {
                             current?.let { entry ->
-                                com.ayaks.winterforest.presentation.ui.components.ResourceTypeGlyph(
-                                    type = entry.resourceType ?: ResourceType.WOOD,
-                                    modifier = Modifier.size(28.dp)
-                                )
+                                if (entry.resourceType != null) {
+                                    com.ayaks.winterforest.presentation.ui.components.ResourceTypeGlyph(
+                                        type = entry.resourceType!!,
+                                        modifier = Modifier.size(28.dp)
+                                    )
+                                } else {
+                                    Text(
+                                        text = "🔧",
+                                        fontSize = 20.sp,
+                                        modifier = Modifier.align(Alignment.Center)
+                                    )
+                                }
                             }
                         }
                         Text(
                             text = current?.titleRu ?: "Слот ${slotIdx + 1}",
                             color = if (current != null) SnowCrispText else MistMutedText,
                             fontSize = 9.5.sp,
-                            maxLines = 1,
-                            overflow = androidx.compose.foundation.layout.Overflow.Ellipsis
+                            maxLines = 1
                         )
                         if (selectedType != null && run != null && viewModel.canAssignToHotbar(selectedType!!)) {
                             Button(
