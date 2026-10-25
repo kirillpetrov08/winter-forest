@@ -900,7 +900,7 @@ object SurvivalEngine {
         val maxHp = GameRunState.BASE_MAX_HEALTH + (nextLevel - 1) * GameRunState.HEALTH_PER_LEVEL
         // §7.11: мягкого штрафа «руками 1 ед.» больше нет — профильные узлы
         // без инструмента просто не добываются (жёсткий гейт выше)
-        val toolNote = 
+        val toolNote = ""
         val msg = "Собрано: ${resType.titleRu} +$added (+$xpEarned опыта)$toolNote"
 
         val updatedRun = run.copy(

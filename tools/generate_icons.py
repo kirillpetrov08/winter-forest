@@ -576,6 +576,71 @@ def icon_soldier_ration():
     return finish(img, 83, 0.18)
 
 
+def icon_primitive_axe():
+    """Примитивный топор: деревянное топорище, колотый каменный камень-лезвие, кожаная обмотка."""
+    img = canvas(); d = ImageDraw.Draw(img)
+    ang = -0.72
+    ca, sa = math.cos(ang), math.sin(ang)
+    cx, cy = 512.0, 540.0
+
+    def pt(x, y):
+        return (cx + x * ca - y * sa, cy + x * sa + y * ca)
+
+    def poly(points, **kw):
+        d.polygon([pt(x, y) for x, y in points], **kw)
+
+    def rect(x0, y0, x1, y1, **kw):
+        poly([(x0, y0), (x1, y0), (x1, y1), (x0, y1)], **kw)
+
+    # топорище с изгибом
+    rect(-40, -26, 300, 26, fill="#7a5c38", outline="#43301c", width=8)
+    rect(-34, -18, 294, 18, fill="#8d6c44")
+    # колотое каменное лезвие (несимметричный скол — не «блоб»)
+    poly([(150, -96), (268, -64), (300, 6), (252, 84), (150, 70), (128, 0)],
+         fill="#8b929b", outline="#4a5058", width=8)
+    poly([(168, -70), (258, -44), (276, 4), (238, 62), (166, 50)], fill="#a2aab2")
+    poly([(196, -40), (246, -18), (238, 30), (196, 26)], fill="#6d747c")
+    # кожаная обмотка крепления
+    for k in range(4):
+        x = 96 + k * 26
+        rect(x, -44, x + 14, 44, fill="#5c4630", outline="#33261a", width=4)
+    rect(88, -50, 200, -34, fill="#6b543c", outline="#33261a", width=5)
+    rect(88, 34, 200, 50, fill="#6b543c", outline="#33261a", width=5)
+    return finish(img, 91, 0.22)
+
+
+def icon_primitive_pickaxe():
+    """Примитивная кирка: деревянное топорище и каменный клин, привязанный ремнем."""
+    img = canvas(); d = ImageDraw.Draw(img)
+    ang = -0.5
+    ca, sa = math.cos(ang), math.sin(ang)
+    cx, cy = 512.0, 520.0
+
+    def pt(x, y):
+        return (cx + x * ca - y * sa, cy + x * sa + y * ca)
+
+    def poly(points, **kw):
+        d.polygon([pt(x, y) for x, y in points], **kw)
+
+    def rect(x0, y0, x1, y1, **kw):
+        poly([(x0, y0), (x1, y0), (x1, y1), (x0, y1)], **kw)
+
+    # рукоять
+    rect(-260, -24, 240, 24, fill="#7a5c38", outline="#43301c", width=8)
+    rect(-254, -16, 234, 16, fill="#8d6c44")
+    # каменный клин-кирка: два скола к концам
+    poly([(-60, -34), (60, -34), (232, -8), (252, 4), (232, 16), (60, 40), (-60, 40),
+          (-232, 16), (-252, 4), (-232, -8)],
+         fill="#8b929b", outline="#4a5058", width=8)
+    poly([(-48, -22), (48, -22), (216, -2), (48, 28), (-48, 28), (-216, -2)], fill="#a2aab2")
+    poly([(-30, -10), (30, -10), (24, 14), (-24, 14)], fill="#6d747c")
+    # ремень крепления
+    rect(-34, -52, 34, 52, fill="#5c4630", outline="#33261a", width=5)
+    rect(-26, -60, 26, -44, fill="#6b543c", outline="#33261a", width=4)
+    rect(-26, 44, 26, 60, fill="#6b543c", outline="#33261a", width=4)
+    return finish(img, 93, 0.22)
+
+
 ICONS = [
     "icon_wood", "icon_stone", "icon_iron_ore", "icon_coal", "icon_cloth", "icon_hide", "icon_meat",
     "icon_fish", "icon_berries", "icon_resin", "icon_ice",
@@ -586,6 +651,7 @@ ICONS = [
     "icon_campfire", "icon_field_campfire", "icon_supply_crate", "icon_ice_hole", "icon_workbench",
     # лут военных ящиков (§7.5: у каждого предмета из ящика должна быть иконка)
     "icon_military_crate", "icon_first_aid_kit", "icon_hunting_knife", "icon_soldier_ration",
+    "icon_primitive_axe", "icon_primitive_pickaxe",
 ]
 
 

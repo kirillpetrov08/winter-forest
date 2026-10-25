@@ -855,6 +855,8 @@ private fun recipeIconPath(recipe: WorkbenchRecipe): String = when (recipe) {
     WorkbenchRecipe.CRAFT_IRON_AXE -> "icons/icon_axe.png"
     WorkbenchRecipe.CRAFT_IRON_PICKAXE -> "icons/icon_pickaxe.png"
     WorkbenchRecipe.CRAFT_IRON_SPEARHEAD -> "icons/icon_spear.png"
+    WorkbenchRecipe.CRAFT_PRIMITIVE_AXE -> "icons/icon_primitive_axe.png"
+    WorkbenchRecipe.CRAFT_PRIMITIVE_PICKAXE -> "icons/icon_primitive_pickaxe.png"
 }
 
 @Composable
