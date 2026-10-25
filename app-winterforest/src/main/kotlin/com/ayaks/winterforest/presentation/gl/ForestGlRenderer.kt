@@ -1120,6 +1120,10 @@ class ForestGlRenderer(
         // [x, y, z, yaw, scale, tintR, tintG, tintB] — камни-ресурсы моделями автора
         val nodeRockSpots = HashMap<String, MutableList<FloatArray>>()
         val terrainSteps = worldTerrainSteps(quality)
+        if (nodeCacheQuality != quality) {
+            nodeGeometryCache.clear()
+            nodeCacheQuality = quality
+        }
         val bark = builders[ProceduralTextureId.WOOD_BARK]!!
         val foliage = builders[ProceduralTextureId.PINE_FOLIAGE]!!
         val stone = builders[ProceduralTextureId.STONE]!!
@@ -1149,132 +1153,36 @@ class ForestGlRenderer(
             val ndz = node.z - playerZ
             if (ndx * ndx + ndz * ndz > 118f * 118f) continue
             val y = MeshBuilder.sampleWorldHeight(node.x, node.z, terrainSteps)
-            when (node.kind) {
-                WorldObjectKind.PINE_TREE -> {
-                    addDetailedPineTree(bark, foliage, node.x, y, node.z, scale = 0.94f + (idx % 4) * 0.11f, seed = 90 + idx)
+            // §7.17: геометрия узла печётся ОДИН раз на id узла и переиспользуется
+            // при каждой пересборке VBO (сбор ресурса больше не перегоняет
+            // процедурные ёлки/кусты заново — берём запечённые меши).
+            val cachedEntry = nodeGeometryCache.getOrPut(node.id) {
+                val tmp = EnumMap<ProceduralTextureId, MeshBuilder>(ProceduralTextureId::class.java)
+                for (mat in ProceduralTextureId.entries) {
+                    tmp[mat] = MeshBuilder(4096)
                 }
-                WorldObjectKind.BERRY_BUSH -> {
-                    foliage.addShadowDisc(node.x, y, node.z, 1.15f, 0.34f)
-                    foliage.addSpruceBoughTier(node.x, y + 0.08f, node.z, 0.92f, 0.88f, tips = 7, twistRad = idx * 0.6f)
-                    foliage.addSpruceBoughTier(node.x + 0.25f, y + 0.22f, node.z - 0.18f, 0.68f, 0.72f, tips = 6, twistRad = 1.1f)
-                    foliage.addSpruceBoughTier(node.x - 0.12f, y + 0.38f, node.z + 0.10f, 0.46f, 0.50f, tips = 6, twistRad = 2.05f)
-                    // Ягоды утоплены в крону: раньше шарики «висели» над кустом
-                    for (b in 0 until 7) {
-                        val ba = b * 0.9f + idx
-                        cloth.addSculptedBoulder(
-                            node.x + cos(ba) * 0.32f, y + 0.14f + (b % 3) * 0.11f, node.z + sin(ba) * 0.32f,
-                            0.075f, 0.075f, 0.075f, 60 + b, r = 1.0f, g = 0.16f, b = 0.20f, snowCapTint = false
-                        )
-                    }
+                val tmpSpots = HashMap<String, MutableList<FloatArray>>()
+                bakeNodeGeometry(tmp, node, idx, y, tmpSpots)
+                val baked = EnumMap<ProceduralTextureId, GlMesh>(ProceduralTextureId::class.java)
+                for (mat in ProceduralTextureId.entries) {
+                    val m = tmp[mat]!!.build()
+                    if (m.vertexCount > 0) baked[mat] = m
                 }
-                WorldObjectKind.STONE_OUTCROP -> {
-                    foliage.addShadowDisc(node.x, y, node.z, 1.55f, 0.36f)
-                    // Светлая порода автора (rock_09) — из неё падает Камень
-                    nodeRockSpots.getOrPut("rock_09") { mutableListOf() }
-                        .add(floatArrayOf(node.x, y, node.z, idx * 1.71f, 1.22f, 1f, 1f, 1f))
+                val spots = ArrayList<Pair<String, FloatArray>>()
+                for ((modelId, list) in tmpSpots) {
+                    for (spot in list) spots.add(modelId to spot)
                 }
-                WorldObjectKind.SUPPLY_CRATE, WorldObjectKind.MILITARY_CRATE -> {
-                    foliage.addShadowDisc(node.x, y, node.z, 0.72f, 0.34f)
-                    nodeRockSpots.getOrPut("cache_crate") { mutableListOf() }
-                        .add(floatArrayOf(node.x, y, node.z, idx * 0.7f, 1.0f, 1f, 1f, 1f))
-                }
-                WorldObjectKind.CLOTH_BUSH -> {
-                    // Куст технической конопли автора (0.54 м) — источник Ткани
-                    foliage.addShadowDisc(node.x, y, node.z, 0.42f, 0.32f)
-                    nodeRockSpots.getOrPut("cloth_bush") { mutableListOf() }
-                        .add(
-                            floatArrayOf(
-                                node.x, y, node.z,
-                                idx * 1.37f,
-                                0.92f + (idx % 4) * 0.09f,
-                                1f, 1f, 1f
-                            )
-                        )
-                }
-                WorldObjectKind.FALLEN_BRANCH -> {
-                    // сухие ветки автора: чередуем две модели, тонировка снегом
-                    foliage.addShadowDisc(node.x, y, node.z, 0.58f, 0.30f)
-                    val branchModel = if (idx % 2 == 0) "dry_branches_a" else "dry_branches_b"
-                    nodeRockSpots.getOrPut(branchModel) { mutableListOf() }
-                        .add(
-                            floatArrayOf(
-                                node.x, y, node.z,
-                                idx * 1.13f,
-                                0.86f + (idx % 3) * 0.12f,
-                                0.96f, 0.97f, 1.0f
-                            )
-                        )
-                }
-                WorldObjectKind.PEBBLES -> {
-                    // галька: тот же авторский валун, но мелкий и высветленный
-                    nodeRockSpots.getOrPut("rock_09") { mutableListOf() }
-                        .add(floatArrayOf(node.x, y, node.z, idx * 0.97f, 0.40f, 0.88f, 0.90f, 0.94f))
-                }
-                WorldObjectKind.RESIN_STUMP -> {
-                    // §7.10: смоляной ствол — авторская модель tree_bark (не процедурный
-                    // цилиндр): каждое видимое дерево в мире обязано быть узлом
-                    foliage.addShadowDisc(node.x, y, node.z, 0.95f, 0.34f)
-                    nodeRockSpots.getOrPut("tree_bark") { mutableListOf() }
-                        .add(floatArrayOf(node.x, y, node.z, idx * 0.83f, 1.0f, 1f, 1f, 1f))
-                    fire.addSculptedBoulder(node.x + 0.34f, y + 0.44f, node.z + 0.12f, 0.16f, 0.22f, 0.15f, 310 + idx, 1f, 0.72f, 0.16f, false)
-                    fire.addSculptedBoulder(node.x - 0.28f, y + 0.62f, node.z - 0.20f, 0.12f, 0.16f, 0.12f, 340 + idx, 1f, 0.78f, 0.22f, false)
-                }
-                WorldObjectKind.ICE_HOLE -> {
-                    for (r in 0 until 8) {
-                        val a = (r / 8f) * Math.PI.toFloat() * 2f
-                        ice.addSculptedBoulder(node.x + cos(a) * 0.82f, y + 0.08f, node.z + sin(a) * 0.82f, 0.24f, 0.14f, 0.22f, 410 + r)
-                    }
-                    ice.addShadowDisc(node.x, y + 0.09f, node.z, 0.72f, 0.88f)
-                    bark.addTaperedCylinder(node.x + 0.95f, y + 0.05f, node.z, node.x + 0.45f, y + 1.28f, node.z, 0.045f, 0.025f, 6)
-                }
-                WorldObjectKind.COAL_SEAM -> {
-                    foliage.addShadowDisc(node.x, y, node.z, 1.45f, 0.38f)
-                    // Угольная жила — тёмная тонировка светлой породы
-                    nodeRockSpots.getOrPut("rock_09") { mutableListOf() }
-                        .add(floatArrayOf(node.x, y, node.z, idx * 1.37f, 1.18f, 0.30f, 0.30f, 0.34f))
-                    nodeRockSpots.getOrPut("rock_moss_a") { mutableListOf() }
-                        .add(floatArrayOf(node.x + 0.52f, y - 0.05f, node.z + 0.34f, idx * 2.1f, 0.55f, 0.26f, 0.26f, 0.30f))
-                }
-                WorldObjectKind.IRON_VEIN -> {
-                    foliage.addShadowDisc(node.x, y, node.z, 1.45f, 0.38f)
-                    // Тёмная порода автора (rock_moss) — из неё падает Железная руда
-                    nodeRockSpots.getOrPut("rock_moss_b") { mutableListOf() }
-                        .add(floatArrayOf(node.x, y, node.z, idx * 1.13f, 1.12f, 1f, 1f, 1f))
-                    nodeRockSpots.getOrPut("rock_moss_a") { mutableListOf() }
-                        .add(floatArrayOf(node.x - 0.48f, y - 0.04f, node.z + 0.42f, idx * 2.31f, 0.62f, 1f, 1f, 1f))
-                }
-                WorldObjectKind.GAME_CARCASS -> {
-                    foliage.addShadowDisc(node.x, y, node.z, 1.10f, 0.36f)
-                    fur.addSculptedBoulder(node.x, y - 0.05f, node.z, 0.68f, 0.42f, 0.46f, 710 + idx, 0.72f, 0.56f, 0.44f)
-                }
-                WorldObjectKind.SPECIAL_CACHE -> {
-                    foliage.addShadowDisc(node.x, y, node.z, 1.35f, 0.44f)
-                    timber.addBox(node.x, y, node.z, 1.24f, 0.66f, 0.86f, 0.95f, 0.78f, 0.52f)
-                    metal.addBox(node.x, y + 0.66f, node.z, 1.28f, 0.16f, 0.90f, 1.0f, 0.88f, 0.55f)
-                    bark.addTaperedCylinder(node.x + 0.78f, y, node.z, node.x + 0.78f, y + 1.85f, node.z, 0.05f, 0.04f, 6)
-                }
-                // Лиственные деревья и полевые кусты пака Trees & Bushes (модель пользователя)
-                WorldObjectKind.OAK_TREE -> {
-                    foliage.addShadowDisc(node.x, y, node.z, 1.55f, 0.36f)
-                    val oakId = OAK_MODELS[idx % OAK_MODELS.size]
-                    nodeRockSpots.getOrPut(oakId) { mutableListOf() }
-                        .add(floatArrayOf(node.x, y, node.z, idx * 1.71f, 0.92f + (idx % 3) * 0.12f, 0.94f, 0.97f, 1f))
-                }
-                WorldObjectKind.SCRUB_BUSH -> {
-                    foliage.addShadowDisc(node.x, y, node.z, 1.05f, 0.34f)
-                    val bushId = SCRUB_MODELS[idx % SCRUB_MODELS.size]
-                    nodeRockSpots.getOrPut(bushId) { mutableListOf() }
-                        .add(floatArrayOf(node.x, y, node.z, idx * 2.13f, 0.94f + (idx % 3) * 0.10f, 0.96f, 0.97f, 1f))
-                    // Ягоды утоплены в крону куста — признак добычи
-                    for (b in 0 until 5) {
-                        val ba = b * 1.1f + idx
-                        cloth.addSculptedBoulder(
-                            node.x + cos(ba) * 0.28f, y + 0.30f + (b % 3) * 0.10f, node.z + sin(ba) * 0.28f,
-                            0.07f, 0.07f, 0.07f, 60 + b, r = 1.0f, g = 0.16f, b = 0.20f, snowCapTint = false
-                        )
-                    }
-                }
+                NodeGeometry(baked, spots)
             }
+            for ((mat, mesh) in cachedEntry.meshes) {
+                builders[mat]?.appendMesh(mesh)
+            }
+            // Авторские модели-«пятна» (камни, ящики, пни) реестрится КАЖДУЮ
+            // пересборку: nodeRockSpots живёт только на время одного вызова.
+            for ((modelId, spot) in cachedEntry.spots) {
+                nodeRockSpots.getOrPut(modelId) { mutableListOf() }.add(spot)
+            }
+
         }
 
         // §7.12: выброшенные предметы лежат процедурными модельками на снегу
@@ -1614,6 +1522,148 @@ class ForestGlRenderer(
                 timeSec = animTimeSec
             )
         }
+    }
+
+    /** Процедурная геометрия узла добычи (ели, кусты, пни, лунки) в свои батчи. */
+    private fun bakeNodeGeometry(
+        builders: EnumMap<ProceduralTextureId, MeshBuilder>,
+        node: ResourceNode,
+        idx: Int,
+        y: Float,
+        nodeRockSpots: HashMap<String, MutableList<FloatArray>>
+    ) {
+        val bark = builders[ProceduralTextureId.WOOD_BARK]!!
+        val foliage = builders[ProceduralTextureId.PINE_FOLIAGE]!!
+        val cloth = builders[ProceduralTextureId.CLOTH]!!
+        val fire = builders[ProceduralTextureId.FIRE_EMBER]!!
+        val ice = builders[ProceduralTextureId.ICE]!!
+        when (node.kind) {
+
+                WorldObjectKind.PINE_TREE -> {
+                    addDetailedPineTree(bark, foliage, node.x, y, node.z, scale = 0.94f + (idx % 4) * 0.11f, seed = 90 + idx)
+                }
+                WorldObjectKind.BERRY_BUSH -> {
+                    foliage.addShadowDisc(node.x, y, node.z, 1.15f, 0.34f)
+                    foliage.addSpruceBoughTier(node.x, y + 0.08f, node.z, 0.92f, 0.88f, tips = 7, twistRad = idx * 0.6f)
+                    foliage.addSpruceBoughTier(node.x + 0.25f, y + 0.22f, node.z - 0.18f, 0.68f, 0.72f, tips = 6, twistRad = 1.1f)
+                    foliage.addSpruceBoughTier(node.x - 0.12f, y + 0.38f, node.z + 0.10f, 0.46f, 0.50f, tips = 6, twistRad = 2.05f)
+                    // Ягоды утоплены в крону: раньше шарики «висели» над кустом
+                    for (b in 0 until 7) {
+                        val ba = b * 0.9f + idx
+                        cloth.addSculptedBoulder(
+                            node.x + cos(ba) * 0.32f, y + 0.14f + (b % 3) * 0.11f, node.z + sin(ba) * 0.32f,
+                            0.075f, 0.075f, 0.075f, 60 + b, r = 1.0f, g = 0.16f, b = 0.20f, snowCapTint = false
+                        )
+                    }
+                }
+                WorldObjectKind.STONE_OUTCROP -> {
+                    foliage.addShadowDisc(node.x, y, node.z, 1.55f, 0.36f)
+                    // Светлая порода автора (rock_09) — из неё падает Камень
+                    nodeRockSpots.getOrPut("rock_09") { mutableListOf() }
+                        .add(floatArrayOf(node.x, y, node.z, idx * 1.71f, 1.22f, 1f, 1f, 1f))
+                }
+                WorldObjectKind.SUPPLY_CRATE, WorldObjectKind.MILITARY_CRATE -> {
+                    foliage.addShadowDisc(node.x, y, node.z, 0.72f, 0.34f)
+                    nodeRockSpots.getOrPut("cache_crate") { mutableListOf() }
+                        .add(floatArrayOf(node.x, y, node.z, idx * 0.7f, 1.0f, 1f, 1f, 1f))
+                }
+                WorldObjectKind.CLOTH_BUSH -> {
+                    // Куст технической конопли автора (0.54 м) — источник Ткани
+                    foliage.addShadowDisc(node.x, y, node.z, 0.42f, 0.32f)
+                    nodeRockSpots.getOrPut("cloth_bush") { mutableListOf() }
+                        .add(
+                            floatArrayOf(
+                                node.x, y, node.z,
+                                idx * 1.37f,
+                                0.92f + (idx % 4) * 0.09f,
+                                1f, 1f, 1f
+                            )
+                        )
+                }
+                WorldObjectKind.FALLEN_BRANCH -> {
+                    // сухие ветки автора: чередуем две модели, тонировка снегом
+                    foliage.addShadowDisc(node.x, y, node.z, 0.58f, 0.30f)
+                    val branchModel = if (idx % 2 == 0) "dry_branches_a" else "dry_branches_b"
+                    nodeRockSpots.getOrPut(branchModel) { mutableListOf() }
+                        .add(
+                            floatArrayOf(
+                                node.x, y, node.z,
+                                idx * 1.13f,
+                                0.86f + (idx % 3) * 0.12f,
+                                0.96f, 0.97f, 1.0f
+                            )
+                        )
+                }
+                WorldObjectKind.PEBBLES -> {
+                    // галька: тот же авторский валун, но мелкий и высветленный
+                    nodeRockSpots.getOrPut("rock_09") { mutableListOf() }
+                        .add(floatArrayOf(node.x, y, node.z, idx * 0.97f, 0.40f, 0.88f, 0.90f, 0.94f))
+                }
+                WorldObjectKind.RESIN_STUMP -> {
+                    // §7.10: смоляной ствол — авторская модель tree_bark (не процедурный
+                    // цилиндр): каждое видимое дерево в мире обязано быть узлом
+                    foliage.addShadowDisc(node.x, y, node.z, 0.95f, 0.34f)
+                    nodeRockSpots.getOrPut("tree_bark") { mutableListOf() }
+                        .add(floatArrayOf(node.x, y, node.z, idx * 0.83f, 1.0f, 1f, 1f, 1f))
+                    fire.addSculptedBoulder(node.x + 0.34f, y + 0.44f, node.z + 0.12f, 0.16f, 0.22f, 0.15f, 310 + idx, 1f, 0.72f, 0.16f, false)
+                    fire.addSculptedBoulder(node.x - 0.28f, y + 0.62f, node.z - 0.20f, 0.12f, 0.16f, 0.12f, 340 + idx, 1f, 0.78f, 0.22f, false)
+                }
+                WorldObjectKind.ICE_HOLE -> {
+                    for (r in 0 until 8) {
+                        val a = (r / 8f) * Math.PI.toFloat() * 2f
+                        ice.addSculptedBoulder(node.x + cos(a) * 0.82f, y + 0.08f, node.z + sin(a) * 0.82f, 0.24f, 0.14f, 0.22f, 410 + r)
+                    }
+                    ice.addShadowDisc(node.x, y + 0.09f, node.z, 0.72f, 0.88f)
+                    bark.addTaperedCylinder(node.x + 0.95f, y + 0.05f, node.z, node.x + 0.45f, y + 1.28f, node.z, 0.045f, 0.025f, 6)
+                }
+                WorldObjectKind.COAL_SEAM -> {
+                    foliage.addShadowDisc(node.x, y, node.z, 1.45f, 0.38f)
+                    // Угольная жила — тёмная тонировка светлой породы
+                    nodeRockSpots.getOrPut("rock_09") { mutableListOf() }
+                        .add(floatArrayOf(node.x, y, node.z, idx * 1.37f, 1.18f, 0.30f, 0.30f, 0.34f))
+                    nodeRockSpots.getOrPut("rock_moss_a") { mutableListOf() }
+                        .add(floatArrayOf(node.x + 0.52f, y - 0.05f, node.z + 0.34f, idx * 2.1f, 0.55f, 0.26f, 0.26f, 0.30f))
+                }
+                WorldObjectKind.IRON_VEIN -> {
+                    foliage.addShadowDisc(node.x, y, node.z, 1.45f, 0.38f)
+                    // Тёмная порода автора (rock_moss) — из неё падает Железная руда
+                    nodeRockSpots.getOrPut("rock_moss_b") { mutableListOf() }
+                        .add(floatArrayOf(node.x, y, node.z, idx * 1.13f, 1.12f, 1f, 1f, 1f))
+                    nodeRockSpots.getOrPut("rock_moss_a") { mutableListOf() }
+                        .add(floatArrayOf(node.x - 0.48f, y - 0.04f, node.z + 0.42f, idx * 2.31f, 0.62f, 1f, 1f, 1f))
+                }
+                WorldObjectKind.GAME_CARCASS -> {
+                    foliage.addShadowDisc(node.x, y, node.z, 1.10f, 0.36f)
+                    fur.addSculptedBoulder(node.x, y - 0.05f, node.z, 0.68f, 0.42f, 0.46f, 710 + idx, 0.72f, 0.56f, 0.44f)
+                }
+                WorldObjectKind.SPECIAL_CACHE -> {
+                    foliage.addShadowDisc(node.x, y, node.z, 1.35f, 0.44f)
+                    timber.addBox(node.x, y, node.z, 1.24f, 0.66f, 0.86f, 0.95f, 0.78f, 0.52f)
+                    metal.addBox(node.x, y + 0.66f, node.z, 1.28f, 0.16f, 0.90f, 1.0f, 0.88f, 0.55f)
+                    bark.addTaperedCylinder(node.x + 0.78f, y, node.z, node.x + 0.78f, y + 1.85f, node.z, 0.05f, 0.04f, 6)
+                }
+                // Лиственные деревья и полевые кусты пака Trees & Bushes (модель пользователя)
+                WorldObjectKind.OAK_TREE -> {
+                    foliage.addShadowDisc(node.x, y, node.z, 1.55f, 0.36f)
+                    val oakId = OAK_MODELS[idx % OAK_MODELS.size]
+                    nodeRockSpots.getOrPut(oakId) { mutableListOf() }
+                        .add(floatArrayOf(node.x, y, node.z, idx * 1.71f, 0.92f + (idx % 3) * 0.12f, 0.94f, 0.97f, 1f))
+                }
+                WorldObjectKind.SCRUB_BUSH -> {
+                    foliage.addShadowDisc(node.x, y, node.z, 1.05f, 0.34f)
+                    val bushId = SCRUB_MODELS[idx % SCRUB_MODELS.size]
+                    nodeRockSpots.getOrPut(bushId) { mutableListOf() }
+                        .add(floatArrayOf(node.x, y, node.z, idx * 2.13f, 0.94f + (idx % 3) * 0.10f, 0.96f, 0.97f, 1f))
+                    // Ягоды утоплены в крону куста — признак добычи
+                    for (b in 0 until 5) {
+                        val ba = b * 1.1f + idx
+                        cloth.addSculptedBoulder(
+                            node.x + cos(ba) * 0.28f, y + 0.30f + (b % 3) * 0.10f, node.z + sin(ba) * 0.28f,
+                            0.07f, 0.07f, 0.07f, 60 + b, r = 1.0f, g = 0.16f, b = 0.20f, snowCapTint = false
+                        )
+                    }
+                }
+            }
     }
 
     /**
@@ -2201,6 +2251,15 @@ class ForestGlRenderer(
     )
 
     private val beastPool = ArrayList<BeastDraw>(8)
+
+    /** §7.17: запечённая геометрия узлов по id (переживает пересборки VBO). */
+    private val nodeGeometryCache = HashMap<String, NodeGeometry>()
+    private var nodeCacheQuality: GraphicsQuality? = null
+
+    private class NodeGeometry(
+        val meshes: EnumMap<ProceduralTextureId, GlMesh>,
+        val spots: List<Pair<String, FloatArray>>
+    )
     private val importedBeasts = ArrayList<BeastDraw>(8)
 
     private class LegPart(val vbo: GlVbo, val pivotX: Float, val pivotY: Float, val pivotZ: Float)

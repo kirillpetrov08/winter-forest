@@ -149,6 +149,26 @@ class MeshBuilder(initialFloatsCapacity: Int = 16384) {
         floatSize += GlMesh.FLOATS_PER_VERTEX
     }
 
+    /**
+     * §7.17: быстрое присоединение уже запечённой геометрии (без пересчёта
+     * нормалей): используется кэшем геометрии узлов, чтобы пересборка VBO
+     * при сборе ресурса не гоняла процедурные построители заново.
+     */
+    fun appendMesh(mesh: GlMesh) {
+        val src = mesh.vertexBuffer
+        for (i in 0 until mesh.vertexCount) {
+            val o = i * GlMesh.FLOATS_PER_VERTEX
+            if (floatSize + GlMesh.FLOATS_PER_VERTEX > data.size) {
+                data = data.copyOf(data.size * 2)
+            }
+            val w = floatSize
+            for (k in 0 until GlMesh.FLOATS_PER_VERTEX) {
+                data[w + k] = src.get(o + k)
+            }
+            floatSize += GlMesh.FLOATS_PER_VERTEX
+        }
+    }
+
     fun addQuad(
         x0: Float, y0: Float, z0: Float,
         x1: Float, y1: Float, z1: Float,
