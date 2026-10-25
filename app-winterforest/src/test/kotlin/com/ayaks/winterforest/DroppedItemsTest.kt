@@ -60,16 +60,17 @@ class DroppedItemsTest {
     @Test
     fun `pickup with full inventory keeps item on ground`() {
         val base = BaseProgress()
-        var full = Inventory()
-        for (i in 0 until Inventory.MAX_SLOTS) {
-            full = full.tryAddResource(ResourceType.WOOD, 1).inventory
-        }
-        // заполняем под завязку разными типами, чтобы камень не куда было класть
+        // Забиваем ВСЕ 20 слотов полными стаками (циклом по типам кроме
+        // камня): стаки одного типа не сливаются сверх MAX_STACK_SIZE,
+        // поэтому каждый вызов занимает новый слот.
         var inv = Inventory()
         val types = ResourceType.entries.filter { it != ResourceType.STONE }
-        for (t in types.take(Inventory.MAX_SLOTS)) {
-            inv = inv.tryAddResource(t, Inventory.MAX_STACK_SIZE).inventory
+        var ti = 0
+        while (inv.occupiedSlots < Inventory.MAX_SLOTS) {
+            inv = inv.tryAddResource(types[ti % types.size], Inventory.MAX_STACK_SIZE).inventory
+            ti++
         }
+        assertTrue(inv.isFull)
         val run0 = SurvivalEngine.createNewRun(base).copy(inventory = inv)
         val withDrop = run0.copy(
             droppedItems = listOf(
@@ -83,6 +84,6 @@ class DroppedItemsTest {
         assertFalse(picked.actionSucceeded)
         assertTrue(picked.message.contains("Инвентарь полон"))
         assertEquals(1, picked.run.droppedItems.size)
-        assertEquals(full.occupiedSlots, Inventory.MAX_SLOTS)
+        assertEquals(Inventory.MAX_SLOTS, inv.occupiedSlots)
     }
 }
