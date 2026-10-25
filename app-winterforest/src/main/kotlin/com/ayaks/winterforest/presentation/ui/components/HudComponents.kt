@@ -516,12 +516,33 @@ fun rememberAssetIcon(path: String): androidx.compose.ui.graphics.ImageBitmap? {
     val context = androidx.compose.ui.platform.LocalContext.current
     return remember(path) {
         runCatching {
+            // Иконки в ассетах — 1024² (глифы 512²), а в HUD рисуются 40–64 dp.
+            // Полный декод стоил 4 МБ на иконку: десяток иконок на экране — 40+ МБ
+            // heap и постоянные GC-паузы на слабых устройствах. Декодируем с
+            // inSampleSize под целевые ~192 px (≈256 КБ на иконку).
+            val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
             context.assets.open(path).use { stream ->
-                android.graphics.BitmapFactory.decodeStream(stream)?.asImageBitmap()
+                android.graphics.BitmapFactory.decodeStream(stream, null, bounds)
+            }
+            var sample = 1
+            while (bounds.outWidth / (sample * 2) >= ICON_TARGET_PX &&
+                bounds.outHeight / (sample * 2) >= ICON_TARGET_PX
+            ) {
+                sample *= 2
+            }
+            val opts = android.graphics.BitmapFactory.Options().apply {
+                inSampleSize = sample
+                inPreferredConfig = android.graphics.Bitmap.Config.ARGB_8888
+            }
+            context.assets.open(path).use { stream ->
+                android.graphics.BitmapFactory.decodeStream(stream, null, opts)?.asImageBitmap()
             }
         }.getOrNull()
     }
 }
+
+/** Целевой размер декодирования иконок HUD, px (≈64 dp на xhdpi-xxhdpi). */
+private const val ICON_TARGET_PX = 192
 
 /**
  * Кнопка с внутренним кулдауном: фон заполняется слева направо по прогрессу

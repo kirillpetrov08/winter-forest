@@ -4,6 +4,7 @@ import com.ayaks.winterforest.domain.model.LocationId
 import com.ayaks.winterforest.domain.model.ResourceNode
 import com.ayaks.winterforest.domain.model.WorldObjectKind
 import com.ayaks.winterforest.domain.world.WorldCollision
+import com.ayaks.winterforest.domain.world.WorldRegions
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -66,8 +67,54 @@ class WorldCollisionTest {
     fun `inside shelter detection`() {
         assertTrue(WorldCollision.isInsideShelter(LocationId.BASE_CLEARING, -6.8f, -5.8f))
         assertFalse(WorldCollision.isInsideShelter(LocationId.BASE_CLEARING, 2.5f, 1.5f))
-        assertTrue(WorldCollision.isInsideShelter(LocationId.HUNTERS_CABIN, 7.2f, 128.8f))
+        // комната зимовья: модель стоит под 3.6 рад, «внутри» считается по её осям
+        val room = cabinWorld(-0.25f, -2.22f)
+        assertTrue(WorldCollision.isInsideShelter(LocationId.HUNTERS_CABIN, room[0], room[1]))
+        assertFalse(WorldCollision.isInsideShelter(LocationId.HUNTERS_CABIN, cabinWorld(-3.0f, -2.22f)[0], cabinWorld(-3.0f, -2.22f)[1]))
         assertFalse(WorldCollision.isInsideShelter(LocationId.DENSE_SPRUCE, 0f, 0f))
+    }
+
+    /** Точка в мире по локальным координатам модели зимовья (центр — 7.2 / 8.8). */
+    private fun cabinWorld(dx: Float, dz: Float): FloatArray {
+        val c = kotlin.math.cos(3.6f)
+        val s = kotlin.math.sin(3.6f)
+        val (ox, oz) = WorldRegions.centerOf(LocationId.HUNTERS_CABIN)
+        return floatArrayOf(ox + 7.2f + dx * c + dz * s, oz + 8.8f - dx * s + dz * c)
+    }
+
+    @Test
+    fun `hunter cabin has rotated wall boxes`() {
+        val walls = WorldCollision.cabinWalls()
+        assertEquals(6, walls.size) // 4 стены с проёмом в восточной + очаг
+        walls.forEach { assertEquals(3.6f, it.yaw, 1e-4f) }
+    }
+
+    @Test
+    fun `hunter cabin west wall pushes out along model axes`() {
+        // локально X -1.9 — снаружи западной стены, Z -2.2 — середина длинной стены
+        val p = cabinWorld(-1.9f, -2.2f)
+        val r = WorldCollision.resolveFor(LocationId.HUNTERS_CABIN, emptyList(), p[0], p[1])
+        val (ox, oz) = WorldRegions.centerOf(LocationId.HUNTERS_CABIN)
+        val c = kotlin.math.cos(3.6f)
+        val s = kotlin.math.sin(3.6f)
+        val dx = r[0] - ox - 7.2f
+        val dz = r[1] - oz - 8.8f
+        val lx = dx * c - dz * s
+        assertTrue("игрока вытолкнуло вплотную к стене, lx=$lx", lx <= -1.55f + 0.05f)
+    }
+
+    @Test
+    fun `hunter cabin doorway is passable`() {
+        // заходим через проём: локально Z -1.87, X снаружи 1.30 -> внутрь 0.40
+        val outside = cabinWorld(1.30f, -1.87f)
+        val r = WorldCollision.resolveFor(LocationId.HUNTERS_CABIN, emptyList(), outside[0], outside[1])
+        assertEquals("проём не должен выталкивать", outside[0], r[0], 1e-3f)
+        assertEquals(outside[1], r[1], 1e-3f)
+        // и внутри сруба игрок не застревает
+        val inside = cabinWorld(-0.4f, -2.2f)
+        val ri = WorldCollision.resolveFor(LocationId.HUNTERS_CABIN, emptyList(), inside[0], inside[1])
+        assertEquals(inside[0], ri[0], 1e-3f)
+        assertEquals(inside[1], ri[1], 1e-3f)
     }
 
     @Test

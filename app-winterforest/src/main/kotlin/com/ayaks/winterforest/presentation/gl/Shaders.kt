@@ -77,6 +77,13 @@ object Shaders {
                 litColor = texel.rgb;
             } else {
                 vec3 N = normalize(vNormal);
+                // Двустороннее освещение: back-face culling выключен, и у листвы/карт
+                // половина граней смотрит «внутрь» (в bush_thicket 24% нормалей
+                // инвертированы). Разворачиваем нормаль к камере — иначе такие грани
+                // получают ambient без солнца и выглядят чёрными пятнами.
+                if (!gl_FrontFacing) {
+                    N = -N;
+                }
                 vec3 V = normalize(uCameraPos - vWorldPos);
                 vec3 Lsun = normalize(uSunDir);
 

@@ -29,8 +29,8 @@ object AssetProps {
         "dry_branches_a", "dry_branches_b", "tree_bark",
         "cabin_wood", "cabin_bark", "cabin_stone", "cabin_shingle", "cabin_burned",
         "wolf_body", "deer_body", "rat_body",
-        "spear", "pickaxe", "fence", "winter_tree", "workbench", "barrel",
-        "gate", "lantern", "cache_crate", "cache_crate_open", "woodstack", "crate",
+        "spear", "pickaxe", "winter_tree", "workbench", "barrel",
+        "gate", "lantern", "cache_crate", "cache_crate_open", "woodstack", "crate", "cloth_bush",
         "oak_a", "oak_b", "oak_c", "bush_green", "bush_dry", "bush_thicket"
     )
 
@@ -66,11 +66,13 @@ object AssetProps {
             Placement("bush_thicket", 12.4f, -3.2f, 1.9f, 1.0f, 0.97f, 0.97f, 1.0f)
         )
         LocationId.HUNTERS_CABIN -> listOf(
-            Placement("cabin_wood", 7.2f, 8.8f, 3.6f, 0.78f),
-            Placement("cabin_bark", 7.2f, 8.8f, 3.6f, 0.78f),
-            Placement("cabin_stone", 7.2f, 8.8f, 3.6f, 0.78f),
-            Placement("cabin_shingle", 7.2f, 8.8f, 3.6f, 0.78f),
-            Placement("cabin_burned", 7.2f, 8.8f, 3.6f, 0.78f),
+            // Масштаб 1.0: сруб высотой 1.86 м. При 0.78 крыша опускалась до 1.45 м —
+            // ниже камеры игрока (1.72 м), и печная труба с подсветкой торчали сквозь неё.
+            Placement("cabin_wood", 7.2f, 8.8f, 3.6f, 1.0f),
+            Placement("cabin_bark", 7.2f, 8.8f, 3.6f, 1.0f),
+            Placement("cabin_stone", 7.2f, 8.8f, 3.6f, 1.0f),
+            Placement("cabin_shingle", 7.2f, 8.8f, 3.6f, 1.0f),
+            Placement("cabin_burned", 7.2f, 8.8f, 3.6f, 1.0f),
             Placement("fire_pit", 4.5f, 6.3f, 1.1f, 0.72f),
             Placement("rock_moss_b", 9.9f, 5.1f, 1.5f, 1.0f),
             Placement("rock_09", 3.2f, 11.6f, 2.2f, 1.1f),
