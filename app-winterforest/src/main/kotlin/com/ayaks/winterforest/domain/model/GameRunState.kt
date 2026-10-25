@@ -137,12 +137,38 @@ enum class RunPhase {
     DEAD
 }
 
+/**
+ * §7.12: предмет, выброшенный на землю. Лежит моделью в мире, подбирается
+ * кнопкой «Подобрать» в радиусе взаимодействия. Сериализуется в сейв.
+ */
+@Serializable
+data class DroppedItem(
+    val id: String,
+    val resourceType: ResourceType? = null,
+    val specialLootId: SpecialLootId? = null,
+    val count: Int = 1,
+    val x: Float,
+    val z: Float,
+    val yawRad: Float = 0f
+) {
+    init {
+        require(count >= 1) { "Выброшенный предмет не может быть пустым" }
+        require(resourceType != null || specialLootId != null) {
+            "Выброшенный предмет должен быть ресурсом или спецлутoм"
+        }
+    }
+
+    val titleRu: String get() = resourceType?.titleRu ?: specialLootId?.titleRu ?: "Предмет"
+}
+
 data class TargetPromptInfo(
     val labelRu: String,
     val actionVerbRu: String,
     val distanceMeters: Float,
     val isHostile: Boolean = false,
     val isSpecialRelic: Boolean = false,
+    /** §7.12: цель — предмет на земле, кнопка превращается в «Подобрать». */
+    val isDroppedItem: Boolean = false,
     /** Иконка цели из assets/icons (ящики, находки); null — иконки нет. */
     val iconPath: String? = null
 )
@@ -220,6 +246,8 @@ data class GameRunState(
     val fishingHoleId: String? = null,
     /** Хотбар быстрого доступа: 6 слотов, изначально все пустые (заполняется вручную). */
     val hotbarSlots: List<HotbarEntry?> = List(6) { null },
+    /** §7.12: предметы, выброшенные на землю в текущем забеге. */
+    val droppedItems: List<DroppedItem> = emptyList(),
     val lastStatusMessage: String = "Осмотрите Базовую поляну и соберите дрова для костра."
 ) {
     val maxHealth: Float
@@ -290,6 +318,12 @@ data class GameRunState(
     fun currentWildlife(): List<WildlifeEntity> =
         wildlifeByLocation.values.asSequence().flatten().toList()
 
+    /** §7.12: ближайший выброшенный предмет в радиусе взаимодействия. */
+    fun nearestDroppedItem(): DroppedItem? =
+        droppedItems
+            .filter { (it.x - playerX) * (it.x - playerX) + (it.z - playerZ) * (it.z - playerZ) <= INTERACT_RADIUS_SQ }
+            .minByOrNull { (it.x - playerX) * (it.x - playerX) + (it.z - playerZ) * (it.z - playerZ) }
+
     fun nearestInteractableNode(): ResourceNode? {
         val reachSq = maxOf(INTERACT_RADIUS, equippedTool.reachMeters).let { it * it }
         return currentLocationNodes()
@@ -323,6 +357,18 @@ data class GameRunState(
     }
 
     fun activeTargetPrompt(): TargetPromptInfo? {
+        // Предмет на земле важнее узла/зверя: стоим на нём — хотим подобрать
+        val nearDrop = nearestDroppedItem()
+        if (nearDrop != null) {
+            val d = hypot(nearDrop.x - playerX, nearDrop.z - playerZ)
+            return TargetPromptInfo(
+                labelRu = nearDrop.titleRu,
+                actionVerbRu = "Подобрать",
+                distanceMeters = d,
+                isDroppedItem = true,
+                iconPath = nearDrop.specialLootId?.iconPath
+            )
+        }
         val nearNode = nearestInteractableNode()
         // Ящики отвечают раньше ветки находок: у военного ящика specialLootId
         // задан как ГАРАНТИРОВАННЫЙ лут, но подсказка должна быть «Вскрыть ящик»,

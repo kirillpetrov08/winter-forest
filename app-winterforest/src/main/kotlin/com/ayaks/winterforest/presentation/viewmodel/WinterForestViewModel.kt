@@ -13,6 +13,7 @@ import com.ayaks.winterforest.domain.model.GameRunState
 import com.ayaks.winterforest.domain.model.GraphicsQuality
 import com.ayaks.winterforest.domain.model.LocationId
 import com.ayaks.winterforest.domain.model.ResourceType
+import com.ayaks.winterforest.domain.model.SpecialLootId
 import com.ayaks.winterforest.domain.model.RunPhase
 import com.ayaks.winterforest.domain.model.StarterLoadout
 import com.ayaks.winterforest.domain.model.WorkbenchRecipe
@@ -525,6 +526,24 @@ class WinterForestViewModel(
         }
         persistCheckpointAsync()
     }
+
+    /** §7.12: подобрать предмет под прицелом. */
+    fun onPickupNearestDropped() = applyEngineAction(cooldownId = "pickup", cooldownSec = 0.6f) { run, base ->
+        val item = run.nearestDroppedItem()
+            ?: return@applyEngineAction EngineStepOutcome(run, base, false, "Рядом нет предметов.")
+        SurvivalEngine.pickupDroppedItem(run, base, item.id)
+    }
+
+    /** §7.12: выбросить ресурс выбранной ячейки рюкзака перед собой. */
+    fun onDropResourceToGround(type: ResourceType) =
+        applyEngineAction(cooldownId = "drop", cooldownSec = 0.6f) { run, base ->
+            SurvivalEngine.dropItemNearPlayer(run, base, resourceType = type)
+        }
+
+    fun onDropSpecialToGround(id: SpecialLootId) =
+        applyEngineAction(cooldownId = "drop", cooldownSec = 0.6f) { run, base ->
+            SurvivalEngine.dropItemNearPlayer(run, base, specialLootId = id)
+        }
 
     /** §7.3: сортировка рюкзака перетаскиванием — обмен двух ячеек сетки. */
     fun onSwapInventoryCells(a: Int, b: Int) {

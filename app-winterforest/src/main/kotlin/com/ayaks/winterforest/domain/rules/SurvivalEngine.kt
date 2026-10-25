@@ -618,6 +618,77 @@ object SurvivalEngine {
         return gatherNearest(run, base, withToolStrikeBonus)
     }
 
+    /**
+     * §7.12: выбросить предмет из инвентаря на землю перед игроком.
+     * Ресурс снимается со стака (1 ед. за бросок), спецпредмет — целиком.
+     */
+    fun dropItemNearPlayer(
+        run: GameRunState,
+        base: BaseProgress,
+        resourceType: ResourceType? = null,
+        specialLootId: SpecialLootId? = null
+    ): EngineStepOutcome {
+        if (resourceType == null && specialLootId == null) {
+            return EngineStepOutcome(run, base, false, "Нечего выбрасывать.")
+        }
+        val nextInv = when {
+            resourceType != null ->
+                run.inventory.tryConsumeResource(resourceType, 1) ?: return EngineStepOutcome(
+                    run, base, false, "Нет ${resourceType.titleRu} в рюкзаке."
+                )
+            else ->
+                run.inventory.consumeSpecialLoot(specialLootId!!) ?: return EngineStepOutcome(
+                    run, base, false, "Нет предмета «${specialLootId.titleRu}»."
+                )
+        }
+        val yawRad = Math.toRadians(run.yawDeg.toDouble()).toFloat()
+        val dx = kotlin.math.sin(yawRad) * 1.25f
+        val dz = -kotlin.math.cos(yawRad) * 1.25f
+        val item = com.ayaks.winterforest.domain.model.DroppedItem(
+            id = "drop_${run.elapsedRealSeconds.toInt()}_${run.droppedItems.size}",
+            resourceType = resourceType,
+            specialLootId = specialLootId,
+            count = 1,
+            x = run.playerX + dx,
+            z = run.playerZ + dz,
+            yawRad = yawRad
+        )
+        val title = item.titleRu
+        val msg = "Выброшено: $title."
+        return EngineStepOutcome(
+            run.copy(
+                inventory = nextInv,
+                droppedItems = run.droppedItems + item,
+                lastStatusMessage = msg
+            ),
+            base, true, msg
+        )
+    }
+
+    /** §7.12: подобрать предмет с земли кнопкой «Подобрать». */
+    fun pickupDroppedItem(run: GameRunState, base: BaseProgress, itemId: String): EngineStepOutcome {
+        val item = run.droppedItems.firstOrNull { it.id == itemId }
+            ?: return EngineStepOutcome(run, base, false, "Предмет уже подобран.")
+        val withLoot = if (item.resourceType != null) {
+            val add = run.inventory.tryAddResource(item.resourceType, item.count)
+            if (add.isFullBlocked) {
+                val msg = "Инвентарь полон (${Inventory.MAX_SLOTS}/${Inventory.MAX_SLOTS} слотов)!"
+                return EngineStepOutcome(run.copy(lastStatusMessage = msg), base, false, msg)
+            }
+            run.copy(inventory = add.inventory)
+        } else {
+            run.copy(inventory = run.inventory.grantSpecialLoot(item.specialLootId!!, item.count))
+        }
+        val msg = "Подобрано: ${item.titleRu}."
+        return EngineStepOutcome(
+            withLoot.copy(
+                droppedItems = run.droppedItems.filterNot { it.id == itemId },
+                lastStatusMessage = msg
+            ),
+            base, true, msg
+        )
+    }
+
     fun strikeWildlifeTarget(
         run: GameRunState,
         base: BaseProgress,

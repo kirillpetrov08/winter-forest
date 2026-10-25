@@ -525,10 +525,19 @@ fun GameScreen(
         // 4. НИЖНЯЯ строка: джойстик | хотбар | действия
         val targetPrompt = run.activeTargetPrompt()
         val primaryLabel = when {
+            targetPrompt?.isDroppedItem == true -> "Подобрать"
             targetPrompt?.isSpecialRelic == true -> "Забрать находку"
             targetPrompt != null -> targetPrompt.actionVerbRu
             else -> "Удар (${run.equippedTool.shortLabelRu})"
         }
+        // §7.12: кнопка действия подбирает предмет с земли, когда цель — дроп
+        val primaryCooldownId = if (targetPrompt?.isDroppedItem == true) "pickup" else "strike"
+        val onPrimaryAction: () -> Unit =
+            if (targetPrompt?.isDroppedItem == true) {
+                { viewModel.onPickupNearestDropped() }
+            } else {
+                { viewModel.onActionStrike() }
+            }
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -595,9 +604,9 @@ fun GameScreen(
 
                 com.ayaks.winterforest.presentation.ui.components.CooldownButton(
                     label = primaryLabel,
-                    cooldownRemainingSec = state.cooldowns["strike"] ?: 0f,
+                    cooldownRemainingSec = state.cooldowns[primaryCooldownId] ?: 0f,
                     cooldownTotalSec = 1.0f,
-                    onClick = { viewModel.onActionStrike() },
+                    onClick = onPrimaryAction,
                     modifier = Modifier.width(actionsWidth).height(48.dp)
                 )
 
@@ -1288,6 +1297,15 @@ private fun InventoryStorageTab(
                                     Text("Использовать", fontSize = 11.sp)
                                 }
                             }
+                            if (run != null) {
+                                OutlinedButton(
+                                    onClick = { viewModel.onDropResourceToGround(selectedSlot.type) },
+                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                                    modifier = Modifier.height(34.dp)
+                                ) {
+                                    Text("Выбросить", fontSize = 11.sp)
+                                }
+                            }
                         }
                     }
 
@@ -1314,6 +1332,11 @@ private fun InventoryStorageTab(
                                 if (run != null && loot == SpecialLootId.RESIN_TORCH) {
                                     Button(onClick = { viewModel.onIgniteResinTorch() }) {
                                         Text("Зажечь", fontSize = 11.sp)
+                                    }
+                                }
+                                if (run != null && !loot.persistsAcrossRuns) {
+                                    OutlinedButton(onClick = { viewModel.onDropSpecialToGround(loot) }) {
+                                        Text("Выбросить", fontSize = 11.sp)
                                     }
                                 }
                             }
