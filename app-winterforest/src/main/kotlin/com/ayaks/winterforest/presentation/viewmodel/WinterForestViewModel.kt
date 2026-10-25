@@ -231,6 +231,7 @@ class WinterForestViewModel(
             AppDestination.MAIN_MENU -> AppDestination.MAIN_MENU
             AppDestination.GAME -> AppDestination.MAIN_MENU
             AppDestination.RESULTS -> AppDestination.MAIN_MENU
+            AppDestination.LOADOUT_SELECT -> AppDestination.MAIN_MENU
             AppDestination.BASE_INVENTORY ->
                 if (cur.previousDestination == AppDestination.GAME && cur.hasActiveSave) {
                     AppDestination.GAME

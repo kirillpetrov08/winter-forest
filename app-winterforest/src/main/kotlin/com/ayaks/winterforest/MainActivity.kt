@@ -42,6 +42,7 @@ import com.ayaks.winterforest.presentation.navigation.AppDestination
 import com.ayaks.winterforest.presentation.ui.screens.AboutScreen
 import com.ayaks.winterforest.presentation.ui.screens.BaseInventoryScreen
 import com.ayaks.winterforest.presentation.ui.screens.GameScreen
+import com.ayaks.winterforest.presentation.ui.screens.LoadoutSelectScreen
 import com.ayaks.winterforest.presentation.ui.screens.MainMenuScreen
 import com.ayaks.winterforest.presentation.ui.screens.ResultsScreen
 import com.ayaks.winterforest.presentation.ui.screens.SettingsScreen
