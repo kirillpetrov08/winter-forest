@@ -1,7 +1,6 @@
 package com.ayaks.winterforest
 
 import com.ayaks.winterforest.domain.model.BaseProgress
-import com.ayaks.winterforest.domain.model.BaseUpgradeType
 import com.ayaks.winterforest.domain.model.EquippedTool
 import com.ayaks.winterforest.domain.model.Inventory
 import com.ayaks.winterforest.domain.model.ResourceType
@@ -70,18 +69,17 @@ class HandProgressionTest {
         val base0 = BaseProgress()
         val run0 = SurvivalEngine.createNewRun(base0)
 
-        // верстак 1-го уровня ставится на старте базы (первый уровень бесплатен)
-        val bench = SurvivalEngine.upgradeBaseStructure(run0, base0, BaseUpgradeType.WORKBENCH)
-        assertTrue(bench.actionSucceeded)
-        assertEquals(1, bench.base.workbenchLevel)
+        // верстак 1-го уровня есть у базы с самого начала — примитивные
+        // инструменты крафтятся сразу из собранных руками палок и гальки
+        assertEquals(1, base0.workbenchLevel)
 
-        val stocked = bench.run.copy(
+        val stocked = run0.copy(
             inventory = Inventory()
                 .tryAddResource(ResourceType.WOOD, 6).inventory
                 .tryAddResource(ResourceType.STONE, 6).inventory
         )
 
-        val axe = SurvivalEngine.craftAtWorkbench(stocked, bench.base, WorkbenchRecipe.CRAFT_PRIMITIVE_AXE)
+        val axe = SurvivalEngine.craftAtWorkbench(stocked, base0, WorkbenchRecipe.CRAFT_PRIMITIVE_AXE)
         assertTrue(axe.actionSucceeded)
         assertEquals(EquippedTool.AXE, axe.run.equippedTool)
 

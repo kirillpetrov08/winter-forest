@@ -36,9 +36,9 @@ class LoadoutFlowTest {
         val kits = StarterLoadout.entries.map { it.items }
         assertEquals(kits.size, kits.toSet().size)
         for (loadout in StarterLoadout.entries) {
-            assertEquals(3, loadout.titleRu.length.coerceAtLeast(3))
-            assert(loadout.items.isNotEmpty())
-            assert(loadout.descriptionRu.isNotBlank())
+            assertTrue("${loadout.name}: пустой набор", loadout.items.isNotEmpty())
+            assertTrue("${loadout.name}: пустое описание", loadout.descriptionRu.isNotBlank())
+            assertTrue("${loadout.name}: короткое имя", loadout.titleRu.length >= 4)
         }
     }
 }
