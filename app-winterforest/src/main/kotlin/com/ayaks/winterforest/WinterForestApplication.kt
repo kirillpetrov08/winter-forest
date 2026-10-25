@@ -29,7 +29,7 @@ class AppContainer(application: Application) {
         WinterForestDatabase::class.java,
         WinterForestDatabase.DATABASE_NAME
     )
-        .fallbackToDestructiveMigration()
+        .fallbackToDestructiveMigration(dropAllTables = true)
         .build()
 
     val settingsDataStore: SettingsDataStore = SettingsDataStore.create(application)

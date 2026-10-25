@@ -1126,7 +1126,7 @@ private fun InventoryStorageTab(
                             fontSize = 9.5.sp,
                             maxLines = 1
                         )
-                        if (selectedType != null && run != null && viewModel.canAssignToHotbar(selectedType!!)) {
+                        if (selectedType != null && run != null && viewModel.canAssignToHotbar(selectedType)) {
                             Button(
                                 onClick = { viewModel.onAssignHotbarFromInventory(slotIdx, selectedType!!) },
                                 contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),

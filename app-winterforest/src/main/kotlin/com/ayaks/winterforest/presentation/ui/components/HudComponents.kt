@@ -367,7 +367,6 @@ private fun toolIcon(tool: EquippedTool): String = when (tool) {
     EquippedTool.PICKAXE -> "⛏️"
     EquippedTool.SPEAR -> "🎯"
     EquippedTool.TORCH -> "🔥"
-    else -> "🔧"
 }
 
 /** Ячейка слота хотбара: иконка + подпись, либо пустая ячейка. */
@@ -489,7 +488,6 @@ fun assetIconNameFor(type: ResourceType): String = when (type) {
     ResourceType.BERRIES -> "icon_berries"
     ResourceType.RESIN -> "icon_resin"
     ResourceType.ICE -> "icon_ice"
-    else -> "icon_stone"
 }
 
 /** Загрузка PNG из assets как ImageBitmap (с кэшем через remember). */

@@ -212,17 +212,6 @@ object ProceduralTextures {
                         g = (0.83f * shade).coerceIn(0f, 1f)
                         b = (0.79f * shade).coerceIn(0f, 1f)
                     }
-
-                    else -> {
-                        // Фолбэк для новых материалов (профлист/бетон/мешковина/сруб/тент/угли)
-                        val base = fbm(u * 6f, v * 6f, octaves = 4, seed = seed + 313)
-                        val detail = ridgedFbm(u * 18f, v * 18f, octaves = 3, seed = seed + 407)
-                        val shade = (0.42f + 0.36f * base + 0.22f * detail).coerceIn(0.12f, 1f)
-                        val warm = 0f
-                        r = (shade * (0.92f + warm)).coerceIn(0f, 1f)
-                        g = (shade * 0.93f).coerceIn(0f, 1f)
-                        b = (shade * 0.95f).coerceIn(0f, 1f)
-                    }
                 }
 
                 pixels[idx] = packArgb(a, r, g, b)
