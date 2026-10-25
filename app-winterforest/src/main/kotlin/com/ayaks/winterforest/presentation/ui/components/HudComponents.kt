@@ -354,7 +354,6 @@ fun QuickEquipmentHotbar(
             HotbarSlotChip(
                 indexLabel = (slotIdx + 1).toString(),
                 entry = entry,
-                selected = false,
                 onClick = { onUseSlot(slotIdx) }
             )
         }
@@ -374,7 +373,6 @@ private fun toolIcon(tool: EquippedTool): String = when (tool) {
 private fun HotbarSlotChip(
     indexLabel: String,
     entry: com.ayaks.winterforest.domain.model.HotbarEntry?,
-    selected: Boolean,
     onClick: () -> Unit
 ) {
     val bg = FrostedCardSurface.copy(alpha = 0.72f)
