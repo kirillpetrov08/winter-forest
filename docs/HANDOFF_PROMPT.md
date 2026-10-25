@@ -1,7 +1,7 @@
 # WINTER FOREST — промпт передачи смены (полный контекст проекта)
 
 > Этот файл — готовый промпт. Скопируйте его целиком в новый чат как **первое сообщение**.
-> Всё, что ниже, — правда о репозитории на коммите `e6f15bf` (ветка `arena/155c7e9b-winter-forest`; он же `185b7c3` + этот документ).
+> Всё, что ниже, — правда о репозитории на ветке `arena/155c7e9b-winter-forest` (HEAD — docs-коммит поверх `185b7c3`; сверься через `git log --oneline -3`).
 > Читать до конца, ничего не додумывать «по памяти».
 
 ---
@@ -36,10 +36,10 @@
 
 ```
 repo:      github.com/kirillpetrov08/winter-forest
-ветка:     arena/155c7e9b-winter-forest   (HEAD e6f15bf, запушена)
+ветка:     arena/155c7e9b-winter-forest   (HEAD ≈ 1d569f0, запушена)
 PR:        #14 открыт, arena/155c7e9b-winter-forest -> main, +259318 / −2179448 в 45 файлах
 main:      0d8e379  ("67": пользователь запушил models/cloth.blend)
-CI:        прогон 40229824473 на e6f15bf — SUCCESS (до него 40215335910 на 185b7c3 — SUCCESS)
+CI:        все прогоны ветки — SUCCESS (проверить: gh run list --branch arena/155c7e9b-winter-forest)
 артефакт: winter-forest-release-and-debug-outputs ≈ 245 МБ (debug APK + release APK + AAB внутри zip)
 ```
 
@@ -467,7 +467,7 @@ gh run watch <run_id> --exit-status --interval 30
 
 ## 11. Первые шаги (рекомендованный порядок)
 
-1. `git fetch && git log --oneline -3` — убедиться, что HEAD = `e6f15bf` (или новее).
+1. `git fetch && git log --oneline -3` — ветка должна стоять на docs-коммите поверх `185b7c3`.
 2. **7.16 (краш) и 7.1 (загрузка)** — самые быстрые и самые заметные; правятся точечно.
 3. **7.9 (чёрное пятно неба)** — правка шейдера + перегенерация `sun_disc/moon_disc`.
 4. **7.6 (олень + зайцы)** — правка меша скриптом + чистка enum/ростеров.
@@ -498,7 +498,7 @@ gh run watch <run_id> --exit-status --interval 30
 | Военных ящиков 10 (2×5) | `WorldPopulator.kt:296-301` |
 | Ассеты: 101 МБ (models 50, textures 45) | `du -sh` |
 | 34 модели, 88 тестов, 14 232 строки main | подсчёт |
-| CI зелёный на `e6f15bf` | run `40229824473` (+ `40215335910` на `185b7c3`) |
+| CI зелёный на ветке | `gh run list --branch arena/155c7e9b-winter-forest` → последний `success` |
 
 ---
 
