@@ -405,15 +405,29 @@ fun GameScreen(
             }
         }
 
-        // 4. Строка активного таймера — под верхней панелью, чтобы не перекрывать «Меню»
+        // 4. Кнопка «Восстановить ресурсы» — кверху экрана, освобождает игровую зону
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             modifier = Modifier
                 .align(Alignment.TopCenter)
-                .padding(top = 64.dp)
+                .padding(top = 8.dp)
                 .width(340.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp)
+            verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
+            Button(
+                onClick = { viewModel.onRestoreResources() },
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
+                modifier = Modifier.width(220.dp).height(40.dp)
+            ) {
+                Text("Восстановить ресурсы", fontSize = 12.sp)
+            }
+
+            // Строка активного таймера — под кнопкой восстановления
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier.width(340.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
             val activeTimer = run.activeSkippableTimer()
             if (activeTimer != null) {
                 Row(
@@ -440,6 +454,7 @@ fun GameScreen(
                     }
                 }
             }
+        }
         }
 
         // 5. Правый верхний узел: кнопки Лагеря / Меню + опциональный FPS + круговой 3D-радар
@@ -503,13 +518,10 @@ fun GameScreen(
                 .padding(start = 14.dp, bottom = 10.dp)
         )
 
-        // 7. Нижний центральный 6-слотовый хотбар: инструменты, еда и установка костра
+        // 7. Нижний центральный хотбар: 6 пустых слотов, заполняются из рюкзака
         QuickEquipmentHotbar(
             run = run,
-            onSelectTool = { viewModel.onEquipTool(it) },
-            onIgniteOrEquipTorch = { viewModel.onIgniteResinTorch() },
-            onQuickEat = { viewModel.onActionQuickUse() },
-            onPlaceCampfire = { viewModel.onPlaceFieldCampfire() },
+            onUseSlot = { viewModel.onUseHotbar(it) },
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .padding(bottom = 10.dp)
@@ -1059,6 +1071,74 @@ private fun InventoryStorageTab(
                         }
                     }
                 }
+            // Хотбар быстрого доступа: 6 слотов, заполняются вручную из рюкзака
+            HorizontalDivider(color = Color(0x33FFFFFF))
+            Text(
+                "Хотбар быстрого доступа",
+                fontWeight = FontWeight.Bold,
+                color = HearthAmberAccent,
+                fontSize = 12.sp
+            )
+            Text(
+                "Перетащите еду, инструменты и расходники из рюкзака в слоты хотбара — они будут доступны одной кнопкой в игре.",
+                color = MistMutedText,
+                fontSize = 10.5.sp
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                for (slotIdx in 0..5) {
+                    val current = run?.hotbarAt(slotIdx)
+                    Column(
+                        modifier = Modifier
+                            .width(64.dp)
+                            .height(72.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .width(52.dp)
+                                .height(52.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Color(0x18FFFFFF))
+                                .border(1.dp, if (current != null) Color(0xFF7CC6FE) else Color(0x33FFFFFF), RoundedCornerShape(8.dp))
+                        ) {
+                            current?.let { entry ->
+                                if (entry.resourceType != null) {
+                                    com.ayaks.winterforest.presentation.ui.components.ResourceTypeGlyph(
+                                        type = entry.resourceType!!,
+                                        modifier = Modifier.size(28.dp)
+                                    )
+                                } else {
+                                    Text(
+                                        text = "🔧",
+                                        fontSize = 20.sp,
+                                        modifier = Modifier.align(Alignment.Center)
+                                    )
+                                }
+                            }
+                        }
+                        Text(
+                            text = current?.titleRu ?: "Слот ${slotIdx + 1}",
+                            color = if (current != null) SnowCrispText else MistMutedText,
+                            fontSize = 9.5.sp,
+                            maxLines = 1
+                        )
+                        val assignable = selectedType
+                        if (assignable != null && run != null && viewModel.canAssignToHotbar(assignable)) {
+                            Button(
+                                onClick = { viewModel.onAssignHotbarFromInventory(slotIdx, assignable) },
+                                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
+                                modifier = Modifier.height(22.dp)
+                            ) {
+                                Text("В слот ${slotIdx + 1}", fontSize = 9.sp)
+                            }
+                        }
+                    }
+                }
+            }
             }
         }
     }

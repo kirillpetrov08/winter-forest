@@ -112,8 +112,8 @@ class YandexRewardedAdSdkAdapter(appContext: Context) : RewardedAdSdkPort {
         loader.loadAd(
             request,
             object : RewardedAdLoadListener {
-                override fun onAdLoaded(rewardedAd: RewardedAd) {
-                    onLoaded(YandexLoadedAdHandle(rewardedAd))
+                override fun onAdLoaded(rewarded: RewardedAd) {
+                    onLoaded(YandexLoadedAdHandle(rewarded))
                 }
 
                 override fun onAdFailedToLoad(error: AdRequestError) {

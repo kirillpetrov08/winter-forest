@@ -10,13 +10,23 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.material3.Text
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -154,6 +164,38 @@ fun WinterForestAppRoot(viewModel: WinterForestViewModel) {
             AppDestination.RESULTS -> ResultsScreen(state = state, viewModel = viewModel)
             AppDestination.SETTINGS -> SettingsScreen(state = state, viewModel = viewModel)
             AppDestination.ABOUT -> AboutScreen(viewModel = viewModel)
+        }
+
+        // Светлый экран загрузки: пока OpenGL не отрисовал первый кадр,
+        // пользователь не видит чёрный экран.
+        if (!state.sceneReady) {
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(
+                    modifier = Modifier
+                        .width(260.dp)
+                        .height(60.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        text = "WINTER FOREST",
+                        style = TextStyle(
+                            fontSize = 32.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = Color(0xFF071521)
+                        )
+                    )
+                    Text(
+                        text = "Загрузка тайги…",
+                        style = TextStyle(
+                            fontSize = 14.sp,
+                            color = Color(0xFF5B7A8A)
+                        )
+                    )
+                }
+            }
         }
     }
 }

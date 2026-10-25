@@ -247,6 +247,22 @@ class ForestGlRenderer(
     private var assetPropsBuiltQuality: GraphicsQuality? = null
     private var assetTexturesQuality: GraphicsQuality? = null
 
+    // Железные ворота на тропах между районами: рама + две створки на петлях.
+    // Створки распахиваются, когда игрок подходит к проходу, и закрываются позади.
+    private class TrailGate(val x: Float, val z: Float, val yawRad: Float)
+    private val trailGates = listOf(
+        TrailGate(0f, -48f, 0f),
+        TrailGate(48f, 0f, (Math.PI / 2.0).toFloat()),
+        TrailGate(-48f, 0f, (Math.PI / 2.0).toFloat()),
+        TrailGate(0f, 48f, 0f)
+    )
+    private var gateFrameVbo: GlVbo? = null
+    private var gateDoorLVbo: GlVbo? = null
+    private var gateDoorRVbo: GlVbo? = null
+    private val gateOpenAmount = FloatArray(4)
+    private var gateAnimPrevNs = 0L
+
+
     // Камни-ресурсы (камень/руда/уголь) рисуются МОДЕЛЯМИ автора (rock_09 / rock_moss_*),
     // а не процедурными «булыжниками»: батчи перестраиваются вместе с узлами локации.
     private val rockNodeBatches = HashMap<String, GlVbo>()
@@ -526,6 +542,8 @@ class ForestGlRenderer(
         for ((modelId, vbo) in assetPropBatches) {
             drawVbo(vbo, assetTextures[modelId] ?: 0, unlit = false, specStrength = 0.18f)
         }
+        // 6b-2. Железные ворота на тропах: створки распахиваются при подходе игрока
+        drawTrailGates(camX, camZ, quality)
         // 6c. Камни-ресурсы (камень/руда/уголь) моделями автора
         for ((modelId, vbo) in rockNodeBatches) {
             drawVbo(vbo, assetTextures[modelId] ?: 0, unlit = false, specStrength = 0.18f)
@@ -584,7 +602,27 @@ class ForestGlRenderer(
         }
         if (assetPropsBuiltQuality != quality) {
             rebuildAssetPropsVbo(quality)
+            buildTrailGateVbos()
             assetPropsBuiltQuality = quality
+        }
+    }
+
+    /** VBO железных ворот: рама + левая и правая створки (общая нормализация мешей). */
+    private fun buildTrailGateVbos() {
+        val ctx = appContext ?: return
+        gateFrameVbo?.release(); gateDoorLVbo?.release(); gateDoorRVbo?.release()
+        gateFrameVbo = null; gateDoorLVbo = null; gateDoorRVbo = null
+        val frame = readAssetFloats(ctx, "models/gate/mesh_frame.obj")
+        val left = readAssetFloats(ctx, "models/gate/mesh_left.obj")
+        val right = readAssetFloats(ctx, "models/gate/mesh_right.obj")
+        if (frame.isNotEmpty()) {
+            gateFrameVbo = GlVbo().also { it.uploadStatic(floatsToBuilder(frame)) }
+        }
+        if (left.isNotEmpty()) {
+            gateDoorLVbo = GlVbo().also { it.uploadStatic(floatsToBuilder(left)) }
+        }
+        if (right.isNotEmpty()) {
+            gateDoorRVbo = GlVbo().also { it.uploadStatic(floatsToBuilder(right)) }
         }
     }
 
@@ -1064,7 +1102,19 @@ class ForestGlRenderer(
         val ice = builders[ProceduralTextureId.ICE]!!
 
         for ((idx, node) in nodes.withIndex()) {
-            if (!node.isAvailable) continue
+            if (!node.isAvailable) {
+                // Вскрытый ящик остаётся на земле открытым до конца перезарядки (90 с)
+                if (node.kind == WorldObjectKind.SUPPLY_CRATE || node.kind == WorldObjectKind.MILITARY_CRATE) {
+                    val ndx2 = node.x - playerX
+                    val ndz2 = node.z - playerZ
+                    if (ndx2 * ndx2 + ndz2 * ndz2 <= 118f * 118f) {
+                        val y2 = MeshBuilder.sampleWorldHeight(node.x, node.z, terrainSteps)
+                        nodeRockSpots.getOrPut("cache_crate_open") { mutableListOf() }
+                            .add(floatArrayOf(node.x, y2, node.z, idx * 0.7f, 1.0f, 1f, 1f, 1f))
+                    }
+                }
+                continue
+            }
             // Дальние узлы не пекутся: VBO пересобирается при смене района игрока
             val ndx = node.x - playerX
             val ndz = node.z - playerZ
@@ -1094,11 +1144,10 @@ class ForestGlRenderer(
                     nodeRockSpots.getOrPut("rock_09") { mutableListOf() }
                         .add(floatArrayOf(node.x, y, node.z, idx * 1.71f, 1.22f, 1f, 1f, 1f))
                 }
-                WorldObjectKind.SUPPLY_CRATE -> {
-                    foliage.addShadowDisc(node.x, y, node.z, 1.05f, 0.36f)
-                    timber.addOrientedBox(node.x, y + 0.44f, node.z, 1.02f, 0.88f, 1.02f, idx * 0.35f, 0f, 0f)
-                    metal.addOrientedBox(node.x, y + 0.89f, node.z, 1.06f, 0.06f, 1.06f, idx * 0.35f, 0f, 0f)
-                    cloth.addOrientedBox(node.x, y + 0.98f, node.z, 0.72f, 0.20f, 0.62f, idx * 0.35f + 0.2f, 0f, 0f)
+                WorldObjectKind.SUPPLY_CRATE, WorldObjectKind.MILITARY_CRATE -> {
+                    foliage.addShadowDisc(node.x, y, node.z, 0.72f, 0.34f)
+                    nodeRockSpots.getOrPut("cache_crate") { mutableListOf() }
+                        .add(floatArrayOf(node.x, y, node.z, idx * 0.7f, 1.0f, 1f, 1f, 1f))
                 }
                 WorldObjectKind.RESIN_STUMP -> {
                     foliage.addShadowDisc(node.x, y, node.z, 0.95f, 0.34f)
@@ -1316,9 +1365,16 @@ class ForestGlRenderer(
                 if (dotFwd < -0.35f) continue // Frustum culling за спиной камеры!
             }
             val gy = MeshBuilder.sampleWorldHeight(bx, bz, worldTerrainSteps(quality))
-            if (beast.kind == WildlifeKind.TIMBER_WOLF || beast.kind == WildlifeKind.NORTHERN_DEER) {
-                // Импортированные модели волка и оленя: тело + качающиеся ноги (draw ниже)
-                fur.addShadowDisc(bx, gy, bz, if (beast.kind == WildlifeKind.TIMBER_WOLF) 1.05f else 1.3f, 0.34f)
+            if (beast.kind == WildlifeKind.TIMBER_WOLF || beast.kind == WildlifeKind.NORTHERN_DEER ||
+                beast.kind == WildlifeKind.TAIGA_RAT
+            ) {
+                // Импортированные модели зверей (волк/олень/крыса): тело + ноги (draw ниже)
+                val shadowR = when (beast.kind) {
+                    WildlifeKind.TIMBER_WOLF -> 1.05f
+                    WildlifeKind.TAIGA_RAT -> 0.42f
+                    else -> 1.3f
+                }
+                fur.addShadowDisc(bx, gy, bz, shadowR, 0.34f)
                 importedBeasts.add(BeastDraw(beast.kind, bx, gy, bz, bh, gait, moving))
                 continue
             }
@@ -1436,7 +1492,11 @@ class ForestGlRenderer(
 
         // Импортированные 3D-модели животных (волк/олень) — тело + ноги с шагом
         for (bd in importedBeasts) {
-            val modelId = if (bd.kind == WildlifeKind.TIMBER_WOLF) "wolf_body" else "deer_body"
+            val modelId = when (bd.kind) {
+                WildlifeKind.TIMBER_WOLF -> "wolf_body"
+                WildlifeKind.TAIGA_RAT -> "rat_body"
+                else -> "deer_body"
+            }
             drawAnimatedEntity(
                 modelId = modelId,
                 x = bd.x, y = bd.y, z = bd.z,
@@ -1619,7 +1679,7 @@ class ForestGlRenderer(
             1f, -1f,
             -1f, 1f,
             -1f, 1f,
-            1f, 1f,
+            1f, -1f,
             1f, 1f
         )
         val buf = ByteBuffer.allocateDirect(quadCoords.size * 4)
@@ -1801,6 +1861,71 @@ class ForestGlRenderer(
         GLES20.glUniform1f(uFogFarLoc, fogFar)
     }
 
+    /**
+     * Ворота на тропах: рама стоит на земле, обе створки висят на петлях у
+     * внешних краёв и распахиваются на 95°, когда игрок ближе 7.5 м.
+     * Дальние ворота не рисуются (они в тумане и за деревьями) — 0 лишних треугольников.
+     */
+    private fun drawTrailGates(camX: Float, camZ: Float, quality: GraphicsQuality) {
+        val frame = gateFrameVbo ?: return
+        val left = gateDoorLVbo ?: return
+        val right = gateDoorRVbo ?: return
+        val tex = assetTextures["gate"] ?: return
+
+        val nowNs = System.nanoTime()
+        val dt = if (gateAnimPrevNs == 0L) 0f else ((nowNs - gateAnimPrevNs) / 1_000_000_000.0).toFloat()
+        gateAnimPrevNs = nowNs
+        val step = (dt.coerceIn(0f, 0.12f) * 2.6f)
+
+        for ((idx, gate) in trailGates.withIndex()) {
+            val dx = camX - gate.x
+            val dz = camZ - gate.z
+            val dist = sqrt(dx * dx + dz * dz)
+            val target = if (dist < 7.5f) 1f else 0f
+            val cur = gateOpenAmount[idx]
+            gateOpenAmount[idx] = when {
+                cur < target -> (cur + step).coerceAtMost(target)
+                cur > target -> (cur - step).coerceAtLeast(target)
+                else -> cur
+            }
+            if (dist > 46f) continue
+
+            val gy = MeshBuilder.sampleWorldHeight(gate.x, gate.z, worldTerrainSteps(quality))
+            drawTrailGatePart(frame, tex, gate, gy, 0f, 0f)
+            val openness = gateOpenAmount[idx]
+            val swing = openness * 95f
+            drawGateDoor(left, tex, gate, gy, -GATE_HINGE_X, -swing)
+            drawGateDoor(right, tex, gate, gy, GATE_HINGE_X, swing)
+        }
+
+        Matrix.setIdentityM(modelMatrix, 0)
+        System.arraycopy(vpMatrix, 0, mvpMatrix, 0, 16)
+        GLES20.glUniformMatrix4fv(uMvpLoc, 1, false, mvpMatrix, 0)
+        GLES20.glUniformMatrix4fv(uModelLoc, 1, false, modelMatrix, 0)
+    }
+
+    /** Рама ворот (статичная часть) в точке тропы. */
+    private fun drawTrailGatePart(vbo: GlVbo, tex: Int, gate: TrailGate, groundY: Float, hingeX: Float, angleDeg: Float) {
+        Matrix.setIdentityM(modelMatrix, 0)
+        Matrix.translateM(modelMatrix, 0, gate.x, groundY, gate.z)
+        Matrix.rotateM(modelMatrix, 0, gate.yawRad * 180f / Math.PI.toFloat(), 0f, 1f, 0f)
+        Matrix.scaleM(modelMatrix, 0, GATE_SCALE, GATE_SCALE, GATE_SCALE)
+        if (hingeX != 0f || angleDeg != 0f) {
+            Matrix.translateM(modelMatrix, 0, hingeX, 0f, 0f)
+            Matrix.rotateM(modelMatrix, 0, angleDeg, 0f, 1f, 0f)
+            Matrix.translateM(modelMatrix, 0, -hingeX, 0f, 0f)
+        }
+        Matrix.multiplyMM(mvpMatrix, 0, vpMatrix, 0, modelMatrix, 0)
+        GLES20.glUniformMatrix4fv(uMvpLoc, 1, false, mvpMatrix, 0)
+        GLES20.glUniformMatrix4fv(uModelLoc, 1, false, modelMatrix, 0)
+        drawVbo(vbo, tex, unlit = false, specStrength = 0.30f)
+    }
+
+    /** Створка на петле: поворот вокруг вертикальной оси у внешнего края. */
+    private fun drawGateDoor(vbo: GlVbo, tex: Int, gate: TrailGate, groundY: Float, hingeX: Float, angleDeg: Float) {
+        drawTrailGatePart(vbo, tex, gate, groundY, hingeX, angleDeg)
+    }
+
     /** Разовая отрисовка импортированной модели в точке мира (волк/олень и т.п.). */
     private fun drawModelInstance(modelId: String, x: Float, y: Float, z: Float, yawRad: Float, scale: Float) {
         val vbo = assetPropBatches[modelId] ?: return
@@ -1839,7 +1964,13 @@ class ForestGlRenderer(
 
     private fun buildEntityParts(modelId: String) {
         val ctx = appContext ?: return
-        val bodyFloats = readAssetFloats(ctx, "models/$modelId/mesh_body.obj")
+        val importedBody = readAssetFloats(ctx, "models/$modelId/mesh_body.obj")
+        val bodyFloats = if (importedBody.isNotEmpty()) {
+            importedBody
+        } else {
+            // Цельная модель без разбивки на ноги (например, крыса автора)
+            readAssetFloats(ctx, "models/$modelId/mesh.obj")
+        }
         if (bodyFloats.isEmpty()) return
         val bodyVbo = GlVbo()
         bodyVbo.uploadStatic(floatsToBuilder(bodyFloats))
@@ -2273,6 +2404,11 @@ class ForestGlRenderer(
     }
 
     companion object {
+        /** Масштаб ворот на тропе: модель 2.55 м → почти 3 м в мире. */
+        const val GATE_SCALE = 1.15f
+        /** Петля створки в координатах модели (из tools/pack_gate_doors.py). */
+        const val GATE_HINGE_X = 1.2483f
+
         /** Окно интерполяции позиции = период тика симуляции (20 Гц). */
         private const val TICK_INTERP_WINDOW_NS = 50_000_000L
 

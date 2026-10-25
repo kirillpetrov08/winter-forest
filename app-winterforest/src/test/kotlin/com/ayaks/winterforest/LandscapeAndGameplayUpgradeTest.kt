@@ -80,11 +80,12 @@ class LandscapeAndGameplayUpgradeTest {
     fun `hunting spear defeats wildlife grants meat and hide trophies and new workbench recipes work`() {
         val base = BaseProgress(workbenchLevel = 2)
         val baseRun = SurvivalEngine.createNewRun(base)
+        // Радиус удара — 2 м (требование заказчика), поэтому зверь стоит вплотную
         val deer = WildlifeEntity(
             id = "stag_1",
             kind = WildlifeKind.NORTHERN_DEER,
             x = 0f,
-            z = 3.0f,
+            z = 4.0f,
             hp = WildlifeKind.NORTHERN_DEER.maxHp
         )
         val armed = baseRun.copy(

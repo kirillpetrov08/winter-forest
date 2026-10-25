@@ -59,7 +59,9 @@ data class WinterForestUiState(
     val joystickStrafe: Float = 0f,
     val measuredFps: Int = 60,
     val cooldowns: Map<String, Float> = emptyMap(),
-    val travelJourney: TravelJourney? = null
+    val travelJourney: TravelJourney? = null,
+    /** Сцена OpenGL отрисовала первый кадр — экран загрузки можно убирать. */
+    val sceneReady: Boolean = false
 ) {
     val hasActiveSave: Boolean
         get() = activeRun != null && activeRun.phase == RunPhase.PLAYING
@@ -93,7 +95,6 @@ class WinterForestViewModel(
 
     private var gameLoopJob: Job? = null
     private var autoSaveAccumulatorSec: Float = 0f
-    private var portalCooldownSec: Float = 0f
 
     init {
         vmScope.launch {
@@ -279,9 +280,51 @@ class WinterForestViewModel(
         SurvivalEngine.placeFieldCampfire(run, base)
     }
 
+    /** Можно ли положить тип ресурса в слот хотбара (еда, инструмент, спецпредмет). */
+    fun canAssignToHotbar(type: ResourceType): Boolean {
+        return type.isEdible || type.isFuel || type.category == com.ayaks.winterforest.domain.model.ResourceCategory.MATERIAL
+    }
+
+    /** Положить выбранный предмет из инвентаря в слот хотбара. */
+    fun onAssignHotbarFromInventory(slotIndex: Int, type: ResourceType) {
+        _uiState.update { st ->
+            val run = st.activeRun ?: return@update st
+            val entry = com.ayaks.winterforest.domain.model.HotbarEntry(
+                titleRu = type.titleRu,
+                iconPath = "",
+                resourceType = type
+            )
+            st.copy(activeRun = run.withHotbarSlot(slotIndex, entry))
+        }
+        persistCheckpointAsync()
+    }
+
+    /** Кнопка «Восстановить ресурсы»: сбрасывает перезарядку всех узлов текущей локации. */
+    fun onRestoreResources() {
+        _uiState.update { st ->
+            val run = st.activeRun ?: return@update st
+            val updatedNodes = run.nodesByLocation.mapValues { (_, nodes) ->
+                nodes.map { it.copy(respawnRemainingSec = 0f) }
+            }
+            st.copy(
+                activeRun = run.copy(
+                    nodesByLocation = updatedNodes,
+                    lastStatusMessage = "Ресурсы на карте восстановлены."
+                )
+            )
+        }
+    }
+
     fun onFpsMeasured(fps: Int) {
         if (fps > 0 && fps != _uiState.value.measuredFps) {
             _uiState.update { it.copy(measuredFps = fps) }
+        }
+    }
+
+    /** OpenGL-сцена отрисовала первый кадр — светлый экран загрузки заменяется игрой. */
+    fun onSceneReady() {
+        if (!_uiState.value.sceneReady) {
+            _uiState.update { it.copy(sceneReady = true) }
         }
     }
 
@@ -304,8 +347,6 @@ class WinterForestViewModel(
         val current = _uiState.value
         val run = current.activeRun ?: return
         if (run.phase == RunPhase.DEAD) return
-
-        portalCooldownSec = (portalCooldownSec - deltaSeconds).coerceAtLeast(0f)
 
         // Кулдауны кнопок тикают всегда
         if (_uiState.value.cooldowns.isNotEmpty()) {
@@ -352,30 +393,23 @@ class WinterForestViewModel(
             run
         }
 
-        // Прямой переход через северные 3D-ворота тропы (x in -2.6..2.6, z <= -34.2)
-        if (isMoving &&
-            portalCooldownSec <= 0f &&
-            abs(movedRun.playerX) <= 2.6f &&
-            movedRun.playerZ <= -34.2f
-        ) {
-            portalCooldownSec = 3.5f
-            val nextZone = movedRun.currentLocation.neighborNext()
-            val travel = SurvivalEngine.travelToLocation(movedRun, current.baseProgress, nextZone)
-            _uiState.update {
-                it.copy(
-                    activeRun = travel.run,
-                    baseProgress = travel.base
-                )
-            }
-            if (travel.actionSucceeded) {
-                persistCheckpointAsync()
-                return
-            }
+        // Переход между районами — БЕЗ телепорта: мир непрерывный, игрок просто идёт
+        // через проход в железных воротах тропы, а район переключается по позиции.
+
+        // Рыбалка в процессе: персонаж рыбачит у лунки, затем поклёвка
+        var runForTick = movedRun
+        var baseForTick = current.baseProgress
+        if (movedRun.isFishing) {
+            val fishing = com.ayaks.winterforest.domain.rules.AdvancedMechanics.tickFishing(
+                movedRun, current.baseProgress, deltaSeconds
+            )
+            runForTick = fishing.run
+            baseForTick = fishing.base
         }
 
         val outcome = SurvivalEngine.tick(
-            run = movedRun,
-            base = current.baseProgress,
+            run = runForTick,
+            base = baseForTick,
             deltaSeconds = deltaSeconds,
             isMoving = isMoving
         )
@@ -453,8 +487,38 @@ class WinterForestViewModel(
         }
     }
 
-    fun onFishAtHole() = applyEngineAction(cooldownId = "fish", cooldownSec = 6.0f) { run, base ->
-        com.ayaks.winterforest.domain.rules.AdvancedMechanics.fishAtHole(run, base)
+    fun onFishAtHole() = applyEngineAction(
+        cooldownId = "fish",
+        cooldownSec = com.ayaks.winterforest.domain.model.GameRunState.FISHING_PROCESS_SECONDS
+    ) { run, base ->
+        // Рыбалка — процесс: персонаж рыбачит несколько секунд, потом поклёвка
+        // и перезарядка лунки (тик процесса идёт в stepSimulation).
+        com.ayaks.winterforest.domain.rules.AdvancedMechanics.startFishing(run, base)
+    }
+
+    // ---------- Хотбар быстрого доступа ----------
+
+    /** Положить запись (еда/инструмент/расходник) в слот хотбара. */
+    fun onAssignHotbar(index: Int, entry: com.ayaks.winterforest.domain.model.HotbarEntry) {
+        _uiState.update { st ->
+            val run = st.activeRun ?: return@update st
+            st.copy(activeRun = run.withHotbarSlot(index, entry))
+        }
+        persistCheckpointAsync()
+    }
+
+    /** Убрать запись из слота хотбара. */
+    fun onClearHotbar(index: Int) {
+        _uiState.update { st ->
+            val run = st.activeRun ?: return@update st
+            st.copy(activeRun = run.withHotbarSlot(index, null))
+        }
+        persistCheckpointAsync()
+    }
+
+    /** Использовать слот хотбара: экипировать инструмент либо съесть/применить расходник. */
+    fun onUseHotbar(index: Int) = applyEngineAction(cooldownId = "hotbar_$index", cooldownSec = 0.8f) { run, base ->
+        com.ayaks.winterforest.domain.rules.AdvancedMechanics.consumeHotbarEntry(run, base, index)
     }
 
     fun onPlaceSnowShelter() = applyEngineAction(cooldownId = "shelter", cooldownSec = 6.0f) { run, base ->
