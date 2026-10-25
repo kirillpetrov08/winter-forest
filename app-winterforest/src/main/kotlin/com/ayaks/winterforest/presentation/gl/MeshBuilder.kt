@@ -971,6 +971,8 @@ class MeshBuilder(initialFloatsCapacity: Int = 16384) {
         val tipDz = -cos(yawRad) * sin(0.28f + chopArc * 0.85f)
 
         when (tool) {
+            // §7.11: пустые руки — геометрии нет (герой начинает забег без инструмента)
+            EquippedTool.NONE -> Unit
             EquippedTool.AXE -> {
                 val topX = baseX + tipDx * 0.50f
                 val topY = baseY + tipDy * 0.50f

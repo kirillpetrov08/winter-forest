@@ -66,7 +66,7 @@ object SurvivalEngine {
             warmth = GameRunState.MAX_STAT,
             stamina = GameRunState.MAX_STAT,
             isSprinting = false,
-            equippedTool = EquippedTool.AXE,
+            equippedTool = EquippedTool.NONE,
             xp = 0,
             level = 1,
             elapsedRealSeconds = 0f,
@@ -633,6 +633,8 @@ object SurvivalEngine {
             EquippedTool.AXE -> 28f + knifeBonus
             EquippedTool.PICKAXE -> 24f + knifeBonus
             EquippedTool.TORCH -> 18f + knifeBonus
+            // голыми руками зверя не остановить: урон символический
+            EquippedTool.NONE -> 6f + knifeBonus
         }
         val hitY = WorldPopulator.terrainHeight(run.currentLocation, target.x, target.z) + 0.6f
         val remainingHp = (target.hp - damage * AdvancedMechanics.hunterDamageMultiplier(base)).coerceAtLeast(0f)
@@ -836,19 +838,36 @@ object SurvivalEngine {
             base.ironAxeCrafted && resType == ResourceType.WOOD -> 1
             else -> 0
         }
-        // Жёсткое правило выживания: профильный ресурс без инструмента — максимум 1 ед. руками
-        val requiredToolMissing = when (resType) {
-            ResourceType.WOOD -> run.equippedTool != EquippedTool.AXE
-            ResourceType.STONE, ResourceType.COAL, ResourceType.IRON ->
-                run.equippedTool != EquippedTool.PICKAXE &&
-                    SpecialLootId.PICKAXE !in base.persistentSpecialLoot
-            else -> false
+        // §7.11: ЖЁСТКИЙ гейт профильных узлов. Большое дерево без топора и
+        // порода/руда без кирки не добываются вовсе — подсказка ведёт к крафту
+        // примитивного инструмента. Мелкие узлы (валежник, галька, ягоды,
+        // ткань, смола, рыба) собираются руками всегда.
+        val missingToolMsg: String? = when {
+            target.kind == WorldObjectKind.PINE_TREE || target.kind == WorldObjectKind.OAK_TREE ->
+                if (run.equippedTool == EquippedTool.AXE) null
+                else "Большое дерево голыми руками не свалить: скрафтите Примитивный топор (верстак: 3 дерева + 2 камня)"
+            target.kind == WorldObjectKind.STONE_OUTCROP ||
+                target.kind == WorldObjectKind.COAL_SEAM ||
+                target.kind == WorldObjectKind.IRON_VEIN ->
+                if (run.equippedTool == EquippedTool.PICKAXE ||
+                    SpecialLootId.PICKAXE in base.persistentSpecialLoot
+                ) null
+                else "Породу и руду голыми руками не добыть: скрафтите Примитивную кирку (верстак: 2 дерева + 3 камня)"
+            else -> null
         }
-        val rawYield = if (requiredToolMissing) {
-            1
-        } else {
+        if (missingToolMsg != null) {
+            return EngineStepOutcome(
+                run.copy(
+                    swingAnimRemainingSec = run.equippedTool.swingDurationSec,
+                    lastStatusMessage = missingToolMsg
+                ),
+                base,
+                actionSucceeded = false,
+                message = missingToolMsg
+            )
+        }
+        val rawYield =
             (target.baseYield + pickaxeBonus + axeWoodBonus + ironToolBonus + levelBonus).coerceIn(1, 6)
-        }
         val addResult = run.inventory.tryAddResource(resType, rawYield)
 
         if (addResult.isFullBlocked) {
@@ -1342,6 +1361,21 @@ object SurvivalEngine {
         }
         val (invAfterCost, baseAfterCost) = spent
         return when (recipe) {
+            // Первые инструменты забега: герой начинает с пустыми руками (§7.11)
+            WorkbenchRecipe.CRAFT_PRIMITIVE_AXE -> {
+                val msg = "Собран Примитивный топор: деревья и валежник теперь поддаются!"
+                EngineStepOutcome(
+                    run.copy(inventory = invAfterCost, equippedTool = EquippedTool.AXE, lastStatusMessage = msg),
+                    baseAfterCost, true, msg
+                )
+            }
+            WorkbenchRecipe.CRAFT_PRIMITIVE_PICKAXE -> {
+                val msg = "Собрана Примитивная кирка: камень, уголь и руда теперь поддаются!"
+                EngineStepOutcome(
+                    run.copy(inventory = invAfterCost, equippedTool = EquippedTool.PICKAXE, lastStatusMessage = msg),
+                    baseAfterCost, true, msg
+                )
+            }
             WorkbenchRecipe.CRAFT_RESIN_TORCH -> {
                 val withTorch = invAfterCost.grantSpecialLoot(SpecialLootId.RESIN_TORCH, 1)
                 val msg = "Изготовлен «Смоляной факел»!"

@@ -1196,6 +1196,25 @@ class ForestGlRenderer(
                             )
                         )
                 }
+                WorldObjectKind.FALLEN_BRANCH -> {
+                    // сухие ветки автора: чередуем две модели, тонировка снегом
+                    foliage.addShadowDisc(node.x, y, node.z, 0.58f, 0.30f)
+                    val branchModel = if (idx % 2 == 0) "dry_branches_a" else "dry_branches_b"
+                    nodeRockSpots.getOrPut(branchModel) { mutableListOf() }
+                        .add(
+                            floatArrayOf(
+                                node.x, y, node.z,
+                                idx * 1.13f,
+                                0.86f + (idx % 3) * 0.12f,
+                                0.96f, 0.97f, 1.0f
+                            )
+                        )
+                }
+                WorldObjectKind.PEBBLES -> {
+                    // галька: тот же авторский валун, но мелкий и высветленный
+                    nodeRockSpots.getOrPut("rock_09") { mutableListOf() }
+                        .add(floatArrayOf(node.x, y, node.z, idx * 0.97f, 0.40f, 0.88f, 0.90f, 0.94f))
+                }
                 WorldObjectKind.RESIN_STUMP -> {
                     foliage.addShadowDisc(node.x, y, node.z, 0.95f, 0.34f)
                     bark.addTaperedCylinder(node.x, y, node.z, node.x, y + 0.98f, node.z, 0.46f, 0.38f, 10)
@@ -1544,18 +1563,21 @@ class ForestGlRenderer(
             )
         }
 
-        // Модель топора/кирки/копья в руках — рисуется поверх динамики (ближе всего к камере)
-        if (!menuOrbitMode && run.equippedTool != EquippedTool.TORCH) {
+        // Модель топора/кирки/копья в руках — рисуется поверх динамики (ближе всего к камере).
+        // §7.11: с пустыми руками (NONE) и с факелом модель инструмента не рисуется.
+        val handToolModelId: String? = when (run.equippedTool) {
+            EquippedTool.AXE -> "wooden_axe"
+            EquippedTool.PICKAXE -> "pickaxe"
+            EquippedTool.SPEAR -> "spear"
+            EquippedTool.NONE, EquippedTool.TORCH -> null
+        }
+        if (!menuOrbitMode && handToolModelId != null) {
             val swingNorm = (run.swingAnimRemainingSec / run.equippedTool.swingDurationSec.coerceAtLeast(0.1f))
                 .coerceIn(0f, 1f)
             val fpAlpha = FramePacing.interpAlpha(frameNowNs - smoothStartNs, TICK_INTERP_WINDOW_NS)
             val fpBobPhase = FramePacing.lerpAngle(smoothPrevBobPhase, smoothCurBobPhase, fpAlpha)
             drawFirstPersonToolModel(
-                modelId = when (run.equippedTool) {
-                    EquippedTool.AXE -> "wooden_axe"
-                    EquippedTool.PICKAXE -> "pickaxe"
-                    else -> "spear"
-                },
+                modelId = handToolModelId,
                 camX = camX,
                 camY = camY,
                 camZ = camZ,

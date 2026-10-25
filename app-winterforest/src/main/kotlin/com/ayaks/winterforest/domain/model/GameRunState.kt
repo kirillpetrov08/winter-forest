@@ -28,7 +28,17 @@ enum class WorldObjectKind {
      * Куст технической конопли — источник Ткани (модель автора `cloth_bush`, 0.54 м).
      * Заменил прежний «собираемый» ящик с процедурной тканью.
      */
-    CLOTH_BUSH
+    CLOTH_BUSH,
+
+    /**
+     * Валежник: сухие ветки на снегу (§7.11). Источник Дерева, который герой
+     * собира РУКАМИ до крафта первого топора — иначе прогрессия крафта
+     * заходит в тупик (верстак и топор требуют дерево).
+     */
+    FALLEN_BRANCH,
+
+    /** Галька: мелкие камни у троп (§7.11), источник Камня без кирки. */
+    PEBBLES
 }
 
 @Serializable
@@ -175,7 +185,7 @@ data class GameRunState(
     val warmth: Float = MAX_STAT,
     val stamina: Float = MAX_STAT,
     val isSprinting: Boolean = false,
-    val equippedTool: EquippedTool = EquippedTool.AXE,
+    val equippedTool: EquippedTool = EquippedTool.NONE,
     val xp: Int = 0,
     val level: Int = 1,
     val elapsedRealSeconds: Float = 0f,

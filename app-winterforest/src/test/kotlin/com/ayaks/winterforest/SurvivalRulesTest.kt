@@ -4,6 +4,7 @@ import com.ayaks.winterforest.domain.model.BaseProgress
 import com.ayaks.winterforest.domain.model.GameRunState
 import com.ayaks.winterforest.domain.model.LocationId
 import com.ayaks.winterforest.domain.model.RunPhase
+import com.ayaks.winterforest.domain.model.WorldObjectKind
 import com.ayaks.winterforest.domain.rules.SurvivalEngine
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -119,7 +120,9 @@ class SurvivalRulesTest {
     fun `entering night restores depleted world resource nodes automatically`() {
         val base = BaseProgress()
         val initial = SurvivalEngine.createNewRun(base)
-        val firstNode = initial.currentLocationNodes().first { it.resourceType != null }
+        // ручной узел (валежник): добывается без инструмента (§7.11)
+        val firstNode = initial.currentLocationNodes()
+            .first { it.kind == WorldObjectKind.FALLEN_BRANCH }
         val nearNode = initial.copy(
             playerX = firstNode.x,
             playerZ = firstNode.z,

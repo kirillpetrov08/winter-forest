@@ -378,6 +378,7 @@ fun QuickEquipmentHotbar(
 
 /** Иконка инструмента (Unicode-символ, пока не привезены иконки-картинки). */
 private fun toolIcon(tool: EquippedTool): String = when (tool) {
+    EquippedTool.NONE -> "✋"
     EquippedTool.AXE -> "🪓"
     EquippedTool.PICKAXE -> "⛏️"
     EquippedTool.SPEAR -> "🎯"

@@ -6,6 +6,7 @@ import com.ayaks.winterforest.domain.model.GameRunState
 import com.ayaks.winterforest.domain.model.Inventory
 import com.ayaks.winterforest.domain.model.LocationId
 import com.ayaks.winterforest.domain.model.ResourceType
+import com.ayaks.winterforest.domain.model.WorldObjectKind
 import com.ayaks.winterforest.domain.model.StarterLoadout
 import com.ayaks.winterforest.domain.rules.SurvivalEngine
 import org.junit.Assert.assertEquals
@@ -42,7 +43,10 @@ class EdgeCasesTest {
         assertTrue(fullInv.isFull)
 
         val initial = SurvivalEngine.createNewRun(base)
-        val woodNode = initial.currentLocationNodes().first { it.resourceType == ResourceType.WOOD }
+        // §7.11: большое дерево без топора не добывается вовсе, поэтому для
+        // проверки полного инвентаря берём ручной узел — валежник
+        val woodNode = initial.currentLocationNodes()
+            .first { it.resourceType == ResourceType.WOOD && it.kind == WorldObjectKind.FALLEN_BRANCH }
         val fullRun = initial.copy(
             inventory = fullInv,
             playerX = woodNode.x,

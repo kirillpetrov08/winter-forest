@@ -91,6 +91,9 @@ object WorldCollision {
                 // Лиственное дерево и полевой куст (модель пользователя) — непроходимые
                 WorldObjectKind.OAK_TREE -> 0.70f
                 WorldObjectKind.SCRUB_BUSH -> 0.62f
+                // валежник и галька низкие: почти не мешают ходьбе
+                WorldObjectKind.FALLEN_BRANCH -> 0.34f
+                WorldObjectKind.PEBBLES -> 0.28f
                 // ICE_HOLE — лунка для рыбалки, GAME_CARCASS — туша: не мешают
                 else -> continue
             }

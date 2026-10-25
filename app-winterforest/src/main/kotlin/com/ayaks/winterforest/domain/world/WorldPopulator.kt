@@ -8,6 +8,7 @@ import com.ayaks.winterforest.domain.model.SpecialLootId
 import com.ayaks.winterforest.domain.model.WildlifeEntity
 import com.ayaks.winterforest.domain.model.WildlifeKind
 import com.ayaks.winterforest.domain.model.WorldObjectKind
+import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.hypot
 import kotlin.math.sin
@@ -323,6 +324,37 @@ object WorldPopulator {
                 baseYield = 1
             )
         }
+        // §7.11: валежник и галька — ручная добыча дерева и камня на старте
+        // забега (до первого топора/кирки). Раскиданы кольцом по всей площади
+        // района, вдали от построек, чтобы старт не зависел от одной точки.
+        val handSpots = 8
+        for (k in 0 until handSpots) {
+            val angle = (k.toFloat() / handSpots) * 2f * PI + 0.42f
+            val radius = 11f + ((k * 37) % 29) * 1.1f
+            val hx = (cos(angle) * radius).toFloat()
+            val hz = (sin(angle) * radius).toFloat()
+            trimmed += ResourceNode(
+                id = "${location.name.lowercase()}_fallen_$k",
+                location = location,
+                kind = WorldObjectKind.FALLEN_BRANCH,
+                x = hx,
+                z = hz,
+                resourceType = ResourceType.WOOD,
+                specialLootId = null,
+                baseYield = 1
+            )
+            trimmed += ResourceNode(
+                id = "${location.name.lowercase()}_pebble_$k",
+                location = location,
+                kind = WorldObjectKind.PEBBLES,
+                x = -hx * 0.86f,
+                z = -hz * 0.92f,
+                resourceType = ResourceType.STONE,
+                specialLootId = null,
+                baseYield = 1
+            )
+        }
+
         result.clear()
         result.addAll(trimmed)
 
