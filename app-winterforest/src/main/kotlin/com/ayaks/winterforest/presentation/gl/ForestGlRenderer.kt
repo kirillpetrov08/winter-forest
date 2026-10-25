@@ -1102,7 +1102,19 @@ class ForestGlRenderer(
         val ice = builders[ProceduralTextureId.ICE]!!
 
         for ((idx, node) in nodes.withIndex()) {
-            if (!node.isAvailable) continue
+            if (!node.isAvailable) {
+                // Вскрытый ящик остаётся на земле открытым до конца перезарядки (90 с)
+                if (node.kind == WorldObjectKind.SUPPLY_CRATE || node.kind == WorldObjectKind.MILITARY_CRATE) {
+                    val ndx2 = node.x - playerX
+                    val ndz2 = node.z - playerZ
+                    if (ndx2 * ndx2 + ndz2 * ndz2 <= 118f * 118f) {
+                        val y2 = MeshBuilder.sampleWorldHeight(node.x, node.z, terrainSteps)
+                        nodeRockSpots.getOrPut("cache_crate_open") { mutableListOf() }
+                            .add(floatArrayOf(node.x, y2, node.z, idx * 0.7f, 1.0f, 1f, 1f, 1f))
+                    }
+                }
+                continue
+            }
             // Дальние узлы не пекутся: VBO пересобирается при смене района игрока
             val ndx = node.x - playerX
             val ndz = node.z - playerZ
@@ -1132,11 +1144,10 @@ class ForestGlRenderer(
                     nodeRockSpots.getOrPut("rock_09") { mutableListOf() }
                         .add(floatArrayOf(node.x, y, node.z, idx * 1.71f, 1.22f, 1f, 1f, 1f))
                 }
-                WorldObjectKind.SUPPLY_CRATE -> {
-                    foliage.addShadowDisc(node.x, y, node.z, 1.05f, 0.36f)
-                    timber.addOrientedBox(node.x, y + 0.44f, node.z, 1.02f, 0.88f, 1.02f, idx * 0.35f, 0f, 0f)
-                    metal.addOrientedBox(node.x, y + 0.89f, node.z, 1.06f, 0.06f, 1.06f, idx * 0.35f, 0f, 0f)
-                    cloth.addOrientedBox(node.x, y + 0.98f, node.z, 0.72f, 0.20f, 0.62f, idx * 0.35f + 0.2f, 0f, 0f)
+                WorldObjectKind.SUPPLY_CRATE, WorldObjectKind.MILITARY_CRATE -> {
+                    foliage.addShadowDisc(node.x, y, node.z, 0.72f, 0.34f)
+                    nodeRockSpots.getOrPut("cache_crate") { mutableListOf() }
+                        .add(floatArrayOf(node.x, y, node.z, idx * 0.7f, 1.0f, 1f, 1f, 1f))
                 }
                 WorldObjectKind.RESIN_STUMP -> {
                     foliage.addShadowDisc(node.x, y, node.z, 0.95f, 0.34f)
@@ -1177,12 +1188,6 @@ class ForestGlRenderer(
                     timber.addBox(node.x, y, node.z, 1.24f, 0.66f, 0.86f, 0.95f, 0.78f, 0.52f)
                     metal.addBox(node.x, y + 0.66f, node.z, 1.28f, 0.16f, 0.90f, 1.0f, 0.88f, 0.55f)
                     bark.addTaperedCylinder(node.x + 0.78f, y, node.z, node.x + 0.78f, y + 1.85f, node.z, 0.05f, 0.04f, 6)
-                }
-                WorldObjectKind.MILITARY_CRATE -> {
-                    foliage.addShadowDisc(node.x, y, node.z, 1.15f, 0.38f)
-                    timber.addOrientedBox(node.x, y + 0.44f, node.z, 1.02f, 0.88f, 1.02f, idx * 0.35f, 0f, 0f)
-                    metal.addOrientedBox(node.x, y + 0.89f, node.z, 1.06f, 0.06f, 1.06f, idx * 0.35f, 0f, 0f)
-                    cloth.addOrientedBox(node.x, y + 0.98f, node.z, 0.72f, 0.20f, 0.62f, idx * 0.35f + 0.2f, 0f, 0f)
                 }
                 // Лиственные деревья и полевые кусты пака Trees & Bushes (модель пользователя)
                 WorldObjectKind.OAK_TREE -> {
