@@ -3,7 +3,6 @@ package com.ayaks.winterforest
 import android.content.pm.ActivityInfo
 import android.os.Build
 import android.os.Bundle
-import android.view.Surface
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -38,7 +37,6 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.ayaks.winterforest.data.ads.YandexAdsPrivacyBootstrapper
 import com.ayaks.winterforest.domain.model.GameRunState
 import com.ayaks.winterforest.presentation.gl.ForestGlSurfaceView
-import com.ayaks.winterforest.presentation.gl.FramePacing
 import com.ayaks.winterforest.presentation.gl.RenderSceneSnapshot
 import com.ayaks.winterforest.presentation.navigation.AppDestination
 import com.ayaks.winterforest.presentation.ui.screens.AboutScreen
@@ -71,9 +69,9 @@ class MainActivity : ComponentActivity() {
         requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
         enableEdgeToEdge()
         configureImmersiveLandscapeWindow()
-        // Целевые 60 FPS: просим у системы фиксированную частоту вместо «не троттлите
-        // меня» (см. FramePacing — прежняя разблокировка до 120 Гц давала микрофризы).
-        requestTargetFrameRate()
+        // Целевые 60 FPS задаёт сам рендерер: eglSwapInterval(1) в
+        // ForestGlRenderer + Surface.setFrameRate(60, FIXED) в ForestGlSurfaceView
+        // (см. FramePacing — прежняя разблокировка 120 Гц давала микрофризы).
 
         setContent {
             WinterForestTheme {
@@ -86,28 +84,7 @@ class MainActivity : ComponentActivity() {
         super.onWindowFocusChanged(hasFocus)
         if (hasFocus) {
             configureImmersiveLandscapeWindow()
-            // Некоторые прошивки сбрасывают запрошенную частоту после сворачивания
-            requestTargetFrameRate()
         }
-    }
-
-    /**
-     * Фиксирует частоту кадров окна на [FramePacing.TARGET_FPS].
-     *
-     * Раньше здесь стоял запрос самого быстрого режима дисплея
-     * (preferredDisplayModeId = 90/120/144 Гц) в паре с eglSwapInterval(0).
-     * Тяжёлая сцена не успевала за панелью, SoC упиралась в термопакет и
-     * сбрасывала частоты — на Galaxy S24+ это выглядело как постоянные
-     * микрофризы. Теперь игра просит ровно 60 Гц и ждёт vsync.
-     */
-    private fun requestTargetFrameRate() {
-        // rootSurfaceControl доступен с API 29, Surface.setFrameRate — с API 30
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return
-        val surface = window.decorView.rootSurfaceControl?.surface ?: return
-        surface.setFrameRate(
-            FramePacing.TARGET_SURFACE_FRAME_RATE,
-            Surface.FRAME_RATE_COMPATIBILITY_FIXED
-        )
     }
 
     private fun configureImmersiveLandscapeWindow() {

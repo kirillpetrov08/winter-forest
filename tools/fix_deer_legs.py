@@ -18,10 +18,18 @@ import math
 import sys
 
 BASE = "app-winterforest/src/main/assets/models/deer_body"
+# Пороги заданы в долях высоты туши (REF_HEIGHT = 1.755 м — масштаб ассета, на
+# котором разрез подбирался). Абсолютные значения пересчитываются в main(),
+# поэтому скрипт не ломается, когда упаковщик меняет нормализацию оленя.
+REF_HEIGHT = 1.755
 CUT_Y = 0.42      # ниже брюха (0.33) — тут ноги гарантированно разъединены
 GROW_Y = 0.56     # ветки выше среза, но рядом с осью ноги, растут в состав ноги (бедро)
 MIN_LEG_VERTS = 50
 LEG_AVG_Y_MAX = 0.48
+LEG_SPAN_X_MAX = 0.045   # шире — значит в компоненте две сросшиеся ноги
+LEG_SPAN_MIN_VERTS = 140
+LEG_SIDE_X = 0.03        # граница «левая/правая» при дроблении сросшейся пары
+LEG_GROW_RADIUS = 0.16   # допуск по XZ при доращивании бедра
 
 
 class UnionFind:
@@ -99,7 +107,19 @@ def write_part(path, verts, uvs, norms, faces, tag):
 
 
 def main():
+    global CUT_Y, GROW_Y, LEG_AVG_Y_MAX
+    global LEG_SPAN_X_MAX, LEG_SIDE_X, LEG_GROW_RADIUS
     verts, uvs, norms, faces = parse(f"{BASE}/mesh.obj")
+    ys = [v[1] for v in verts]
+    height = max(ys) - min(ys)
+    k = height / REF_HEIGHT if height > 1e-6 else 1.0
+    CUT_Y *= k
+    GROW_Y *= k
+    LEG_AVG_Y_MAX *= k
+    LEG_SPAN_X_MAX *= k
+    LEG_SIDE_X *= k
+    LEG_GROW_RADIUS *= k
+    print(f"deer height {height:.3f} (k={k:.3f}): CUT_Y={CUT_Y:.3f} GROW_Y={GROW_Y:.3f}")
     uf = UnionFind(len(verts))
     for corners in faces:
         if all(verts[vi][1] < CUT_Y for vi, _, _ in corners):
@@ -122,9 +142,9 @@ def main():
         if avg_y >= LEG_AVG_Y_MAX:
             continue
         xs = [verts[v][0] for v in members]
-        if max(xs) - min(xs) > 0.045 and len(members) > 140:
+        if max(xs) - min(xs) > LEG_SPAN_X_MAX and len(members) > LEG_SPAN_MIN_VERTS:
             # две ноги, сросшиеся по низу: режем по провалу X
-            left = {v for v in members if verts[v][0] < -0.03}
+            left = {v for v in members if verts[v][0] < -LEG_SIDE_X}
             right = members - left
             if len(left) >= 40:
                 leg_roots.append((next_tag, left)); next_tag += 1
@@ -158,7 +178,7 @@ def main():
     for vi in range(len(verts)):
         if verts[vi][1] >= GROW_Y or vi in vert_leg:
             continue
-        best, best_d = None, 0.16
+        best, best_d = None, LEG_GROW_RADIUS
         for k, (cx, cz) in enumerate(centroids):
             d = math.hypot(verts[vi][0] - cx, verts[vi][2] - cz)
             if d < best_d:

@@ -147,6 +147,63 @@ class AnimalModelsTest {
         assertTrue("deer must tower over wolf ($deerHigh vs $wolfHigh)", deerHigh > wolfHigh * 1.5f)
     }
 
+    /** Вершины OBJ: [x, y, z] по порядку строк. */
+    private fun vertices(obj: File): List<FloatArray> {
+        val out = ArrayList<FloatArray>()
+        for (line in obj.readLines()) {
+            if (line.startsWith("v ")) {
+                val p = line.trim().split(Regex("\\s+"))
+                out.add(floatArrayOf(p[1].toFloat(), p[2].toFloat(), p[3].toFloat()))
+            }
+        }
+        return out
+    }
+
+    /**
+     * Олень должен быть ОБЪЁМНЫМ и симметричным. Исходный RedDeer из
+     * «The Deer Rigger» поставлялся половиной туши (зеркальный модификатор не
+     * запечён): в игре это выглядело как плоский бумажный олень, а разрез по
+     * связности давал только две ноги — mesh_leg2/mesh_leg3 были пустыми и
+     * никогда не анимировались. Упаковщик теперь отражает геометрию через
+     * плоскость X=0 и сшивает шов, тест это фиксирует.
+     */
+    @Test
+    fun `deer is a solid mirrored animal with four real legs`() {
+        val root = repoRoot()
+        val dir = File(root, "app-winterforest/src/main/assets/models/deer_body")
+        val verts = vertices(File(dir, "mesh.obj"))
+        val box = bbox(File(dir, "mesh.obj"))
+        val width = box[1] - box[0]
+        val length = box[5] - box[4]
+
+        // «бумажный» олень: вся геометрия по одну сторону от плоскости зеркала
+        val left = verts.count { it[0] < -0.01f }
+        val right = verts.count { it[0] > 0.01f }
+        assertTrue("deer is one-sided: left=$left right=$right", left > verts.size / 4 && right > verts.size / 4)
+
+        // ширина туши взрослого марала: не плоская (0.06 м) и не бочка (0.80 м)
+        val ratio = width / length
+        assertTrue("deer silhouette wrong: width=$width length=$length", ratio > 0.18f && ratio < 0.42f)
+
+        // bounding box симметричен относительно продольной оси
+        assertTrue("deer bbox off-center: ${box[0]}..${box[1]}", Math.abs(box[0] + box[1]) < 0.01f)
+
+        // четыре ноги существуют, достают до земли и не являются огрызками
+        for (k in 0..3) {
+            val leg = File(dir, "mesh_leg$k.obj")
+            assertTrue("missing mesh_leg$k", leg.isFile)
+            val legVerts = vertices(leg)
+            assertTrue("mesh_leg$k is empty", legVerts.size >= 60)
+            val legBox = bbox(leg)
+            assertTrue("mesh_leg$k does not reach the ground: minY=${legBox[2]}", legBox[2] < 0.05f)
+            assertTrue("mesh_leg$k is too short: ${legBox[3] - legBox[2]}", legBox[3] - legBox[2] > 0.30f)
+        }
+        // передние и задние пары разнесены по длине туши
+        val frontZ = bbox(File(dir, "mesh_leg0.obj")).let { (it[4] + it[5]) / 2f }
+        val backZ = bbox(File(dir, "mesh_leg2.obj")).let { (it[4] + it[5]) / 2f }
+        assertTrue("legs are not spread along the body: front=$frontZ back=$backZ", frontZ - backZ > 0.3f)
+    }
+
     @Test
     fun `fur textures carry real detail not flat gradients`() {
         val root = repoRoot()

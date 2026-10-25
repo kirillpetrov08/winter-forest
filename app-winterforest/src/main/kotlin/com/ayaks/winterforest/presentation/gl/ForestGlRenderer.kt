@@ -2066,57 +2066,20 @@ class ForestGlRenderer(
         if (bodyFloats.isEmpty()) return
         val bodyVbo = GlVbo()
         bodyVbo.uploadStatic(floatsToBuilder(bodyFloats))
+        // Ноги берутся ТОЛЬКО из ассета: mesh_leg0…mesh_leg3 у оленя и волка
+        // заполнены настоящей геометрией (олень раньше был половиной туши, и дальние ноги
+        // дорисовывались зеркальной копией — теперь источник зеркалится в
+        // tools/pack_animals_cabin.py, поэтому рантайм-костыль не нужен).
+        // Модель без разбивки (крыса) остаётся цельной и шагает телом.
         val legs = ArrayList<LegPart>(4)
         for (k in 0..3) {
             val floats = readAssetFloats(ctx, "models/$modelId/mesh_leg$k.obj")
             if (floats.isEmpty()) continue
             legs.add(buildLegPart(floats))
-            // Низкополигональный олень смоделирован с двумя ногами — рисуем
-            // зеркальную пару (дальняя сторона), шаг идёт диагональю
-            if (k == 0 && readAssetFloats(ctx, "models/$modelId/mesh_leg2.obj").isEmpty()) {
-                legs.add(buildLegPart(mirrorX(floats)))
-            }
-            if (k == 1 && readAssetFloats(ctx, "models/$modelId/mesh_leg3.obj").isEmpty()) {
-                legs.add(buildLegPart(mirrorX(floats)))
-            }
         }
         // диагональные пары шага: сортируем «вперёд-назад, слева-направо»
         val sorted = legs.sortedWith(compareByDescending<LegPart> { it.pivotZ }.thenBy { it.pivotX })
         entityParts[modelId] = EntityParts(bodyVbo, sorted)
-    }
-
-    /**
-     * Зеркальная копия ноги через ось X (дальняя сторона туловища).
-     *
-     * Отражение меняет ориентацию граней: нормаль отражённого треугольника
-     * равна (nx, −ny, −nz), а не (−nx, ny, nz). Раньше нормали просто
-     * инвертировались по X, из-за чего дальние ноги оленя и волка освещались
-     * «изнутри» и выглядели чёрными. Здесь нормаль приводится к реальной
-     * геометрической ориентации, а обход вершин в каждом треугольнике
-     * меняется (1↔2), чтобы сохранить лицевую сторону при включённом
-     * back-face culling.
-     */
-    private fun mirrorX(floats: FloatArray): FloatArray {
-        val out = floats.copyOf()
-        var i = 0
-        while (i + 11 < out.size) {
-            out[i] = -out[i]          // позиция X отражается
-            out[i + 4] = -out[i + 4]  // нормаль Y меняет знак
-            out[i + 5] = -out[i + 5]  // нормаль Z меняет знак
-            i += 12
-        }
-        // смена обхода: меняем местами углы 1 и 2 каждого треугольника
-        val tri = 36
-        var t = 0
-        while (t + tri <= out.size) {
-            for (k in 0 until 12) {
-                val a = out[t + 12 + k]
-                out[t + 12 + k] = out[t + 24 + k]
-                out[t + 24 + k] = a
-            }
-            t += tri
-        }
-        return out
     }
 
     /**
@@ -2598,10 +2561,10 @@ class ForestGlSurfaceView(
         // Android 11+ (API 30): FIXED вместо DEFAULT — система не поднимает
         // частоту панели выше запрошенных 60 Гц ради этой поверхности.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            holder.surface.setFrameRate(
-                FramePacing.TARGET_SURFACE_FRAME_RATE,
-                Surface.FRAME_RATE_COMPATIBILITY_FIXED
-            )
+            // FRAME_RATE_COMPATIBILITY_FIXED == 0: контент с постоянной частотой
+            // (игра), а не видео. Литерал вместо константы — константа отсутствует
+            // в части сборок android.jar, а значение стабильно с API 30.
+            holder.surface.setFrameRate(FramePacing.TARGET_SURFACE_FRAME_RATE, 0)
         }
     }
 }
