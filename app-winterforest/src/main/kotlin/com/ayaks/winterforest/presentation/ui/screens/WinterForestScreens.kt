@@ -253,7 +253,7 @@ fun MainMenuScreen(
                         GlassMenuButton(
                             text = "Новая экспедиция",
                             icon = rememberAssetIcon("glyphs/glyph_snowfall.png"),
-                            onClick = { viewModel.startNewGame() },
+                            onClick = { viewModel.requestNewExpedition() },
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .testTag("btn_new_game")
@@ -262,7 +262,7 @@ fun MainMenuScreen(
                         PrimaryGameButton(
                             text = "Новая экспедиция",
                             icon = rememberAssetIcon("glyphs/glyph_snowfall.png"),
-                            onClick = { viewModel.startNewGame() },
+                            onClick = { viewModel.requestNewExpedition() },
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .testTag("btn_new_game")
@@ -606,6 +606,81 @@ fun GameScreen(
                 }
             }
         }
+    }
+}
+
+/**
+ * §7.4: выбор класса ПЕРЕД каждым новым забегом. Три стеклянные карточки со
+ * стартовым набором; выбор применяется к забегу сразу при старте.
+ */
+@Composable
+fun LoadoutSelectScreen(
+    state: WinterForestUiState,
+    viewModel: WinterForestViewModel
+) {
+    var chosen by remember { mutableStateOf(state.baseProgress.selectedLoadout) }
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xC4060C14))
+            .displayCutoutPadding()
+            .padding(18.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("Класс экспедиции", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = SnowCrispText)
+            OutlinedButton(onClick = { viewModel.navigateTo(AppDestination.MAIN_MENU) }) {
+                Text("← Меню")
+            }
+        }
+        Text(
+            text = "Класс определяет стартовый набор каждого нового забега. Выбор делается перед стартом, а не в базе.",
+            color = MistMutedText,
+            fontSize = 12.sp
+        )
+        Row(
+            modifier = Modifier.weight(1f),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            for (loadout in StarterLoadout.entries) {
+                val selected = chosen == loadout
+                Card(
+                    colors = CardDefaults.cardColors(
+                        containerColor = if (selected) Color(0x337CC6FE) else FrostedCardSurface
+                    ),
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .clickable { chosen = loadout }
+                ) {
+                    Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(
+                            text = (if (selected) "✓ " else "") + loadout.titleRu,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = SnowCrispText
+                        )
+                        Text(text = loadout.descriptionRu, color = MistMutedText, fontSize = 12.sp)
+                        Text(
+                            text = "Стартовый набор: " + loadout.items.entries
+                                .joinToString(", ") { "${it.key.titleRu} ×${it.value}" },
+                            color = IceCyanPrimary,
+                            fontSize = 12.sp
+                        )
+                    }
+                }
+            }
+        }
+        PrimaryGameButton(
+            text = "Начать забег",
+            icon = rememberAssetIcon("glyphs/glyph_snowfall.png"),
+            onClick = { viewModel.confirmLoadoutAndStart(chosen) },
+            modifier = Modifier.fillMaxWidth().testTag("btn_start_run")
+        )
     }
 }
 
@@ -1221,21 +1296,17 @@ private fun RelicsAndLoadoutTab(
     base: BaseProgress,
     viewModel: WinterForestViewModel
 ) {
+    // §7.4: выбор класса убран из базы — он происходит перед каждым забегом
+    // на экране LOADOUT_SELECT («Новая экспедиция» в главном меню).
     Card(colors = CardDefaults.cardColors(containerColor = FrostedCardSurface)) {
-        Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Выбор стартовой экипировки экспедиции", fontWeight = FontWeight.Bold, color = SnowCrispText)
-            for (loadout in StarterLoadout.entries) {
-                val selected = base.selectedLoadout == loadout
-                OutlinedButton(
-                    onClick = { viewModel.onSelectLoadout(loadout) },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text(
-                        (if (selected) "✓ " else "") + "${loadout.titleRu} — ${loadout.descriptionRu}",
-                        fontSize = 12.sp
-                    )
-                }
-            }
+        Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text("Класс экспедиции", fontWeight = FontWeight.Bold, color = SnowCrispText)
+            Text(
+                text = "Текущий класс: «${base.selectedLoadout.titleRu}». Класс выбирается перед стартом " +
+                    "нового забега в главном меню («Новая экспедиция»).",
+                color = MistMutedText,
+                fontSize = 12.sp
+            )
         }
     }
 
@@ -1318,7 +1389,7 @@ fun ResultsScreen(
             }
 
             Button(
-                onClick = { viewModel.startNewGame() },
+                onClick = { viewModel.requestNewExpedition() },
                 colors = ButtonDefaults.buttonColors(containerColor = HearthAmberAccent),
                 modifier = Modifier.fillMaxWidth().height(48.dp)
             ) {

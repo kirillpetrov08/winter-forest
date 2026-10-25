@@ -140,6 +140,24 @@ class WinterForestViewModel(
         }
     }
 
+    /** §7.4: «Новая экспедиция» всегда ведёт через экран выбора класса. */
+    fun requestNewExpedition() {
+        _uiState.update {
+            it.copy(
+                destination = AppDestination.LOADOUT_SELECT,
+                previousDestination = it.destination
+            )
+        }
+    }
+
+    /** Применение выбранного класса к базе и старт забега с ним. */
+    fun confirmLoadoutAndStart(loadout: StarterLoadout, seed: Long = System.currentTimeMillis()) {
+        val baseWithLoadout = SurvivalEngine.selectStarterLoadout(_uiState.value.baseProgress, loadout)
+        _uiState.update { it.copy(baseProgress = baseWithLoadout) }
+        persistCheckpointAsync()
+        startNewGame(seed)
+    }
+
     fun startNewGame(seed: Long = System.currentTimeMillis()) {
         val currentBase = _uiState.value.baseProgress
         val freshRun = SurvivalEngine.createNewRun(currentBase, seed = seed)

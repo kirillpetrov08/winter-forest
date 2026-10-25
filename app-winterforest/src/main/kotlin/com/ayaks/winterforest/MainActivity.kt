@@ -139,6 +139,7 @@ fun WinterForestAppRoot(viewModel: WinterForestViewModel) {
         if (state.sceneReady) {
             when (state.destination) {
                 AppDestination.MAIN_MENU -> MainMenuScreen(state = state, viewModel = viewModel)
+                AppDestination.LOADOUT_SELECT -> LoadoutSelectScreen(state = state, viewModel = viewModel)
                 AppDestination.GAME -> GameScreen(state = state, viewModel = viewModel)
                 AppDestination.BASE_INVENTORY -> BaseInventoryScreen(state = state, viewModel = viewModel)
                 AppDestination.RESULTS -> ResultsScreen(state = state, viewModel = viewModel)
@@ -202,6 +203,7 @@ private fun PersistentForestScene(
     onFirstFrameReady: () -> Unit
 ) {
     val orbitMode = state.destination == AppDestination.MAIN_MENU ||
+        state.destination == AppDestination.LOADOUT_SELECT ||
         state.destination == AppDestination.SETTINGS ||
         state.destination == AppDestination.ABOUT
     AndroidView(

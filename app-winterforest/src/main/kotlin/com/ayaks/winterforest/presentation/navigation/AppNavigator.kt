@@ -4,6 +4,8 @@ import com.ayaks.winterforest.data.ads.AdConfig
 
 enum class AppDestination(val route: String, val titleRu: String) {
     MAIN_MENU("main_menu", "Главное меню"),
+    // §7.4: класс выбирается ПЕРЕД каждым новым забегом, а не в настройках базы
+    LOADOUT_SELECT("loadout_select", "Выбор класса"),
     GAME("game", "Зимний лес"),
     BASE_INVENTORY("base_inventory", "База и инвентарь"),
     RESULTS("results", "Итоги выживания"),
