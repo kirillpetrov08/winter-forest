@@ -303,7 +303,7 @@ class WinterForestViewModel(
     fun onRestoreResources() {
         _uiState.update { st ->
             val run = st.activeRun ?: return@update st
-            val updatedNodes = run.nodesByLocation.mapValues { _, nodes ->
+            val updatedNodes = run.nodesByLocation.mapValues { (_, nodes) ->
                 nodes.map { it.copy(respawnRemainingSec = 0f) }
             }
             st.copy(

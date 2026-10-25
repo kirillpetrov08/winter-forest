@@ -119,7 +119,6 @@ object AssetProps {
             Placement("dry_branches_b", 17.6f, 15.1f, 0.8f, 1.0f),
             Placement("cache_crate", 10.5f, -8.5f, 0.9f, 1.0f),
             Placement("lantern", 9.25f, -7.55f, 1.4f, 1.0f),
-            Placement("fence", -12.15f, 4.85f, 1.62f, 1.0f),
             Placement("woodstack", -18.35f, 9.45f, 0.42f, 1.0f),
             Placement("barrel", -20.55f, -7.15f, 1.15f, 1.0f),
             // листва и кусты пака Trees & Bushes (модель пользователя)
