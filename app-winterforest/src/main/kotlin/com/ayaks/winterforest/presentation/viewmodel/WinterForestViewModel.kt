@@ -530,7 +530,9 @@ class WinterForestViewModel(
     /** §7.12: подобрать предмет под прицелом. */
     fun onPickupNearestDropped() = applyEngineAction(cooldownId = "pickup", cooldownSec = 0.6f) { run, base ->
         val item = run.nearestDroppedItem()
-            ?: return@applyEngineAction EngineStepOutcome(run, base, false, "Рядом нет предметов.")
+            ?: return@applyEngineAction com.ayaks.winterforest.domain.rules.EngineStepOutcome(
+                run, base, false, "Рядом нет предметов."
+            )
         SurvivalEngine.pickupDroppedItem(run, base, item.id)
     }
 

@@ -314,11 +314,11 @@ data class GameRunState(
     // §7.17: рендерер спрашивает узлы и фауну КАЖДЫЙ кадр; flatten() пяти
     // районов на кадр аллоцировал список за списком. Кэш живёт до изменения
     // карты узлов/фауны или района (copy() создаёт новый экземпляр → поля
-    // сбрасываются, transient-поля в сейв не пишутся).
-    @Transient private var cachedNodes: List<ResourceNode>? = null
-    @Transient private var cachedNodesMap: Map<LocationId, List<ResourceNode>>? = null
-    @Transient private var cachedWildlife: List<WildlifeEntity>? = null
-    @Transient private var cachedWildlifeMap: Map<LocationId, List<WildlifeEntity>>? = null
+    // сбрасываются; свойства тела @Serializable-класса в сейв не пишутся).
+    private var cachedNodes: List<ResourceNode>? = null
+    private var cachedNodesMap: Map<LocationId, List<ResourceNode>>? = null
+    private var cachedWildlife: List<WildlifeEntity>? = null
+    private var cachedWildlifeMap: Map<LocationId, List<WildlifeEntity>>? = null
 
     fun currentLocationNodes(): List<ResourceNode> {
         val map = nodesByLocation
