@@ -425,6 +425,7 @@ private fun HotbarSlotChip(
     }
 
 
+@Composable
 fun MiniCompassBadge(
     playerX: Float,
     playerZ: Float,
