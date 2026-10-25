@@ -695,6 +695,10 @@ class ForestGlRenderer(
             vbo.uploadStatic(builder)
             assetPropBatches[modelId] = vbo
         }
+        // Разобранные в FloatArray меши живут только до загрузки в VBO: кэш на все
+        // 33 модели держал ~41 МБ heap (а cabin_wood один — 4.6 МБ) до конца сессии.
+        // Геометрия уже на GPU, повторная сборка перечитает файл с диска.
+        assetMeshCache.clear()
     }
 
     private fun ensureGpuSceneReady(
@@ -952,27 +956,35 @@ class ForestGlRenderer(
             val sy = kotlin.math.sin(cabYaw)
             fun cabAt(dx: Float, dz: Float): FloatArray =
                 floatArrayOf(cabX + dx * cy + dz * sy, cabZ - dx * sy + dz * cy)
+            // Интерьер вписан в РЕАЛЬНЫЕ стены импортной модели (обмер по сетке:
+            // сруб X [-1.55…+1.05], Z [-4.75…+0.30]; дверь в восточной стене при
+            // Z [-2.30…-1.45]). Прежняя раскладка была нарисована для сруба
+            // 2.9 × 3.8 м: кровать и «свечение двери» висели снаружи избы,
+            // печь и стол протыкали брёвна. Внутренний габарит — 2.2 × 4.7 м.
             // Сплошной деревянный пол (снег больше не «вылазит» сквозь избу)
-            val floor = cabAt(0f, 0f)
-            timber.addOrientedBox(floor[0], cabY + 0.22f, floor[1], 2.75f, 0.14f, 7.1f, cabYaw, 0f, 0f, 0.72f, 0.58f, 0.42f)
-            // Кровать охотника у дальней стены
-            val bed = cabAt(-1.02f, 2.45f)
-            timber.addOrientedBox(bed[0], cabY + 0.42f, bed[1], 1.18f, 0.34f, 2.15f, cabYaw, 0f, 0f)
-            cloth.addOrientedBox(bed[0], cabY + 0.62f, bed[1], 1.12f, 0.14f, 1.75f, cabYaw, 0f, 0f, 0.62f, 0.42f, 0.34f)
-            // Обеденный стол со скамьёй
-            val table = cabAt(1.02f, -0.25f)
-            timber.addOrientedBox(table[0], cabY + 0.74f, table[1], 0.95f, 0.09f, 1.45f, cabYaw, 0f, 0f)
-            timber.addOrientedBox(table[0], cabY + 0.38f, table[1], 0.16f, 0.72f, 0.16f, cabYaw, 0f, 0f)
-            val bench = cabAt(1.02f, -1.35f)
-            timber.addOrientedBox(bench[0], cabY + 0.44f, bench[1], 0.42f, 0.10f, 1.35f, cabYaw, 0f, 0f)
-            // Чугунная печка с трубой и тёплым светом из топки
-            val stove = cabAt(-1.18f, -2.55f)
-            metal.addOrientedBox(stove[0], cabY + 0.62f, stove[1], 0.72f, 0.80f, 0.72f, cabYaw, 0f, 0f, 0.35f, 0.36f, 0.38f)
-            metal.addBox(stove[0], cabY + 1.72f, stove[1], 0.22f, 1.5f, 0.22f, 0.32f, 0.33f, 0.35f)
-            fire.addBox(stove[0] + 0.38f, cabY + 0.58f, stove[1], 0.05f, 0.30f, 0.28f, 1.0f, 0.62f, 0.26f, 1f)
-            // Тёплое свечение внутри избы (видно в проёме двери)
-            val glowWall = cabAt(0f, 3.28f)
-            fire.addOrientedBox(glowWall[0], cabY + 1.15f, glowWall[1], 1.7f, 0.95f, 0.05f, cabYaw, 0f, 0f, 1.0f, 0.76f, 0.34f, 1f)
+            val floor = cabAt(-0.25f, -2.22f)
+            timber.addOrientedBox(floor[0], cabY + 0.22f, floor[1], 2.24f, 0.14f, 4.72f, cabYaw, 0f, 0f, 0.72f, 0.58f, 0.42f)
+            // Кровать охотника у западной стены, изголовьем к печи
+            val bed = cabAt(-0.75f, -0.95f)
+            timber.addOrientedBox(bed[0], cabY + 0.42f, bed[1], 1.00f, 0.34f, 1.80f, cabYaw, 0f, 0f)
+            cloth.addOrientedBox(bed[0], cabY + 0.62f, bed[1], 0.94f, 0.14f, 1.45f, cabYaw, 0f, 0f, 0.62f, 0.42f, 0.34f)
+            // Обеденный стол со скамьёй у окна
+            val table = cabAt(0.34f, -2.85f)
+            timber.addOrientedBox(table[0], cabY + 0.74f, table[1], 0.82f, 0.09f, 1.00f, cabYaw, 0f, 0f)
+            timber.addOrientedBox(table[0], cabY + 0.38f, table[1], 0.15f, 0.72f, 0.15f, cabYaw, 0f, 0f)
+            val bench = cabAt(0.34f, -3.55f)
+            timber.addOrientedBox(bench[0], cabY + 0.44f, bench[1], 0.38f, 0.10f, 0.92f, cabYaw, 0f, 0f)
+            // Чугунная печка с трубой и тёплым светом из топки.
+            // Высота сруба — 1.86 м (масштаб 1.0): труба 0.8 м над топкой уходит в
+            // потолок, а не сквозь крышу, как было при масштабе 0.78 (H = 1.45 м).
+            val stove = cabAt(-1.00f, -3.92f)
+            metal.addOrientedBox(stove[0], cabY + 0.50f, stove[1], 0.62f, 0.72f, 0.62f, cabYaw, 0f, 0f, 0.35f, 0.36f, 0.38f)
+            metal.addOrientedBox(stove[0], cabY + 1.20f, stove[1], 0.18f, 0.72f, 0.18f, cabYaw, 0f, 0f, 0.32f, 0.33f, 0.35f)
+            val firebox = cabAt(-0.70f, -3.92f)
+            fire.addOrientedBox(firebox[0], cabY + 0.42f, firebox[1], 0.05f, 0.28f, 0.26f, cabYaw, 0f, 0f, 1.0f, 0.62f, 0.26f, 1f)
+            // Тёплое свечение у дверного проёма (восточная стена, Z -2.30…-1.45)
+            val glowWall = cabAt(0.72f, -1.88f)
+            fire.addOrientedBox(glowWall[0], cabY + 1.00f, glowWall[1], 0.05f, 0.85f, 0.80f, cabYaw, 0f, 0f, 1.0f, 0.76f, 0.34f, 0.55f)
             // Сушильные козлы охотника возле зимовья
             bark.addTaperedCylinder(cabX - 4.2f, cabY, cabZ - 1.2f, cabX - 4.2f, cabY + 2.0f, cabZ - 0.2f, 0.08f, 0.06f, 6)
             bark.addTaperedCylinder(cabX - 4.2f, cabY, cabZ + 0.8f, cabX - 4.2f, cabY + 2.0f, cabZ - 0.2f, 0.08f, 0.06f, 6)
@@ -1152,6 +1164,19 @@ class ForestGlRenderer(
                     nodeRockSpots.getOrPut("cache_crate") { mutableListOf() }
                         .add(floatArrayOf(node.x, y, node.z, idx * 0.7f, 1.0f, 1f, 1f, 1f))
                 }
+                WorldObjectKind.CLOTH_BUSH -> {
+                    // Куст технической конопли автора (0.54 м) — источник Ткани
+                    foliage.addShadowDisc(node.x, y, node.z, 0.42f, 0.32f)
+                    nodeRockSpots.getOrPut("cloth_bush") { mutableListOf() }
+                        .add(
+                            floatArrayOf(
+                                node.x, y, node.z,
+                                idx * 1.37f,
+                                0.92f + (idx % 4) * 0.09f,
+                                1f, 1f, 1f
+                            )
+                        )
+                }
                 WorldObjectKind.RESIN_STUMP -> {
                     foliage.addShadowDisc(node.x, y, node.z, 0.95f, 0.34f)
                     bark.addTaperedCylinder(node.x, y, node.z, node.x, y + 0.98f, node.z, 0.46f, 0.38f, 10)
@@ -1242,6 +1267,7 @@ class ForestGlRenderer(
             vbo.uploadStatic(builder)
             rockNodeBatches[modelId] = vbo
         }
+        assetMeshCache.clear()
     }
 
     private fun buildAndDrawDynamicFrameLayer(

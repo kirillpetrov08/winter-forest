@@ -256,18 +256,41 @@ object WorldPopulator {
             )
         }
 
-        // Ящиков должно быть немного: оставляем до 4 обычных на район
+        // Кустов ткани должно быть немного: до 6 на район (это профильный узел Ткани)
+        var bushesKept = 0
         var cratesKept = 0
         val trimmed = result.filter { node ->
-            if (node.kind != WorldObjectKind.SUPPLY_CRATE) {
-                true
-            } else if (cratesKept >= 4) {
-                false
-            } else {
-                cratesKept += 1
-                true
+            when (node.kind) {
+                WorldObjectKind.CLOTH_BUSH ->
+                    if (bushesKept >= 6) false else { bushesKept += 1; true }
+                WorldObjectKind.SUPPLY_CRATE ->
+                    if (cratesKept >= 4) false else { cratesKept += 1; true }
+                else -> true
             }
         }.toMutableList()
+
+        // Обычные ящики с припасами: по 2 на район у троп. Ткань теперь добывается
+        // с куста, поэтому ящики больше не появляются «сами» из весов ресурсов —
+        // их выдаём фиксированными точками, чтобы лут ящиков не пропал из игры.
+        val supplySpots = when (location) {
+            LocationId.BASE_CLEARING -> listOf(9.6f to -6.4f, -11.8f to 7.9f)
+            LocationId.DENSE_SPRUCE -> listOf(7.4f to 15.2f, -16.4f to 4.8f)
+            LocationId.FROZEN_LAKE -> listOf(12.6f to 9.4f, -9.2f to -15.8f)
+            LocationId.ABANDONED_MINE -> listOf(9.8f to 6.2f, -11.4f to -14.8f)
+            LocationId.HUNTERS_CABIN -> listOf(12.4f to 4.2f, -8.6f to 12.8f)
+        }
+        supplySpots.forEachIndexed { sIdx, (sx, sz) ->
+            trimmed += ResourceNode(
+                id = "${location.name.lowercase()}_supply_$sIdx",
+                location = location,
+                kind = WorldObjectKind.SUPPLY_CRATE,
+                x = sx,
+                z = sz,
+                resourceType = ResourceType.CLOTH,
+                specialLootId = null,
+                baseYield = 2
+            )
+        }
 
         // 2 военных ящика с редким лутом на район (у троп и строений)
         val militarySpots = when (location) {
@@ -338,7 +361,8 @@ object WorldPopulator {
             ResourceType.BERRIES ->
                 if (index % 3 == 2) WorldObjectKind.SCRUB_BUSH else WorldObjectKind.BERRY_BUSH
             ResourceType.STONE -> WorldObjectKind.STONE_OUTCROP
-            ResourceType.CLOTH -> WorldObjectKind.SUPPLY_CRATE
+            // Ткань добывается с куста технической конопли (модель автора), а не из ящика
+            ResourceType.CLOTH -> WorldObjectKind.CLOTH_BUSH
             ResourceType.RESIN -> WorldObjectKind.RESIN_STUMP
             ResourceType.FISH -> WorldObjectKind.ICE_HOLE
             ResourceType.ICE -> if (location == LocationId.FROZEN_LAKE) {

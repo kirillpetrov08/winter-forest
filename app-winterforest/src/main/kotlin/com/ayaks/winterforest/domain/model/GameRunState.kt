@@ -22,7 +22,13 @@ enum class WorldObjectKind {
     /** Полевой куст из пака Trees & Bushes (модель пользователя) — даёт Ягоды. */
     SCRUB_BUSH,
     /** Военный ящик с редким лутом (аптечка/нож/сухпай) — модель старого военного ящика. */
-    MILITARY_CRATE
+    MILITARY_CRATE,
+
+    /**
+     * Куст технической конопли — источник Ткани (модель автора `cloth_bush`, 0.54 м).
+     * Заменил прежний «собираемый» ящик с процедурной тканью.
+     */
+    CLOTH_BUSH
 }
 
 @Serializable
@@ -339,6 +345,8 @@ data class GameRunState(
                 WorldObjectKind.COAL_SEAM,
                 WorldObjectKind.IRON_VEIN -> "Добывать ($resName)"
                 WorldObjectKind.ICE_HOLE -> "Ловить ($resName)"
+                // Куст ткани обрывают руками — отдельный глагол вместо «Собрать»
+                WorldObjectKind.CLOTH_BUSH -> "Обрывать ($resName)"
                 else -> "Собрать ($resName)"
             }
             return TargetPromptInfo(

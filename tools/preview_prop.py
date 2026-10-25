@@ -78,6 +78,11 @@ def render(vs, vts, faces, tex, yaw, pitch=0.32, size=512):
         v = l0 * vv0 + l1 * vv1 + l2 * vv2
         tx = np.mod((u * tw).astype(np.int64), tw)
         ty = np.mod(((1 - v) * th).astype(np.int64), th)
+        # как в шейдере: alpha < 0.05 -> discard, глубина не пишется
+        alpha = tex[ty, tx, 3]
+        upd = upd & (alpha > 12)
+        if not upd.any():
+            continue
         sub = img[ymin:ymax, xmin:xmax]
         sub[upd] = tex[ty[upd], tx[upd], :3] / 255.0
         cur[upd] = z[upd]
@@ -89,7 +94,7 @@ def main():
     yaw = float(sys.argv[2]) if len(sys.argv) > 2 else 0.6
     base = os.path.join(MODELS, mid)
     vs, vts, faces = load_obj(os.path.join(base, "mesh.obj"))
-    tex = np.asarray(Image.open(os.path.join(base, "diff.png")).convert("RGB"))
+    tex = np.asarray(Image.open(os.path.join(base, "diff.png")).convert("RGBA"))
     a = render(vs, vts, faces, tex, yaw)
     b = render(vs, vts, faces, tex, yaw + math.pi * 0.7)
     out = Image.fromarray(np.concatenate([a, b], 1))
