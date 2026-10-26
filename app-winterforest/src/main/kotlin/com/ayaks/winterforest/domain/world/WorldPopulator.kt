@@ -342,7 +342,9 @@ object WorldPopulator {
         // §7.11: валежник и галька — ручная добыча дерева и камня на старте
         // забега (до первого топора/кирки). Раскиданы кольцом по всей площади
         // района, вдали от построек, чтобы старт не зависел от одной точки.
-        val handSpots = 8
+        // Мелкие камни и ветки — на полкарты: стартовая добыча руками лежит
+        // по всей площади района, а не кучкой у базы.
+        val handSpots = 14
         for (k in 0 until handSpots) {
             val (hx, hz) = sampleSpreadSpot(rng, taken, forbidden, minDist = 5.0f, forbiddenRadius = 8f)
             taken += hx to hz
@@ -421,7 +423,8 @@ object WorldPopulator {
             ResourceType.STONE -> WorldObjectKind.STONE_OUTCROP
             // Ткань добывается с куста технической конопли (модель автора), а не из ящика
             ResourceType.CLOTH -> WorldObjectKind.CLOTH_BUSH
-            ResourceType.RESIN -> WorldObjectKind.RESIN_STUMP
+            // Смола выпадает автоматически при срубе дерева — отдельных пней нет
+            ResourceType.RESIN -> WorldObjectKind.PINE_TREE
             ResourceType.FISH -> WorldObjectKind.ICE_HOLE
             ResourceType.ICE -> if (location == LocationId.FROZEN_LAKE) {
                 WorldObjectKind.STONE_OUTCROP

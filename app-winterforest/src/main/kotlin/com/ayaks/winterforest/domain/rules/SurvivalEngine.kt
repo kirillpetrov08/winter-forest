@@ -549,6 +549,32 @@ object SurvivalEngine {
         return run.copy(equippedTool = tool, lastStatusMessage = msg)
     }
 
+    /**
+     * Экипировать инструмент ИЗ РЮКЗАКА (тап по записи хотбара или кнопка
+     * «Взять в руки»): инструмент должен лежать в [Inventory.tools].
+     * NONE — убрать инструмент и остаться с пустыми руками.
+     */
+    fun equipToolItem(run: GameRunState, base: BaseProgress, tool: EquippedTool): EngineStepOutcome {
+        if (run.phase == RunPhase.DEAD) {
+            return EngineStepOutcome(run, base, false, "Персонаж мёртв.")
+        }
+        if (tool == EquippedTool.NONE) {
+            val msg = "Инструмент убран в рюкзак: пустые руки."
+            return EngineStepOutcome(
+                run.copy(equippedTool = EquippedTool.NONE, lastStatusMessage = msg), base, true, msg
+            )
+        }
+        if (tool == EquippedTool.TORCH) {
+            return igniteResinTorch(run, base)
+        }
+        if (!run.inventory.hasTool(tool)) {
+            val msg = "В рюкзаке нет «${tool.titleRu}» — сначала соберите его на верстаке."
+            return EngineStepOutcome(run.copy(lastStatusMessage = msg), base, false, msg)
+        }
+        val msg = "В руках: ${tool.titleRu}."
+        return EngineStepOutcome(run.copy(equippedTool = tool, lastStatusMessage = msg), base, true, msg)
+    }
+
     fun setSprinting(run: GameRunState, sprinting: Boolean): GameRunState {
         val allowed = sprinting && run.stamina > 5f
         return run.copy(isSprinting = allowed)
@@ -952,6 +978,19 @@ object SurvivalEngine {
         }
 
         val added = addResult.addedAmount
+        // Смола больше не лежит на земле отдельным ресурсом: она автоматически
+        // выступает на срубленном дереве (ель или дуб) и падает в рюкзак.
+        var inventoryAfter = addResult.inventory
+        var resinNote = ""
+        if (resType == ResourceType.WOOD &&
+            (target.kind == WorldObjectKind.PINE_TREE || target.kind == WorldObjectKind.OAK_TREE)
+        ) {
+            val resinAdd = inventoryAfter.tryAddResource(ResourceType.RESIN, 1)
+            if (!resinAdd.isFullBlocked) {
+                inventoryAfter = resinAdd.inventory
+                resinNote = ", Смола +1"
+            }
+        }
         val updatedNodes = replaceNode(
             run.nodesByLocation,
             run.currentLocation,
@@ -972,10 +1011,10 @@ object SurvivalEngine {
         // §7.11: мягкого штрафа «руками 1 ед.» больше нет — профильные узлы
         // без инструмента просто не добываются (жёсткий гейт выше)
         val toolNote = ""
-        val msg = "Собрано: ${resType.titleRu} +$added (+$xpEarned опыта)$toolNote"
+        val msg = "Собрано: ${resType.titleRu} +$added$resinNote (+$xpEarned опыта)$toolNote"
 
         val updatedRun = run.copy(
-            inventory = addResult.inventory,
+            inventory = inventoryAfter,
             nodesByLocation = updatedNodes,
             totalResourcesGathered = run.totalResourcesGathered + added,
             runWoodGathered = run.runWoodGathered + woodDelta,
@@ -1428,16 +1467,24 @@ object SurvivalEngine {
         return when (recipe) {
             // Первые инструменты забега: герой начинает с пустыми руками (§7.11)
             WorkbenchRecipe.CRAFT_PRIMITIVE_AXE -> {
-                val msg = "Собран Примитивный топор: деревья и валежник теперь поддаются!"
+                val msg = "Собран Примитивный топор — он лёг в рюкзак отдельным предметом и взят в руки!"
                 EngineStepOutcome(
-                    run.copy(inventory = invAfterCost, equippedTool = EquippedTool.AXE, lastStatusMessage = msg),
+                    run.copy(
+                        inventory = invAfterCost.grantTool(EquippedTool.AXE),
+                        equippedTool = EquippedTool.AXE,
+                        lastStatusMessage = msg
+                    ),
                     baseAfterCost, true, msg
                 )
             }
             WorkbenchRecipe.CRAFT_PRIMITIVE_PICKAXE -> {
-                val msg = "Собрана Примитивная кирка: камень, уголь и руда теперь поддаются!"
+                val msg = "Собрана Примитивная кирка — она легла в рюкзак отдельным предметом и взята в руки!"
                 EngineStepOutcome(
-                    run.copy(inventory = invAfterCost, equippedTool = EquippedTool.PICKAXE, lastStatusMessage = msg),
+                    run.copy(
+                        inventory = invAfterCost.grantTool(EquippedTool.PICKAXE),
+                        equippedTool = EquippedTool.PICKAXE,
+                        lastStatusMessage = msg
+                    ),
                     baseAfterCost, true, msg
                 )
             }
@@ -1479,10 +1526,10 @@ object SurvivalEngine {
             }
             WorkbenchRecipe.CRAFT_HUNTING_SPEAR -> {
                 val (nextXp, nextLvl) = applyXpGain(run.xp, run.level, 30)
-                val msg = "Выковано «Копьё следопыта»: урон и добыча на охоте усилены навсегда!"
+                val msg = "Выковано «Копьё следопыта»: копьё легло в рюкзак, урон и добыча на охоте усилены!"
                 EngineStepOutcome(
                     run.copy(
-                        inventory = invAfterCost,
+                        inventory = invAfterCost.grantTool(EquippedTool.SPEAR),
                         equippedTool = EquippedTool.SPEAR,
                         xp = nextXp,
                         level = nextLvl,
@@ -1540,9 +1587,11 @@ object SurvivalEngine {
             WorkbenchRecipe.CRAFT_IRON_AXE -> {
                 val (nextXp, nextLvl) = applyXpGain(run.xp, run.level, 32)
                 val msg = "Выкован «Железный топор»: +1 дерева за удар навсегда!"
+                val invWithAxe = if (invAfterCost.hasTool(EquippedTool.AXE)) invAfterCost
+                else invAfterCost.grantTool(EquippedTool.AXE)
                 EngineStepOutcome(
                     run.copy(
-                        inventory = invAfterCost,
+                        inventory = invWithAxe,
                         xp = nextXp,
                         level = nextLvl,
                         lastStatusMessage = msg
@@ -1555,9 +1604,11 @@ object SurvivalEngine {
             WorkbenchRecipe.CRAFT_IRON_PICKAXE -> {
                 val (nextXp, nextLvl) = applyXpGain(run.xp, run.level, 32)
                 val msg = "Выкована «Железная кирка»: +1 руды и камня за добычу навсегда!"
+                val invWithPick = if (invAfterCost.hasTool(EquippedTool.PICKAXE)) invAfterCost
+                else invAfterCost.grantTool(EquippedTool.PICKAXE)
                 EngineStepOutcome(
                     run.copy(
-                        inventory = invAfterCost,
+                        inventory = invWithPick,
                         xp = nextXp,
                         level = nextLvl,
                         lastStatusMessage = msg

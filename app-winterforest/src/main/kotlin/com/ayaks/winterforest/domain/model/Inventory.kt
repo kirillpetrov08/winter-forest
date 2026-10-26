@@ -28,6 +28,12 @@ data class Inventory(
     val slots: List<InventorySlot> = emptyList(),
     val specialItems: Map<SpecialLootId, Int> = emptyMap(),
     /**
+     * Инструменты (топор/кирка/копьё) — ОТДЕЛЬНЫЕ предметы рюкзака: их можно
+     * переносить в хотбар, экипировать и убирать. Пустая карта в старых сейвах
+     * означает «инструментов нет» (миграция выдаёт инструмент по equippedTool).
+     */
+    val tools: Map<EquippedTool, Int> = emptyMap(),
+    /**
      * §7.3: позиционная раскладка рюкзака (сетка MAX_SLOTS): order[i] — индекс
      * слота в [slots], стоящего в ячейке i, либо null — пустая ячейка. Позволяет
      * перетаскиванием сортировать предметы и оставлять «дырки». Пустой список
@@ -160,6 +166,27 @@ data class Inventory(
         val next = (current + count).coerceAtMost(cap)
         val updated = specialItems.toMutableMap().apply { put(id, next) }
         return copy(specialItems = updated)
+    }
+
+    fun toolCount(tool: EquippedTool): Int = tools[tool] ?: 0
+
+    fun hasTool(tool: EquippedTool): Boolean = toolCount(tool) > 0
+
+    /** Положить инструмент в рюкзак (NONE/TORCH предметами не являются). */
+    fun grantTool(tool: EquippedTool, count: Int = 1): Inventory {
+        if (count <= 0 || tool == EquippedTool.NONE || tool == EquippedTool.TORCH) return this
+        val updated = tools.toMutableMap().apply { put(tool, (this[tool] ?: 0) + count) }
+        return copy(tools = updated)
+    }
+
+    /** Забрать один инструмент из рюкзака (null — инструмента нет). */
+    fun consumeTool(tool: EquippedTool): Inventory? {
+        val current = toolCount(tool)
+        if (current <= 0) return null
+        val updated = tools.toMutableMap().apply {
+            if (current <= 1) remove(tool) else put(tool, current - 1)
+        }
+        return copy(tools = updated)
     }
 
     fun consumeSpecialLoot(id: SpecialLootId, amount: Int = 1): Inventory? {

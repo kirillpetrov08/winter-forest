@@ -289,11 +289,8 @@ class WinterForestViewModel(
         }
     }
 
-    fun onEquipTool(tool: EquippedTool) {
-        _uiState.update { st ->
-            val run = st.activeRun ?: return@update st
-            st.copy(activeRun = SurvivalEngine.equipTool(run, tool))
-        }
+    fun onEquipTool(tool: EquippedTool) = applyEngineAction(cooldownId = "equip", cooldownSec = 0.25f) { run, base ->
+        SurvivalEngine.equipToolItem(run, base, tool)
     }
 
     fun onPlaceFieldCampfire() = applyEngineAction(cooldownId = "place_campfire", cooldownSec = 3.0f) { run, base ->
