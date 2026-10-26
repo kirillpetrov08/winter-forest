@@ -9,6 +9,7 @@ import com.ayaks.winterforest.domain.model.WildlifeEntity
 import com.ayaks.winterforest.domain.model.WildlifeKind
 import com.ayaks.winterforest.domain.model.WorldObjectKind
 import kotlin.math.PI
+import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.hypot
 import kotlin.math.sin
@@ -23,28 +24,42 @@ object WorldPopulator {
             return -0.26f + 0.03f * sin(x * 0.30f) * cos(z * 0.30f)
         }
         val flatten = ((centerDist - 6.2f) / 8.0f).coerceIn(0f, 1f)
-        val microDrift = 0.08f * sin(x * 0.38f + z * 0.21f) + 0.05f * cos(x * 0.62f - z * 0.44f) +
-            0.035f * sin(x * 1.15f - z * 0.9f) + 0.022f * cos(x * 1.8f + z * 1.55f)
+        // Плавный рельеф без «ребристых» отвесных скал: амплитуды волн снижены,
+        // высокочастотный микродрейф почти убран (запрос пользователя).
+        val microDrift = 0.045f * sin(x * 0.38f + z * 0.21f) + 0.03f * cos(x * 0.62f - z * 0.44f) +
+            0.016f * sin(x * 1.15f - z * 0.9f)
         val raw = when (location) {
             // Импортированный ландшафт «Snowy Night Scene» (запечённая сетка высот)
             LocationId.BASE_CLEARING ->
                 ImportedTerrain.heightAt(x, z)
             LocationId.DENSE_SPRUCE ->
-                1.35f * sin(x * 0.105f + 1.1f) * cos(z * 0.095f) + 0.52f * cos(x * 0.20f) +
-                0.34f * sin(x * 0.31f + z * 0.27f) + microDrift
+                0.85f * sin(x * 0.105f + 1.1f) * cos(z * 0.095f) + 0.4f * cos(x * 0.20f) +
+                0.26f * sin(x * 0.31f + z * 0.27f) + microDrift
             LocationId.FROZEN_LAKE ->
-                1.55f * ((centerDist - 22.5f) / 13f).coerceAtLeast(0f) + 0.28f * sin(x * 0.14f) + microDrift * 0.6f
+                1.0f * ((centerDist - 24f) / 16f).coerceAtLeast(0f) + 0.2f * sin(x * 0.14f) + microDrift * 0.6f
             LocationId.ABANDONED_MINE ->
-                0.95f * cos(x * 0.125f) * sin(z * 0.115f) + 0.42f * sin(z * 0.25f) +
-                0.30f * cos(x * 0.29f - z * 0.33f) + microDrift * 0.5f
+                0.55f * cos(x * 0.125f) * sin(z * 0.115f) + 0.3f * sin(z * 0.25f) +
+                0.22f * cos(x * 0.29f - z * 0.33f) + microDrift * 0.5f
             LocationId.HUNTERS_CABIN ->
-                1.55f * sin(x * 0.078f + 0.6f) * cos(z * 0.088f - 0.4f) + 0.58f * sin(x * 0.18f) +
-                0.36f * cos(x * 0.24f + z * 0.29f) + microDrift
+                0.95f * sin(x * 0.078f + 0.6f) * cos(z * 0.088f - 0.4f) + 0.42f * sin(x * 0.18f) +
+                0.28f * cos(x * 0.24f + z * 0.29f) + microDrift
         }
         var height = raw * flatten
         // Дом охотника стоит на РОВНОЙ поляне (иначе углы сруба висят над склоном)
         if (location == LocationId.HUNTERS_CABIN) {
             height = plateauBlend(height, x, z, 7.2f, 8.8f, 15f, 26f)
+        }
+        // Сруб базы тоже на ровном пятачке: дом не залезает в текстуру склона.
+        // Радиус 4/7.5 м — центр лагеря (0,0) остаётся нетронутым (тест рельефа).
+        if (location == LocationId.BASE_CLEARING) {
+            val hutFlat = ((hypot(6.8f, 5.8f) - 6.2f) / 8.0f).coerceIn(0f, 1f)
+            val plateau = ImportedTerrain.heightAt(-6.8f, -5.8f) * hutFlat
+            val d = hypot(x + 6.8f, z + 5.8f)
+            if (d < 7.5f) {
+                val t = (1f - (d - 4f) / 3.5f).coerceIn(0f, 1f)
+                val sm = t * t * (3f - 2f * t)
+                height = height * (1f - sm) + plateau * sm
+            }
         }
         // Площадка штольни с рельсами — ровная траншея
         if (location == LocationId.ABANDONED_MINE) {
@@ -80,21 +95,21 @@ object WorldPopulator {
     private fun terrainHeightRawAt(location: LocationId, x: Float, z: Float): Float {
         val centerDist = sqrt(x * x + z * z)
         val flatten = ((centerDist - 6.2f) / 8.0f).coerceIn(0f, 1f)
-        val micro = 0.08f * sin(x * 0.38f + z * 0.21f) + 0.05f * cos(x * 0.62f - z * 0.44f) +
-            0.035f * sin(x * 1.15f - z * 0.9f) + 0.022f * cos(x * 1.8f + z * 1.55f)
+        val micro = 0.045f * sin(x * 0.38f + z * 0.21f) + 0.03f * cos(x * 0.62f - z * 0.44f) +
+            0.016f * sin(x * 1.15f - z * 0.9f)
         val raw = when (location) {
             LocationId.BASE_CLEARING -> ImportedTerrain.heightAt(x, z)
             LocationId.DENSE_SPRUCE ->
-                1.35f * sin(x * 0.105f + 1.1f) * cos(z * 0.095f) + 0.52f * cos(x * 0.20f) +
-                0.34f * sin(x * 0.31f + z * 0.27f) + micro
+                0.85f * sin(x * 0.105f + 1.1f) * cos(z * 0.095f) + 0.4f * cos(x * 0.20f) +
+                0.26f * sin(x * 0.31f + z * 0.27f) + micro
             LocationId.FROZEN_LAKE ->
-                1.55f * ((centerDist - 22.5f) / 13f).coerceAtLeast(0f) + 0.28f * sin(x * 0.14f) + micro * 0.6f
+                1.0f * ((centerDist - 24f) / 16f).coerceAtLeast(0f) + 0.2f * sin(x * 0.14f) + micro * 0.6f
             LocationId.ABANDONED_MINE ->
-                0.95f * cos(x * 0.125f) * sin(z * 0.115f) + 0.42f * sin(z * 0.25f) +
-                0.30f * cos(x * 0.29f - z * 0.33f) + micro * 0.5f
+                0.55f * cos(x * 0.125f) * sin(z * 0.115f) + 0.3f * sin(z * 0.25f) +
+                0.22f * cos(x * 0.29f - z * 0.33f) + micro * 0.5f
             LocationId.HUNTERS_CABIN ->
-                1.55f * sin(x * 0.078f + 0.6f) * cos(z * 0.088f - 0.4f) + 0.58f * sin(x * 0.18f) +
-                0.36f * cos(x * 0.24f + z * 0.29f) + micro
+                0.95f * sin(x * 0.078f + 0.6f) * cos(z * 0.088f - 0.4f) + 0.42f * sin(x * 0.18f) +
+                0.28f * cos(x * 0.24f + z * 0.29f) + micro
         }
         return raw * flatten
     }
@@ -113,9 +128,9 @@ object WorldPopulator {
             hSum += w * terrainHeight(r.id, x - r.cx, z - r.cz)
         }
         val base = if (wSum > 0.0001f) hSum / wSum else 0f
-        // Внешний кряж по периметру мира
+        // Внешний кряж по периметру мира — пологий подъём, не отвесная стена
         val edge = maxOf(Math.abs(x), Math.abs(z))
-        val ridge = ((edge - 158f) * 1.35f).coerceAtLeast(0f)
+        val ridge = ((edge - 152f) * 0.75f).coerceAtLeast(0f)
         return base + ridge
     }
 
@@ -231,10 +246,49 @@ object WorldPopulator {
         // площади района, не опираются на постройки (≥ 8 м) и не слипаются
         // (≥ 4.2 м между узлами). Прежняя формула angle = idx/count·2π рисовала
         // «опоясывающее кольцо» вокруг центра, где стоят ключевые строения.
-        val taken = ArrayList<Pair<Float, Float>>(nodeCount + 32)
+        val taken = ArrayList<Pair<Float, Float>>(nodeCount + 64)
         val forbidden = structureSpots(location)
+
+        // Внешнее кольцо елей больше не декор: каждое дерево на карте —
+        // добываемый узел. Позиции детерминированные, коридоры к соседним
+        // районам сохранены (углы у осей пропускаем).
+        val ringNodes = ArrayList<ResourceNode>()
+        for (i in 0 until 20) {
+            val ang = (i.toFloat() / 20f) * (PI.toFloat() * 2f)
+            if (abs(sin(ang)) < 0.16f || abs(cos(ang)) < 0.16f) continue
+            val rad = 40.2f + (i % 3) * 1.1f
+            val bx = sin(ang) * rad
+            val bz = -cos(ang) * rad
+            taken += bx to bz
+            ringNodes += ResourceNode(
+                id = "${location.name.lowercase()}_ring_inner_$i",
+                location = location,
+                kind = WorldObjectKind.PINE_TREE,
+                x = bx,
+                z = bz,
+                resourceType = ResourceType.WOOD,
+                baseYield = 2
+            )
+        }
+        for (i in 0 until 15) {
+            val ang = (i.toFloat() / 15f) * (PI.toFloat() * 2f) + 0.11f
+            if (abs(sin(ang)) < 0.16f || abs(cos(ang)) < 0.16f) continue
+            val rad = 44.6f + (i % 2) * 0.9f
+            val bx = sin(ang) * rad
+            val bz = -cos(ang) * rad
+            taken += bx to bz
+            ringNodes += ResourceNode(
+                id = "${location.name.lowercase()}_ring_outer_$i",
+                location = location,
+                kind = WorldObjectKind.PINE_TREE,
+                x = bx,
+                z = bz,
+                resourceType = ResourceType.WOOD,
+                baseYield = 2
+            )
+        }
         for (index in 0 until nodeCount) {
-            val (x, z) = sampleSpreadSpot(rng, taken, forbidden, minDist = 4.2f, forbiddenRadius = 8f)
+            val (x, z) = sampleSpreadSpot(rng, taken, forbidden, minDist = 4.2f)
             taken += x to z
 
             val roll = rng.nextFloat() * totalWeight
@@ -346,9 +400,9 @@ object WorldPopulator {
         // по всей площади района, а не кучкой у базы.
         val handSpots = 14
         for (k in 0 until handSpots) {
-            val (hx, hz) = sampleSpreadSpot(rng, taken, forbidden, minDist = 5.0f, forbiddenRadius = 8f)
+            val (hx, hz) = sampleSpreadSpot(rng, taken, forbidden, minDist = 5.0f)
             taken += hx to hz
-            val (px, pz) = sampleSpreadSpot(rng, taken, forbidden, minDist = 5.0f, forbiddenRadius = 8f)
+            val (px, pz) = sampleSpreadSpot(rng, taken, forbidden, minDist = 5.0f)
             taken += px to pz
             trimmed += ResourceNode(
                 id = "${location.name.lowercase()}_fallen_$k",
@@ -371,6 +425,8 @@ object WorldPopulator {
                 baseYield = 1
             )
         }
+
+        trimmed += ringNodes
 
         result.clear()
         result.addAll(trimmed)
@@ -441,21 +497,23 @@ object WorldPopulator {
      * Точки построек/тайников района (локальные координаты): вокруг них узлы
      * не spawn'ятся, чтобы не возникало «кучи ресурсов у сруба» (§7.10).
      */
-    private fun structureSpots(location: LocationId): List<Pair<Float, Float>> {
-        val spots = mutableListOf<Pair<Float, Float>>()
-        spots += specialCacheCoordinates(location)
-        spots += supplySpotsFor(location)
-        militarySpotFor(location)?.let { spots += it }
+    private fun structureSpots(location: LocationId): List<Triple<Float, Float, Float>> {
+        val spots = mutableListOf<Triple<Float, Float, Float>>()
+        // (x, z, радиус): у домов 10 м чистой поляны — ничего не растёт (запрос
+        // пользователя), у тайников/ящиков/верстака прежние 8 м.
+        val cache = specialCacheCoordinates(location)
+        spots += Triple(cache.first, cache.second, 8f)
+        supplySpotsFor(location).forEach { spots += Triple(it.first, it.second, 8f) }
+        militarySpotFor(location)?.let { spots += Triple(it.first, it.second, 8f) }
         when (location) {
             LocationId.BASE_CLEARING -> {
-                spots += -6.8f to -5.8f // сруб базы
-                spots += 4.8f to -4.5f // верстак-тележка
+                spots += Triple(-6.8f, -5.8f, 10f) // сруб базы
+                spots += Triple(4.8f, -4.5f, 8f)   // верстак-тележка
             }
             LocationId.HUNTERS_CABIN -> {
-                spots += 7.2f to 8.8f  // зимовьё
-                spots += 7.2f to 4.7f  // ворота у тропы
+                spots += Triple(7.2f, 8.8f, 10f)   // зимовьё (железные ворота убраны)
             }
-            LocationId.ABANDONED_MINE -> spots += -8.0f to 7.6f
+            LocationId.ABANDONED_MINE -> spots += Triple(-8.0f, 7.6f, 8f)
             else -> Unit
         }
         return spots
@@ -464,22 +522,21 @@ object WorldPopulator {
     /**
      * Выбор точки Пуассон-дискoм: rejection sampling с детерминированным rng.
      * Возвращает первую точку не ближе [minDist] к занятым и не ближе
-     * [forbiddenRadius] к запретным; если за 48 попыток такой нет — лучшую из
+     * собственного радиуса к запретным; если за 48 попыток такой нет — лучшую из
      * найденных (карта не должна терять узлы).
      */
     private fun sampleSpreadSpot(
         rng: Random,
         taken: List<Pair<Float, Float>>,
-        forbidden: List<Pair<Float, Float>>,
-        minDist: Float,
-        forbiddenRadius: Float
+        forbidden: List<Triple<Float, Float, Float>>,
+        minDist: Float
     ): Pair<Float, Float> {
         var best: Pair<Float, Float>? = null
         var bestScore = -1f
         for (attempt in 0 until 48) {
             val x = -44f + rng.nextFloat() * 88f
             val z = -44f + rng.nextFloat() * 88f
-            if (forbidden.any { hypot(x - it.first, z - it.second) < forbiddenRadius }) continue
+            if (forbidden.any { hypot(x - it.first, z - it.second) < it.third }) continue
             val nearest = taken.minOfOrNull { hypot(x - it.first, z - it.second) } ?: Float.MAX_VALUE
             if (nearest >= minDist) return x to z
             if (nearest > bestScore) {

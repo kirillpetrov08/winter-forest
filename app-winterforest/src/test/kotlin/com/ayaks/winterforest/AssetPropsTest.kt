@@ -3,6 +3,7 @@ package com.ayaks.winterforest
 import com.ayaks.winterforest.domain.model.LocationId
 import com.ayaks.winterforest.presentation.gl.AssetProps
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -60,12 +61,14 @@ class AssetPropsTest {
         assertTrue(base.contains("workbench"))
         assertTrue(base.contains("cache_crate"))
         val cabin = AssetProps.forLocation(LocationId.HUNTERS_CABIN).map { it.modelId }
-        assertTrue(cabin.contains("gate"))
+        // железные ворота убраны с карты (запрос пользователя)
+        assertFalse(cabin.contains("gate"))
+        assertTrue(cabin.contains("cabin_wood"))
         assertTrue(cabin.contains("lantern"))
         val lake = AssetProps.forLocation(LocationId.FROZEN_LAKE).map { it.modelId }
         assertTrue(lake.contains("cache_crate"))
         val mine = AssetProps.forLocation(LocationId.ABANDONED_MINE).map { it.modelId }
-        assertTrue(mine.contains("gate"))
+        assertFalse(mine.contains("gate"))
         assertTrue(mine.contains("cache_crate"))
         assertTrue(mine.contains("lantern"))
     }
