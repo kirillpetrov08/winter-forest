@@ -58,6 +58,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import com.ayaks.winterforest.domain.world.WorldRegions
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -198,40 +199,43 @@ fun MainMenuScreen(
                     modifier = Modifier
                         .width(392.dp)
                         .fillMaxHeight()
-                        .verticalScroll(rememberScrollState())
                         .padding(start = 22.dp, top = 14.dp, bottom = 8.dp, end = 10.dp),
-                    // SpaceBetween на низких экранах распирал блоки и уводил ряд
-                    // «Настройки / Об игре» за границу — теперь плотный столбик со скроллом
-                    verticalArrangement = Arrangement.spacedBy(18.dp)
+                    // Настройки ушли вбок (см. правую кромку), колонка меню снова
+                    // помещается по высоте БЕЗ прослистывания
+                    verticalArrangement = Arrangement.SpaceBetween
                 ) {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        // Название кириллицей: две строки, как вырезанные на снегу
+                        // Название кириллицей: две строки, как вырезанные на снегу;
+                        // на низких экранах компактно, чтобы меню не скроллилось
+                        val shortScreen = LocalConfiguration.current.screenHeightDp < 430
                         Text(
                             text = "ЗИМНИЙ",
-                            fontSize = 44.sp,
+                            fontSize = if (shortScreen) 30.sp else 44.sp,
                             fontWeight = FontWeight.Black,
                             color = SnowCrispText,
-                            letterSpacing = 7.sp
+                            letterSpacing = if (shortScreen) 5.sp else 7.sp
                         )
                         Text(
                             text = "Л Е С",
-                            fontSize = 28.sp,
+                            fontSize = if (shortScreen) 20.sp else 28.sp,
                             fontWeight = FontWeight.ExtraBold,
                             color = HearthAmberAccent,
                             letterSpacing = 12.sp
                         )
-                        Box(
-                            modifier = Modifier
-                                .width(118.dp)
-                                .height(2.dp)
-                                .background(HearthAmberAccent.copy(alpha = 0.72f))
-                        )
-                        Text(
-                            text = "тайга • выживание • одиночество",
-                            fontSize = 12.sp,
-                            color = IceCyanPrimary,
-                            fontWeight = FontWeight.Medium
-                        )
+                        if (!shortScreen) {
+                            Box(
+                                modifier = Modifier
+                                    .width(118.dp)
+                                    .height(2.dp)
+                                    .background(HearthAmberAccent.copy(alpha = 0.72f))
+                            )
+                            Text(
+                                text = "тайга • выживание • одиночество",
+                                fontSize = 12.sp,
+                                color = IceCyanPrimary,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
 
                         GlassStatRow(
                             items = listOf(
@@ -295,24 +299,6 @@ fun MainMenuScreen(
                             onClick = { viewModel.navigateTo(AppDestination.BASE_INVENTORY) },
                             modifier = Modifier.fillMaxWidth()
                         )
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                            GlassMenuButton(
-                                text = "Настройки",
-                                icon = rememberAssetIcon("glyphs/glyph_settings.png"),
-                                onClick = { viewModel.navigateTo(AppDestination.SETTINGS) },
-                                modifier = Modifier.weight(1f),
-                                height = 40.dp,
-                                fontSize = 12
-                            )
-                            GlassMenuButton(
-                                text = "Об игре",
-                                onClick = { viewModel.navigateTo(AppDestination.ABOUT) },
-                                modifier = Modifier.weight(1f),
-                                height = 40.dp,
-                                fontSize = 12
-                            )
-                        }
-
                         GlassChip(
                             text = "Снаряжение: «${state.baseProgress.selectedLoadout.titleRu}»  •  Графика: ${state.settings.graphicsQuality.titleRu}",
                             fill = Color(0x7AFFFFFF),
@@ -324,6 +310,32 @@ fun MainMenuScreen(
 
                 // Правая половина — живая 3D-панорама без стекла и карточек
                 Spacer(modifier = Modifier.weight(1f))
+
+                // Настройки и «Об игре» — ОТДЕЛЬНАЯ боковая кромка у правого края:
+                // колонка меню помещается по высоте без прослистывания
+                Column(
+                    modifier = Modifier
+                        .align(Alignment.Bottom)
+                        .width(150.dp)
+                        .padding(end = 10.dp, bottom = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    GlassMenuButton(
+                        text = "Настройки",
+                        icon = rememberAssetIcon("glyphs/glyph_settings.png"),
+                        onClick = { viewModel.navigateTo(AppDestination.SETTINGS) },
+                        modifier = Modifier.fillMaxWidth(),
+                        height = 40.dp,
+                        fontSize = 12
+                    )
+                    GlassMenuButton(
+                        text = "Об игре",
+                        onClick = { viewModel.navigateTo(AppDestination.ABOUT) },
+                        modifier = Modifier.fillMaxWidth(),
+                        height = 40.dp,
+                        fontSize = 12
+                    )
+                }
             }
 
             // ЕДИНСТВЕННОЕ место показа баннера РСЯ во всём приложении — низ главного меню
