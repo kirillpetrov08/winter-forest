@@ -39,7 +39,7 @@ class ToolItemsTest {
         )
         assertTrue(out.message, out.actionSucceeded)
         assertTrue("топор не лёг в рюкзак предметом", out.run.inventory.hasTool(EquippedTool.AXE))
-        assertEquals(EquippedTool.AXE, out.run.equippedTool)
+        assertEquals("после крафта инструмент НЕ берётся в руки автоматически", EquippedTool.NONE, out.run.equippedTool)
 
         val uneq = SurvivalEngine.equipToolItem(out.run, out.base, EquippedTool.NONE)
         assertTrue(uneq.actionSucceeded)

@@ -1536,22 +1536,20 @@ object SurvivalEngine {
         return when (recipe) {
             // Первые инструменты забега: герой начинает с пустыми руками (§7.11)
             WorkbenchRecipe.CRAFT_PRIMITIVE_AXE -> {
-                val msg = "Собран Примитивный топор — он лёг в рюкзак отдельным предметом и взят в руки!"
+                val msg = "Собран Примитивный топор — он лёг в рюкзак к остальным предметам. Взять в руки: рюкзак → «Взять в руки»."
                 EngineStepOutcome(
                     run.copy(
                         inventory = invAfterCost.grantTool(EquippedTool.AXE),
-                        equippedTool = EquippedTool.AXE,
                         lastStatusMessage = msg
                     ),
                     baseAfterCost, true, msg
                 )
             }
             WorkbenchRecipe.CRAFT_PRIMITIVE_PICKAXE -> {
-                val msg = "Собрана Примитивная кирка — она легла в рюкзак отдельным предметом и взята в руки!"
+                val msg = "Собрана Примитивная кирка — она легла в рюкзак к остальным предметам. Взять в руки: рюкзак → «Взять в руки»."
                 EngineStepOutcome(
                     run.copy(
                         inventory = invAfterCost.grantTool(EquippedTool.PICKAXE),
-                        equippedTool = EquippedTool.PICKAXE,
                         lastStatusMessage = msg
                     ),
                     baseAfterCost, true, msg
@@ -1595,11 +1593,10 @@ object SurvivalEngine {
             }
             WorkbenchRecipe.CRAFT_HUNTING_SPEAR -> {
                 val (nextXp, nextLvl) = applyXpGain(run.xp, run.level, 30)
-                val msg = "Выковано «Копьё следопыта»: копьё легло в рюкзак, урон и добыча на охоте усилены!"
+                val msg = "Выковано «Копьё следопыта»: копьё легло в рюкзак к остальным предметам, урон и добыча на охоте усилены!"
                 EngineStepOutcome(
                     run.copy(
                         inventory = invAfterCost.grantTool(EquippedTool.SPEAR),
-                        equippedTool = EquippedTool.SPEAR,
                         xp = nextXp,
                         level = nextLvl,
                         lastStatusMessage = msg
