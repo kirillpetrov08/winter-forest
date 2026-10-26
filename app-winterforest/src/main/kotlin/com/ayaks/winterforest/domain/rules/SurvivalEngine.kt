@@ -20,6 +20,8 @@ import com.ayaks.winterforest.domain.model.WorldObjectKind
 import com.ayaks.winterforest.domain.model.WorkbenchRecipe
 import com.ayaks.winterforest.domain.world.WorldCollision
 import com.ayaks.winterforest.domain.world.WorldPopulator
+import kotlin.math.abs
+import kotlin.math.exp
 import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.floor
@@ -425,7 +427,15 @@ object SurvivalEngine {
                                     speed = entity.kind.cruiseSpeedMps * (if (nowNight) 1.15f else 0.95f)
                                 }
                             } else {
-                                nextHeading += sin(run.elapsedRealSeconds * 0.7f + idx * 1.9f) * 0.65f * deltaSeconds
+                                // Патрулирование угодий: широкий рыскающий обход на охотничьей
+                                // скорости — волк больше не стоит AFK, а обходит территорию.
+                                val t = run.elapsedRealSeconds
+                                nextHeading += (
+                                    sin(t * 0.7f + idx * 1.9f) * 1.15f +
+                                        cos(t * 0.37f + idx) * 0.5f
+                                    ) * deltaSeconds
+                                speed = entity.kind.cruiseSpeedMps *
+                                    (0.5f + 0.15f * sin(t * 0.4f + idx * 2.7f))
                             }
                         } else {
                             // Мирные крысы и северные олени пасутся и стремительно убегают при приближении
@@ -434,8 +444,54 @@ object SurvivalEngine {
                                 speed = entity.kind.cruiseSpeedMps * 1.75f
                                 nextFlee = maxOf(nextFlee, 2.2f)
                             } else {
-                                nextHeading += sin(run.elapsedRealSeconds * 0.55f + idx * 2.3f) * 0.85f * deltaSeconds
-                                speed = entity.kind.cruiseSpeedMps * 0.38f
+                                // Выпас: циклы «пошёл — остановился пощипать мох», повороты
+                                // двух несоизмеримых синусов. Животное живёт своей жизнью.
+                                val t = run.elapsedRealSeconds
+                                val phase = t * 0.55f + idx * 2.3f
+                                val grazeCycle = (t * 0.09f + idx * 0.31f) % 1f
+                                if (grazeCycle > 0.58f && grazeCycle < 0.78f) {
+                                    speed = 0f
+                                    nextHeading += sin(phase * 2.1f) * 0.35f * deltaSeconds
+                                } else {
+                                    nextHeading += (sin(phase) * 0.85f + cos(phase * 0.63f) * 0.45f) * deltaSeconds
+                                    speed = entity.kind.cruiseSpeedMps *
+                                        (0.34f + 0.18f * (0.5f + 0.5f * sin(t * 0.23f + idx * 1.7f)))
+                                }
+                                // Стадность: тянемся к ближайшему сородичу в 16 м (мягкая подрулка)
+                                val mate = list.firstOrNull {
+                                    it.id != entity.id && it.kind == entity.kind && it.isAlive &&
+                                        hypot(it.x - entity.x, it.z - entity.z) < 16f
+                                }
+                                if (mate != null) {
+                                    val toMate = atan2(mate.z - entity.z, mate.x - entity.x)
+                                    var mateDiff = toMate - nextHeading
+                                    while (mateDiff > Math.PI.toFloat()) mateDiff -= 2f * Math.PI.toFloat()
+                                    while (mateDiff < -Math.PI.toFloat()) mateDiff += 2f * Math.PI.toFloat()
+                                    nextHeading += mateDiff * 0.25f * deltaSeconds
+                                    if (hypot(mate.x - entity.x, mate.z - entity.z) > 3.5f) {
+                                        speed = maxOf(speed, entity.kind.cruiseSpeedMps * 0.5f)
+                                    }
+                                }
+                            }
+                        }
+
+                        // Не подходить к домам ближе 10 м (те же поляны, что у ресурсов)
+                        val (homeCx, homeCz) = com.ayaks.winterforest.domain.world.WorldRegions.centerOf(loc)
+                        val homeX = when (loc) {
+                            LocationId.BASE_CLEARING -> homeCx - 6.8f
+                            LocationId.HUNTERS_CABIN -> homeCx + 7.2f
+                            else -> Float.NaN
+                        }
+                        if (!homeX.isNaN()) {
+                            val homeZ = if (loc == LocationId.BASE_CLEARING) homeCz - 5.8f else homeCz + 8.8f
+                            val homeDist = hypot(entity.x - homeX, entity.z - homeZ)
+                            if (homeDist < 11f && homeDist > 0.01f) {
+                                val away = atan2(entity.z - homeZ, entity.x - homeX)
+                                var homeDiff = away - nextHeading
+                                while (homeDiff > Math.PI.toFloat()) homeDiff -= 2f * Math.PI.toFloat()
+                                while (homeDiff < -Math.PI.toFloat()) homeDiff += 2f * Math.PI.toFloat()
+                                nextHeading += homeDiff * minOf(1f, 2.5f * deltaSeconds)
+                                speed = maxOf(speed, entity.kind.cruiseSpeedMps * 0.6f)
                             }
                         }
 
@@ -496,11 +552,18 @@ object SurvivalEngine {
         val sinYaw = sin(yawRad)
         val cosYaw = cos(yawRad)
 
-        val worldDx = (sinYaw * forwardInput + cosYaw * strafeInput) * effectiveSpeed * deltaSeconds
-        val worldDz = (-cosYaw * forwardInput + sinYaw * strafeInput) * effectiveSpeed * deltaSeconds
+        // Физика шага: скорость с инерцией — герой разгоняется и тормозит,
+        // а не телепортируется за вводом джойстика (как в обычных играх).
+        val targetVx = (sinYaw * forwardInput + cosYaw * strafeInput) * effectiveSpeed
+        val targetVz = (-cosYaw * forwardInput + sinYaw * strafeInput) * effectiveSpeed
+        val resp = (1f - exp(-9f * deltaSeconds)).coerceIn(0f, 1f)
+        var velX = run.velX + (targetVx - run.velX) * resp
+        var velZ = run.velZ + (targetVz - run.velZ) * resp
+        if (abs(velX) < 0.02f) velX = 0f
+        if (abs(velZ) < 0.02f) velZ = 0f
 
-        val rawX = run.playerX + worldDx
-        val rawZ = run.playerZ + worldDz
+        val rawX = run.playerX + velX * deltaSeconds
+        val rawZ = run.playerZ + velZ * deltaSeconds
         val bound = GameRunState.WORLD_HALF_BOUND
         val hitBoundary = rawX < -bound || rawX > bound || rawZ < -bound || rawZ > bound
 
@@ -517,6 +580,10 @@ object SurvivalEngine {
         val finalZ = resolved[1]
         val groundY = WorldPopulator.worldHeight(finalX, finalZ)
 
+        if (hitBoundary) {
+            velX = 0f
+            velZ = 0f
+        }
         val msg = if (hitBoundary) {
             "Граница мира: впереди заснеженный хребет."
         } else {
@@ -526,6 +593,8 @@ object SurvivalEngine {
             playerX = finalX,
             playerY = groundY,
             playerZ = finalZ,
+            velX = velX,
+            velZ = velZ,
             // В едином мире район определяется позицией игрока
             currentLocation = com.ayaks.winterforest.domain.world.WorldRegions.regionAt(finalX, finalZ),
             lastStatusMessage = msg

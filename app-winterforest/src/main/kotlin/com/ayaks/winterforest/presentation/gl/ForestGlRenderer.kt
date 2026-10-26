@@ -928,6 +928,55 @@ class ForestGlRenderer(
                 cx = shX, baseY = shY, cz = shZ,
                 width = 4.6f, wallHeight = wallH, depth = 4.2f
             )
+            // ── Интерьер сруба: связная раскладка вдоль осей дома (пол уже внутри).
+            //    Печь в северо-восточном углу точно под существующей трубой, кровать у
+            //    западной стены, стол со скамьями у южного окна, полки с добром на
+            //    северной стене — проход от двери (x ≈ shX-0.85) остаётся свободным.
+            val flY = shY + 0.31f // верх дощатого пола внутри сруба
+            // Каменная печь: корпус под трубой (cx+hw*0.55, cz+hd*0.25) из addDetailedLogCabin
+            val stX = shX + 1.27f; val stZ = shZ + 0.53f
+            stone.addBox(stX, flY, stZ, 1.05f, 1.10f, 0.95f)
+            stone.addBox(stX, flY + 1.10f, stZ, 1.18f, 0.12f, 1.06f)
+            metal.addBox(stX - 0.55f, flY + 0.26f, stZ, 0.06f, 0.52f, 0.44f, 0.30f, 0.31f, 0.34f)
+            fire.addBox(stX - 0.57f, flY + 0.34f, stZ, 0.03f, 0.36f, 0.30f, 1.0f, 0.62f, 0.26f, 1f)
+            // Половичок перед печью
+            cloth.addBox(stX - 0.85f, flY, stZ + 0.10f, 1.35f, 0.03f, 1.05f, 0.55f, 0.26f, 0.22f)
+            // Кровать у западной стены: рама, матрас, подушка
+            timber.addBox(shX - 1.45f, flY + 0.01f, shZ - 0.75f, 0.95f, 0.30f, 1.85f, 0.66f, 0.52f, 0.36f)
+            cloth.addBox(shX - 1.45f, flY + 0.30f, shZ - 0.72f, 0.86f, 0.16f, 1.66f, 0.62f, 0.42f, 0.34f)
+            cloth.addBox(shX - 1.45f, flY + 0.40f, shZ - 1.42f, 0.58f, 0.13f, 0.34f, 0.88f, 0.86f, 0.80f)
+            // Сундук с добром у изголовья
+            timber.addBox(shX - 1.50f, flY + 0.01f, shZ + 0.62f, 0.62f, 0.50f, 0.44f, 0.58f, 0.44f, 0.30f)
+            metal.addBox(shX - 1.50f, flY + 0.49f, shZ + 0.62f, 0.64f, 0.06f, 0.46f, 0.46f, 0.42f, 0.36f)
+            // Стол со скамьями у южного окна (проход от двери не пересекает)
+            val tbX = shX + 0.45f; val tbZ = shZ + 1.05f
+            timber.addBox(tbX, flY + 0.615f, tbZ, 1.15f, 0.09f, 0.82f, 0.74f, 0.60f, 0.44f)
+            timber.addBox(tbX - 0.46f, flY + 0.01f, tbZ, 0.10f, 0.64f, 0.70f, 0.66f, 0.52f, 0.36f)
+            timber.addBox(tbX + 0.46f, flY + 0.01f, tbZ, 0.10f, 0.64f, 0.70f, 0.66f, 0.52f, 0.36f)
+            timber.addBox(tbX, flY + 0.255f, tbZ - 0.62f, 0.95f, 0.09f, 0.30f, 0.70f, 0.56f, 0.40f)
+            timber.addBox(tbX, flY + 0.255f, tbZ + 0.62f, 0.95f, 0.09f, 0.30f, 0.70f, 0.56f, 0.40f)
+            // Фонарь на столе: тёплая точка света в интерьере
+            metal.addBox(tbX + 0.30f, flY + 0.705f, tbZ, 0.10f, 0.06f, 0.10f, 0.40f, 0.41f, 0.44f)
+            fire.addBox(tbX + 0.30f, flY + 0.765f, tbZ, 0.09f, 0.14f, 0.09f, 1.0f, 0.78f, 0.38f, 1f)
+            // Полки с припасами на северной стене
+            for (row in 0 until 2) {
+                val shelfY = flY + 1.02f + row * 0.42f
+                timber.addBox(shX + 0.30f, shelfY - 0.03f, shZ - 1.62f, 2.30f, 0.06f, 0.32f, 0.70f, 0.56f, 0.40f)
+                for (k in 0 until 3) {
+                    val jx = shX - 0.55f + k * 0.78f + row * 0.24f
+                    if (row == 0) {
+                        bark.addTaperedCylinder(jx, shelfY + 0.03f, shZ - 1.62f, jx, shelfY + 0.30f, shZ - 1.62f, 0.11f, 0.09f, 8, 0.62f, 0.48f, 0.34f)
+                    } else {
+                        cloth.addBox(jx, shelfY + 0.03f, shZ - 1.62f, 0.24f, 0.26f, 0.22f, 0.80f, 0.72f, 0.56f)
+                    }
+                }
+            }
+            // Бочка и связка дров у печи — хозяйственный угол
+            bark.addTaperedCylinder(shX + 1.62f, flY, shZ + 1.42f, shX + 1.62f, flY + 0.72f, shZ + 1.42f, 0.26f, 0.22f, 9, 0.55f, 0.42f, 0.30f)
+            for (k in 0 until 3) {
+                bark.addTaperedCylinder(stX - 0.95f, flY + 0.09f + k * 0.17f, stZ + 0.75f, stX - 0.35f, flY + 0.09f + k * 0.17f, stZ + 0.75f, 0.08f, 0.075f, 7)
+            }
+
             // Поленница дров у стены сруба
             for (row in 0 until 3) {
                 for (col in 0 until 4) {
@@ -1541,7 +1590,7 @@ class ForestGlRenderer(
                     nodeRockSpots.getOrPut("cloth_bush") { mutableListOf() }
                         .add(
                             floatArrayOf(
-                                node.x, y, node.z,
+                                node.x, y - 0.03f, node.z,
                                 idx * 1.37f,
                                 0.92f + (idx % 4) * 0.09f,
                                 1f, 1f, 1f
@@ -1565,14 +1614,14 @@ class ForestGlRenderer(
                 WorldObjectKind.PEBBLES -> {
                     // галька: тот же авторский валун, но мелкий и высветленный
                     nodeRockSpots.getOrPut("rock_09") { mutableListOf() }
-                        .add(floatArrayOf(node.x, y, node.z, idx * 0.97f, 0.40f, 0.88f, 0.90f, 0.94f))
+                        .add(floatArrayOf(node.x, y - 0.06f, node.z, idx * 0.97f, 0.40f, 0.88f, 0.90f, 0.94f))
                 }
                 WorldObjectKind.RESIN_STUMP -> {
                     // §7.10: смоляной ствол — авторская модель tree_bark (не процедурный
                     // цилиндр): каждое видимое дерево в мире обязано быть узлом
                     foliage.addShadowDisc(node.x, y, node.z, 0.95f, 0.34f)
                     nodeRockSpots.getOrPut("tree_bark") { mutableListOf() }
-                        .add(floatArrayOf(node.x, y, node.z, idx * 0.83f, 1.0f, 1f, 1f, 1f))
+                        .add(floatArrayOf(node.x, y - 0.03f, node.z, idx * 0.83f, 1.0f, 1f, 1f, 1f))
                     fire.addSculptedBoulder(node.x + 0.34f, y + 0.44f, node.z + 0.12f, 0.16f, 0.22f, 0.15f, 310 + idx, 1f, 0.72f, 0.16f, false)
                     fire.addSculptedBoulder(node.x - 0.28f, y + 0.62f, node.z - 0.20f, 0.12f, 0.16f, 0.12f, 340 + idx, 1f, 0.78f, 0.22f, false)
                 }
@@ -1588,7 +1637,7 @@ class ForestGlRenderer(
                     foliage.addShadowDisc(node.x, y, node.z, 1.45f, 0.38f)
                     // Угольная жила — тёмная тонировка светлой породы
                     nodeRockSpots.getOrPut("rock_09") { mutableListOf() }
-                        .add(floatArrayOf(node.x, y, node.z, idx * 1.37f, 1.18f, 0.30f, 0.30f, 0.34f))
+                        .add(floatArrayOf(node.x, y - 0.06f, node.z, idx * 1.37f, 1.18f, 0.30f, 0.30f, 0.34f))
                     nodeRockSpots.getOrPut("rock_moss_a") { mutableListOf() }
                         .add(floatArrayOf(node.x + 0.52f, y - 0.05f, node.z + 0.34f, idx * 2.1f, 0.55f, 0.26f, 0.26f, 0.30f))
                 }
@@ -1596,7 +1645,7 @@ class ForestGlRenderer(
                     foliage.addShadowDisc(node.x, y, node.z, 1.45f, 0.38f)
                     // Тёмная порода автора (rock_moss) — из неё падает Железная руда
                     nodeRockSpots.getOrPut("rock_moss_b") { mutableListOf() }
-                        .add(floatArrayOf(node.x, y, node.z, idx * 1.13f, 1.12f, 1f, 1f, 1f))
+                        .add(floatArrayOf(node.x, y - 0.06f, node.z, idx * 1.13f, 1.12f, 1f, 1f, 1f))
                     nodeRockSpots.getOrPut("rock_moss_a") { mutableListOf() }
                         .add(floatArrayOf(node.x - 0.48f, y - 0.04f, node.z + 0.42f, idx * 2.31f, 0.62f, 1f, 1f, 1f))
                 }
@@ -1615,13 +1664,13 @@ class ForestGlRenderer(
                     foliage.addShadowDisc(node.x, y, node.z, 1.55f, 0.36f)
                     val oakId = OAK_MODELS[idx % OAK_MODELS.size]
                     nodeRockSpots.getOrPut(oakId) { mutableListOf() }
-                        .add(floatArrayOf(node.x, y, node.z, idx * 1.71f, 0.92f + (idx % 3) * 0.12f, 0.94f, 0.97f, 1f))
+                        .add(floatArrayOf(node.x, y - 0.04f, node.z, idx * 1.71f, 0.92f + (idx % 3) * 0.12f, 0.94f, 0.97f, 1f))
                 }
                 WorldObjectKind.SCRUB_BUSH -> {
                     foliage.addShadowDisc(node.x, y, node.z, 1.05f, 0.34f)
                     val bushId = SCRUB_MODELS[idx % SCRUB_MODELS.size]
                     nodeRockSpots.getOrPut(bushId) { mutableListOf() }
-                        .add(floatArrayOf(node.x, y, node.z, idx * 2.13f, 0.94f + (idx % 3) * 0.10f, 0.96f, 0.97f, 1f))
+                        .add(floatArrayOf(node.x, y - 0.03f, node.z, idx * 2.13f, 0.94f + (idx % 3) * 0.10f, 0.96f, 0.97f, 1f))
                     // Ягоды утоплены в крону куста — признак добычи
                     for (b in 0 until 5) {
                         val ba = b * 1.1f + idx
@@ -2255,10 +2304,11 @@ class ForestGlRenderer(
             i += 12
         }
         val pivotY = maxY * 0.92f
-        // Компактный шар строго в стыке: чуть больше среза, но не выпирает из силуэта
-        val ballR = (rad * 1.15f).coerceIn(0.035f, 0.10f)
+        // Компактный шар строго в стыке: лишь чуть больше среза и утоплен глубже —
+        // сустав не выпирает из силуэта ноги и не «вылезает» за текстуру тела
+        val ballR = (rad * 1.06f).coerceIn(0.035f, 0.09f)
         val builder = floatsToBuilder(floats)
-        appendJointBall(builder, px, pivotY - ballR * 0.2f, pz, ballR, topX, topY, topZ, topU, topV, ti)
+        appendJointBall(builder, px, pivotY - ballR * 0.45f, pz, ballR, topX, topY, topZ, topU, topV, ti)
         val vbo = GlVbo()
         vbo.uploadStatic(builder)
         return LegPart(vbo, px, pivotY, pz)
@@ -2402,7 +2452,9 @@ class ForestGlRenderer(
         val baseX = camX + fwdX * (0.58f + chopArc * 0.24f) + rightX * (0.34f - chopArc * 0.10f + bobX)
         val baseY = camY - 0.34f + fwdY * 0.52f - chopArc * 0.16f - bobY
         val baseZ = camZ + fwdZ * (0.58f + chopArc * 0.24f) + rightZ * (0.34f - chopArc * 0.10f + bobX)
-        val theta = 0.26f + chopArc * 0.62f
+        // Тот же угол, что у варежки в buildAndDrawDynamicFrameLayer — инструмент
+        // и кисть поворачиваются синхронно и выглядят одним целым
+        val theta = 0.28f + chopArc * 0.85f
         Matrix.setIdentityM(modelMatrix, 0)
         Matrix.translateM(modelMatrix, 0, baseX, baseY, baseZ)
         Matrix.rotateM(modelMatrix, 0, -yawRad * 180f / Math.PI.toFloat(), 0f, 1f, 0f)
