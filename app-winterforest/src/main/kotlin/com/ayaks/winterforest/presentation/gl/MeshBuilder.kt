@@ -212,9 +212,10 @@ class MeshBuilder(initialFloatsCapacity: Int = 16384) {
     fun addBox(
         cx: Float, baseY: Float, cz: Float,
         sx: Float, sy: Float, sz: Float,
-        r: Float = 1f, g: Float = 1f, b: Float = 1f, a: Float = 1f
+        r: Float = 1f, g: Float = 1f, b: Float = 1f, a: Float = 1f,
+        uvDensity: Float = 0.65f
     ) {
-        addOrientedBox(cx, baseY + sy * 0.5f, cz, sx, sy, sz, 0f, 0f, 0f, r, g, b, a)
+        addOrientedBox(cx, baseY + sy * 0.5f, cz, sx, sy, sz, 0f, 0f, 0f, r, g, b, a, uvDensity)
     }
 
     /**

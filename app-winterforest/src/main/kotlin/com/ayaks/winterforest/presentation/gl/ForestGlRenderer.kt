@@ -256,6 +256,15 @@ class ForestGlRenderer(
 
     // Уровень 2.5: Импортированные 3D-модели (Poly Haven: камни, кострище, топор, ветви, растение, деревья)
     private val assetMeshCache = HashMap<String, FloatArray>()
+
+    // Раскрытые меши моделей ресурсных узлов (камни/кусты/дубы/ящики) живут всю
+    // сессию: раньше каждый gather перечитывал и парсил OBJ с диска (микрофриз).
+    // Набор моделей ограничен узлами (~10 шт, ~8 МБ), не все 33 модели пропа.
+    private val nodeModelFloats = HashMap<String, FloatArray>()
+
+    // VBO каждой уздовой модели пересоздаётся ТОЛЬКО при изменении её набора
+    // пятен (сигнатура): сбор ресурса перепекает 1 модель вместо десятка.
+    private val rockBatchCache = HashMap<String, Pair<Int, GlVbo>>()
     private val assetTextures = HashMap<String, Int>()
     private val assetPropBatches = HashMap<String, GlVbo>()
     private var assetPropsBuiltQuality: GraphicsQuality? = null
@@ -339,6 +348,9 @@ class ForestGlRenderer(
         entityParts.clear()
         rockNodeBatches.values.forEach { it.release() }
         rockNodeBatches.clear()
+        // VBO уже отпущены выше через rockNodeBatches — кэш сигнатур очищаем,
+        // чтобы после воссоздания поверхности не переиспользовать мёртвые буферы
+        rockBatchCache.clear()
         toolHandVbos.values.forEach { it.release() }
         toolHandVbos.clear()
         assetTextures.values.forEach { id -> if (id != 0) GLES20.glDeleteTextures(1, intArrayOf(id), 0) }
@@ -935,33 +947,33 @@ class ForestGlRenderer(
             val flY = shY + 0.31f // верх дощатого пола внутри сруба
             // Каменная печь: корпус под трубой (cx+hw*0.55, cz+hd*0.25) из addDetailedLogCabin
             val stX = shX + 1.27f; val stZ = shZ + 0.53f
-            stone.addBox(stX, flY, stZ, 1.05f, 1.10f, 0.95f)
+            stone.addBox(stX, flY, stZ, 1.05f, 1.10f, 0.95f, 1f, 1.4f)
             stone.addBox(stX, flY + 1.10f, stZ, 1.18f, 0.12f, 1.06f)
             metal.addBox(stX - 0.55f, flY + 0.26f, stZ, 0.06f, 0.52f, 0.44f, 0.30f, 0.31f, 0.34f)
             fire.addBox(stX - 0.57f, flY + 0.34f, stZ, 0.03f, 0.36f, 0.30f, 1.0f, 0.62f, 0.26f, 1f)
             // Половичок перед печью
             cloth.addBox(stX - 0.85f, flY, stZ + 0.10f, 1.35f, 0.03f, 1.05f, 0.55f, 0.26f, 0.22f)
             // Кровать у западной стены: рама, матрас, подушка
-            timber.addBox(shX - 1.45f, flY + 0.01f, shZ - 0.75f, 0.95f, 0.30f, 1.85f, 0.66f, 0.52f, 0.36f)
+            timber.addBox(shX - 1.45f, flY + 0.01f, shZ - 0.75f, 0.95f, 0.30f, 1.85f, 0.66f, 0.52f, 0.36f, 1f, 1.6f)
             cloth.addBox(shX - 1.45f, flY + 0.30f, shZ - 0.72f, 0.86f, 0.16f, 1.66f, 0.62f, 0.42f, 0.34f)
             cloth.addBox(shX - 1.45f, flY + 0.40f, shZ - 1.42f, 0.58f, 0.13f, 0.34f, 0.88f, 0.86f, 0.80f)
             // Сундук с добром у изголовья
-            timber.addBox(shX - 1.50f, flY + 0.01f, shZ + 0.62f, 0.62f, 0.50f, 0.44f, 0.58f, 0.44f, 0.30f)
+            timber.addBox(shX - 1.50f, flY + 0.01f, shZ + 0.62f, 0.62f, 0.50f, 0.44f, 0.58f, 0.44f, 0.30f, 1f, 1.6f)
             metal.addBox(shX - 1.50f, flY + 0.49f, shZ + 0.62f, 0.64f, 0.06f, 0.46f, 0.46f, 0.42f, 0.36f)
             // Стол со скамьями у южного окна (проход от двери не пересекает)
             val tbX = shX + 0.45f; val tbZ = shZ + 1.05f
-            timber.addBox(tbX, flY + 0.615f, tbZ, 1.15f, 0.09f, 0.82f, 0.74f, 0.60f, 0.44f)
-            timber.addBox(tbX - 0.46f, flY + 0.01f, tbZ, 0.10f, 0.64f, 0.70f, 0.66f, 0.52f, 0.36f)
-            timber.addBox(tbX + 0.46f, flY + 0.01f, tbZ, 0.10f, 0.64f, 0.70f, 0.66f, 0.52f, 0.36f)
-            timber.addBox(tbX, flY + 0.255f, tbZ - 0.62f, 0.95f, 0.09f, 0.30f, 0.70f, 0.56f, 0.40f)
-            timber.addBox(tbX, flY + 0.255f, tbZ + 0.62f, 0.95f, 0.09f, 0.30f, 0.70f, 0.56f, 0.40f)
+            timber.addBox(tbX, flY + 0.615f, tbZ, 1.15f, 0.09f, 0.82f, 0.74f, 0.60f, 0.44f, 1f, 1.6f)
+            timber.addBox(tbX - 0.46f, flY + 0.01f, tbZ, 0.10f, 0.64f, 0.70f, 0.66f, 0.52f, 0.36f, 1f, 1.6f)
+            timber.addBox(tbX + 0.46f, flY + 0.01f, tbZ, 0.10f, 0.64f, 0.70f, 0.66f, 0.52f, 0.36f, 1f, 1.6f)
+            timber.addBox(tbX, flY + 0.255f, tbZ - 0.62f, 0.95f, 0.09f, 0.30f, 0.70f, 0.56f, 0.40f, 1f, 1.6f)
+            timber.addBox(tbX, flY + 0.255f, tbZ + 0.62f, 0.95f, 0.09f, 0.30f, 0.70f, 0.56f, 0.40f, 1f, 1.6f)
             // Фонарь на столе: тёплая точка света в интерьере
             metal.addBox(tbX + 0.30f, flY + 0.705f, tbZ, 0.10f, 0.06f, 0.10f, 0.40f, 0.41f, 0.44f)
             fire.addBox(tbX + 0.30f, flY + 0.765f, tbZ, 0.09f, 0.14f, 0.09f, 1.0f, 0.78f, 0.38f, 1f)
             // Полки с припасами на северной стене
             for (row in 0 until 2) {
                 val shelfY = flY + 1.02f + row * 0.42f
-                timber.addBox(shX + 0.30f, shelfY - 0.03f, shZ - 1.62f, 2.30f, 0.06f, 0.32f, 0.70f, 0.56f, 0.40f)
+                timber.addBox(shX + 0.30f, shelfY - 0.03f, shZ - 1.62f, 2.30f, 0.06f, 0.32f, 0.70f, 0.56f, 0.40f, 1f, 1.6f)
                 for (k in 0 until 3) {
                     val jx = shX - 0.55f + k * 0.78f + row * 0.24f
                     if (row == 0) {
@@ -971,11 +983,21 @@ class ForestGlRenderer(
                     }
                 }
             }
-            // Бочка и связка дров у печи — хозяйственный угол
+            // Обшивка интерьера: дощатые лайнеры стен и потолок с нормальной
+            // плотностью текстуры (uvDensity 2.0) — внутри дом читается деревом,
+            // а не растянутыми брёвнами. Юг и восток разорваны дверью и окном.
+            val inH = wallH - 0.10f
+            val linY = flY + inH * 0.5f
+            timber.addOrientedBox(shX, linY, shZ - 1.77f, 4.0f, inH, 0.06f, 0f, 0f, 0f, 0.80f, 0.66f, 0.48f, 1f, 2.0f)
+            timber.addOrientedBox(shX - 1.715f, linY, shZ + 1.77f, 0.57f, inH, 0.06f, 0f, 0f, 0f, 0.80f, 0.66f, 0.48f, 1f, 2.0f)
+            timber.addOrientedBox(shX + 0.865f, linY, shZ + 1.77f, 1.73f, inH, 0.06f, 0f, 0f, 0f, 0.80f, 0.66f, 0.48f, 1f, 2.0f)
+            timber.addOrientedBox(shX - 1.97f, linY, shZ, 0.06f, inH, 3.6f, 0f, 0f, 0f, 0.78f, 0.64f, 0.46f, 1f, 2.0f)
+            timber.addOrientedBox(shX + 1.97f, linY, shZ - 1.115f, 0.06f, inH, 1.37f, 0f, 0f, 0f, 0.78f, 0.64f, 0.46f, 1f, 2.0f)
+            timber.addOrientedBox(shX + 1.97f, linY, shZ + 1.115f, 0.06f, inH, 1.37f, 0f, 0f, 0f, 0.78f, 0.64f, 0.46f, 1f, 2.0f)
+            // Потолок: изнутри не видно стропил, доска с плотной текстурой
+            timber.addOrientedBox(shX, shY + 0.22f + wallH - 0.07f, shZ, 4.0f, 0.10f, 3.6f, 0f, 0f, 0f, 0.72f, 0.58f, 0.42f, 1f, 2.0f)
+            // Бочка в хозяйственном углу (дров внутри дома больше нет)
             bark.addTaperedCylinder(shX + 1.62f, flY, shZ + 1.42f, shX + 1.62f, flY + 0.72f, shZ + 1.42f, 0.26f, 0.22f, 9, 0.55f, 0.42f, 0.30f)
-            for (k in 0 until 3) {
-                bark.addTaperedCylinder(stX - 0.95f, flY + 0.09f + k * 0.17f, stZ + 0.75f, stX - 0.35f, flY + 0.09f + k * 0.17f, stZ + 0.75f, 0.08f, 0.075f, 7)
-            }
 
             // Поленница дров у стены сруба
             for (row in 0 until 3) {
@@ -1222,11 +1244,20 @@ class ForestGlRenderer(
             nodeBatches[mat]?.uploadStatic(builder)
         }
 
-        // Камни-ресурсы моделями автора: отдельные батчи по моделям (пересборка при изменении узлов)
-        rockNodeBatches.values.forEach { it.release() }
-        rockNodeBatches.clear()
+        // Камни-ресурсы моделями автора: батч модели пересобирается только если
+        // её набор пятен реально изменился (сигнатура включает качество рельефа —
+        // от него зависит высота посадки). Остальные VBO переиспользуются как есть.
+        val nextRockBatches = HashMap<String, GlVbo>()
         for ((modelId, spots) in nodeRockSpots) {
-            val floats = assetMeshCache.getOrPut(modelId) {
+            var sig = quality.hashCode() * 31 + modelId.hashCode()
+            for (sp in spots) sig = sig * 31 + sp.contentHashCode()
+            val cached = rockBatchCache[modelId]
+            if (cached != null && cached.first == sig) {
+                nextRockBatches[modelId] = cached.second
+                continue
+            }
+            cached?.second?.release()
+            val floats = nodeModelFloats.getOrPut(modelId) {
                 val ctx = appContext
                 if (ctx != null) readAssetFloats(ctx, "models/$modelId/mesh.obj") else FloatArray(0)
             }
@@ -1242,9 +1273,16 @@ class ForestGlRenderer(
             }
             val vbo = GlVbo()
             vbo.uploadStatic(builder)
-            rockNodeBatches[modelId] = vbo
+            nextRockBatches[modelId] = vbo
+            rockBatchCache[modelId] = sig to vbo
         }
-        assetMeshCache.clear()
+        // Модели, исчезнувшие из кадра (смена района), отпускают GL-память
+        for ((modelId, cached) in rockBatchCache) {
+            if (!nextRockBatches.containsKey(modelId)) cached.second.release()
+        }
+        rockBatchCache.keys.retainAll(nextRockBatches.keys)
+        rockNodeBatches.clear()
+        rockNodeBatches.putAll(nextRockBatches)
     }
 
     private fun buildAndDrawDynamicFrameLayer(
@@ -1881,8 +1919,9 @@ class ForestGlRenderer(
         if (lintelH > 0.05f) {
             timber.addBox(doorCx, doorTopY + lintelH * 0.5f, cz + hd - wallT * 0.5f, doorHalf * 2f + 0.1f, lintelH, wallT)
         }
-        // Пол внутри сруба
-        timber.addBox(cx, baseY + 0.26f, cz, width - wallT * 1.6f, 0.10f, depth - wallT * 1.6f)
+        // Пол внутри сруба: доска с реальной плотностью текстуры (uvDensity 2.2),
+        // а не растянутая на всю комнату поверхность
+        timber.addBox(cx, baseY + 0.26f, cz, width - wallT * 1.6f, 0.10f, depth - wallT * 1.6f, 0.74f, 0.60f, 0.44f, 1f, 2.2f)
         // Выступающие венцы брёвен («перерубы» на углах); фасадный ряд прерывается дверью
         val courses = 7
         val stepY = wallHeight / courses
