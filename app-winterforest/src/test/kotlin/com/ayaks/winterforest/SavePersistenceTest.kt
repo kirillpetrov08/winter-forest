@@ -1,6 +1,7 @@
 package com.ayaks.winterforest
 
 import com.ayaks.winterforest.data.db.ActiveRunEntity
+import com.ayaks.winterforest.data.db.SavePayloadCodec
 import com.ayaks.winterforest.data.db.BaseProgressEntity
 import com.ayaks.winterforest.data.db.GameProgressDao
 import com.ayaks.winterforest.data.repository.FileBackedGameRepository
@@ -10,12 +11,14 @@ import com.ayaks.winterforest.domain.model.BaseProgress
 import com.ayaks.winterforest.domain.model.LocationId
 import com.ayaks.winterforest.domain.model.ResourceType
 import com.ayaks.winterforest.domain.model.SpecialLootId
+import com.ayaks.winterforest.domain.model.WildlifeKind
 import com.ayaks.winterforest.domain.repository.LoadSaveResult
 import com.ayaks.winterforest.domain.rules.SurvivalEngine
 import java.io.File
 import java.nio.file.Files
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -111,6 +114,91 @@ class SavePersistenceTest {
             )
         } finally {
             tempDir.deleteRecursively()
+        }
+    }
+
+    /**
+     * Удаление значения enum не должно «убивать» существующие сохранения:
+     * CRC проверяется до десериализации, поэтому миграция выполняется после
+     * подтверждения целостности и пересчитывает контрольную сумму.
+     */
+    @Test
+    fun `legacy save with removed wildlife kind is migrated instead of corrupted`() = runTest {
+        val tempDir = Files.createTempDirectory("wf_migrate_test").toFile()
+        try {
+            val repo = FileBackedGameRepository(tempDir)
+            val base = BaseProgress(shelterLevel = 2)
+            val run = SurvivalEngine.createNewRun(base)
+            repo.saveCheckpoint(base, run)
+
+            val runFile = File(tempDir, "active_run.json")
+            val env = SavePayloadCodec.decodeEnvelope(runFile.readText(Charsets.UTF_8))
+            assertTrue("ожидается мелкая дичь в стартовом забеге", env.bodyJson.contains("TAIGA_RAT"))
+
+            // Имитируем сохранение, записанное версией с удалённым видом зайца
+            val legacyBody = env.bodyJson.replace(
+                "\"TAIGA_RAT\"",
+                "\"" + SavePayloadCodec.LEGACY_HARE_KIND_NAME + "\""
+            )
+            assertFalse("подмена не сработала", legacyBody == env.bodyJson)
+            val legacyCrc = SavePayloadCodec.computeCrc32(legacyBody)
+            runFile.writeText(SavePayloadCodec.encodeEnvelope(legacyBody, legacyCrc), Charsets.UTF_8)
+
+            val loaded = FileBackedGameRepository(tempDir).loadGameSnapshot()
+            assertTrue("старое сохранение должно читаться, а не отбраковываться: $loaded",
+                loaded is LoadSaveResult.Loaded)
+            val migrated = (loaded as LoadSaveResult.Loaded).activeRun
+            assertNotNull(migrated)
+            val fauna = migrated!!.currentWildlife()
+            assertTrue("фауна не должна потеряться при миграции", fauna.isNotEmpty())
+            assertTrue(
+                "удалённый вид должен переноситься в существующий: ${fauna.map { it.kind }.toSet()}",
+                fauna.none { it.kind.name == SavePayloadCodec.LEGACY_HARE_KIND_NAME }
+            )
+            assertTrue(
+                "мелкая дичь переносится в таёжную крысу",
+                fauna.any { it.kind == WildlifeKind.TAIGA_RAT }
+            )
+
+            // Повреждённая контрольная сумма по-прежнему отбраковывается
+            runFile.writeText(SavePayloadCodec.encodeEnvelope(legacyBody, legacyCrc + 7L), Charsets.UTF_8)
+            val broken = FileBackedGameRepository(tempDir).loadGameSnapshot()
+            assertTrue("с плохим CRC миграция не должна спасать файл", broken is LoadSaveResult.Corrupted)
+        } finally {
+            tempDir.deleteRecursively()
+        }
+    }
+
+    /**
+     * §7.6 «два одинаковых оленя»: у каждого вида фауны должна быть СВОЯ модель,
+     * а в списке зверей локации не должно быть дублей одного вида сверх парного
+     * количества стада.
+     */
+    @Test
+    fun `every wildlife kind has its own model and no duplicated deer`() {
+        // Удалённый вид зайца: отдельной модели у него не было, и рендерер
+        // рисовал «зайца» моделью оленя — на карте стояли два одинаковых оленя.
+        assertFalse(
+            "удалённый вид фауны вернулся в enum",
+            WildlifeKind.entries.any { it.name == SavePayloadCodec.LEGACY_HARE_KIND_NAME }
+        )
+        // у каждого вида — уникальный идентификатор модели ( wolf / deer / rat )
+        val models = WildlifeKind.entries.map { kind ->
+            when (kind) {
+                WildlifeKind.TIMBER_WOLF -> "wolf_body"
+                WildlifeKind.NORTHERN_DEER -> "deer_body"
+                WildlifeKind.TAIGA_RAT -> "rat_body"
+            }
+        }
+        assertEquals("видам фауны нужны разные модели", models.size, models.toSet().size)
+
+        for (location in LocationId.entries) {
+            val fauna = com.ayaks.winterforest.domain.world.WorldPopulator.generateLocationWildlife(location)
+            assertTrue("$location без фауны", fauna.isNotEmpty())
+            val deer = fauna.count { it.kind == WildlifeKind.NORTHERN_DEER }
+            assertTrue("$location: слишком много оленей ($deer)", deer <= 2)
+            val ids = fauna.map { it.id }
+            assertEquals("$location: дубли id фауны", ids.size, ids.toSet().size)
         }
     }
 }

@@ -313,17 +313,31 @@ fun CrosshairOverlay(
         }
         if (prompt != null) {
             Spacer(Modifier.height(4.dp))
-            Text(
-                text = "${prompt.actionVerbRu} • ${"%.1f".format(prompt.distanceMeters)} м",
-                color = SnowCrispText,
-                fontSize = 11.sp,
-                fontWeight = FontWeight.SemiBold,
+            val promptIcon = prompt.iconPath?.let { rememberAssetIcon(it) }
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier
                     .clip(RoundedCornerShape(8.dp))
                     .background(Color(0xC4091520))
                     .border(1.dp, reticleColor.copy(alpha = 0.6f), RoundedCornerShape(8.dp))
                     .padding(horizontal = 9.dp, vertical = 3.dp)
-            )
+            ) {
+                if (promptIcon != null) {
+                    androidx.compose.foundation.Image(
+                        bitmap = promptIcon,
+                        contentDescription = prompt.labelRu,
+                        modifier = Modifier.size(16.dp),
+                        contentScale = androidx.compose.ui.layout.ContentScale.Fit
+                    )
+                    Spacer(Modifier.width(6.dp))
+                }
+                Text(
+                    text = "${prompt.actionVerbRu} • ${"%.1f".format(prompt.distanceMeters)} м",
+                    color = SnowCrispText,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
         }
     }
 }
@@ -338,7 +352,8 @@ fun CrosshairOverlay(
 fun QuickEquipmentHotbar(
     run: GameRunState,
     onUseSlot: (Int) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    slotSizeDp: Int = 56
 ) {
     Row(
         horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -354,6 +369,7 @@ fun QuickEquipmentHotbar(
             HotbarSlotChip(
                 indexLabel = (slotIdx + 1).toString(),
                 entry = entry,
+                slotSizeDp = slotSizeDp,
                 onClick = { onUseSlot(slotIdx) }
             )
         }
@@ -362,6 +378,7 @@ fun QuickEquipmentHotbar(
 
 /** Иконка инструмента (Unicode-символ, пока не привезены иконки-картинки). */
 private fun toolIcon(tool: EquippedTool): String = when (tool) {
+    EquippedTool.NONE -> "✋"
     EquippedTool.AXE -> "🪓"
     EquippedTool.PICKAXE -> "⛏️"
     EquippedTool.SPEAR -> "🎯"
@@ -373,6 +390,7 @@ private fun toolIcon(tool: EquippedTool): String = when (tool) {
 private fun HotbarSlotChip(
     indexLabel: String,
     entry: com.ayaks.winterforest.domain.model.HotbarEntry?,
+    slotSizeDp: Int = 56,
     onClick: () -> Unit
 ) {
     val bg = FrostedCardSurface.copy(alpha = 0.72f)
@@ -385,7 +403,7 @@ private fun HotbarSlotChip(
             .background(bg)
             .border(1.2.dp, borderCol, RoundedCornerShape(10.dp))
             .clickable(enabled = true, onClick = onClick)
-            .size(56.dp)
+            .size(slotSizeDp.dp)
     ) {
         if (entry != null) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
@@ -499,16 +517,7 @@ fun assetIconNameFor(type: ResourceType): String = when (type) {
 }
 
 /** Иконка редкого предмета в assets/icons (пустая строка, если файла ещё нет). */
-fun specialLootIconPath(id: SpecialLootId): String = when (id) {
-    SpecialLootId.OLD_MAP -> "icons/icon_old_map.png"
-    SpecialLootId.RESIN_TORCH -> "icons/icon_special_resin_torch.png"
-    SpecialLootId.THERMOS -> "icons/icon_thermos.png"
-    SpecialLootId.PICKAXE -> "icons/icon_special_pickaxe.png"
-    SpecialLootId.WARM_COAT -> "icons/icon_warm_coat.png"
-    SpecialLootId.SOLDIER_RATION -> "icons/icon_soldier_ration.png"
-    SpecialLootId.HUNTING_KNIFE -> "icons/icon_hunting_knife.png"
-    SpecialLootId.FIRST_AID_KIT -> "icons/icon_first_aid_kit.png"
-}
+fun specialLootIconPath(id: SpecialLootId): String = id.iconPath
 
 /** Загрузка PNG из assets как ImageBitmap (с кэшем через remember). */
 @Composable
@@ -596,80 +605,5 @@ fun CooldownButton(
             maxLines = 1,
             modifier = Modifier.padding(horizontal = 10.dp)
         )
-    }
-}
-
-@Composable
-fun InventoryCell(
-    slot: InventorySlot?,
-    selected: Boolean,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    val bg = when {
-        selected -> IceCyanPrimary.copy(alpha = 0.24f)
-        slot != null -> FrostedCardSurface.copy(alpha = 0.85f)
-        else -> Color(0x22FFFFFF)
-    }
-    val borderCol = if (selected) IceCyanPrimary else Color(0x2EFFFFFF)
-    Box(
-        contentAlignment = Alignment.Center,
-        modifier = modifier
-            .size(width = 74.dp, height = 62.dp)
-            .clip(RoundedCornerShape(10.dp))
-            .background(bg)
-            .border(1.2.dp, borderCol, RoundedCornerShape(10.dp))
-            .clickable(enabled = slot != null, onClick = onClick)
-    ) {
-        if (slot != null) {
-            ResourceTypeGlyph(type = slot.type, modifier = Modifier.align(Alignment.TopCenter).padding(top = 6.dp))
-            Text(
-                text = "×${slot.count}",
-                color = SnowCrispText,
-                fontSize = 10.sp,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(end = 5.dp, bottom = 3.dp)
-            )
-            Text(
-                text = slot.type.titleRu,
-                color = MistMutedText,
-                fontSize = 8.sp,
-                maxLines = 1,
-                modifier = Modifier
-                    .align(Alignment.BottomStart)
-                    .padding(start = 5.dp, bottom = 3.dp)
-            )
-        } else {
-            Text("·", color = Color(0x33FFFFFF), fontSize = 14.sp)
-        }
-    }
-}
-
-/**
- * Полная сетка рюкзака: MAX_SLOTS ячеек 5×4 с пустыми слотами и выделением.
- */
-@Composable
-fun InventorySlotGrid(
-    inventory: Inventory,
-    selectedType: ResourceType?,
-    onSelectType: (ResourceType?) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        for (row in 0 until 4) {
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                for (col in 0 until 5) {
-                    val idx = row * 5 + col
-                    val slot = inventory.slots.getOrNull(idx)
-                    InventoryCell(
-                        slot = slot,
-                        selected = slot != null && slot.type == selectedType,
-                        onClick = { onSelectType(slot?.type) }
-                    )
-                }
-            }
-        }
     }
 }

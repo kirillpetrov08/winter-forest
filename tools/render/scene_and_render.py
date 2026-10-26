@@ -599,23 +599,36 @@ def add_wildlife(fur, bark, glow, kind, x, ground_y, z, heading, anim_phase):
     right_x, right_z = -fwd_z, fwd_x
     stride = math.sin(anim_phase) * 0.34
 
-    if kind == "SNOW_HARE":
-        hop = abs(math.sin(anim_phase * 0.85)) * 0.14
-        by = ground_y + 0.24 + hop
-        fur.add_shadow_disc(x, ground_y, z, 0.42, 0.30)
-        fur.add_ellipsoid(x, by, z, 0.15, 0.15, 0.24, yaw=yaw, r=1.85, g=1.82, b=1.78, uv_scale=1.6)
-        hx, hz = x + fwd_x * 0.24, z + fwd_z * 0.24
-        fur.add_ellipsoid(hx, by + 0.12, hz, 0.11, 0.11, 0.12, yaw=yaw, r=1.88, g=1.85, b=1.80, uv_scale=1.2)
+    if kind == "TAIGA_RAT":
+        # Таёжная крыса (зеркалит процедурную ветку MeshBuilder в Kotlin):
+        # низкое серо-бурое тело, заострённая морда, круглые уши, длинный хвост.
+        by = ground_y + 0.17
+        fur.add_shadow_disc(x, ground_y, z, 0.40, 0.28)
+        fur.add_ellipsoid(x, by, z, 0.13, 0.13, 0.23, yaw=yaw, r=0.62, g=0.58, b=0.54, uv_scale=1.5)
+        hx, hz = x + fwd_x * 0.22, z + fwd_z * 0.22
+        fur.add_tapered_cylinder(x + fwd_x * 0.12, by + 0.02, z + fwd_z * 0.12,
+                                 hx + fwd_x * 0.07, by - 0.01, hz + fwd_z * 0.07,
+                                 0.085, 0.035, 10, 0.66, 0.62, 0.58)
         for side in (1.0, -1.0):
-            ear_bx = hx + right_x * 0.05 * side
-            ear_bz = hz + right_z * 0.05 * side
-            ear_tx = hx + right_x * 0.07 * side - fwd_x * 0.03
-            ear_tz = hz + right_z * 0.07 * side - fwd_z * 0.03
-            fur.add_tapered_cylinder(ear_bx, by + 0.18, ear_bz, ear_tx, by + 0.40, ear_tz, 0.030, 0.016, 12, 1.80, 1.78, 1.75)
-            fur.add_tapered_cylinder(ear_tx, by + 0.38, ear_tz,
-                                     hx + right_x * 0.075 * side - fwd_x * 0.05, by + 0.44,
-                                     hz + right_z * 0.075 * side - fwd_z * 0.05, 0.016, 0.008, 12, 0.22, 0.22, 0.26)
-        fur.add_ellipsoid(x - fwd_x * 0.24, by + 0.05, z - fwd_z * 0.24, 0.07, 0.07, 0.07, r=1.9, g=1.88, b=1.82)
+            fur.add_tapered_cylinder(hx - fwd_x * 0.05 + right_x * 0.055 * side, by + 0.05,
+                                     hz - fwd_z * 0.05 + right_z * 0.055 * side,
+                                     hx - fwd_x * 0.07 + right_x * 0.075 * side, by + 0.13,
+                                     hz - fwd_z * 0.07 + right_z * 0.075 * side,
+                                     0.042, 0.014, 8, 0.58, 0.50, 0.48)
+        tx, tz = x - fwd_x * 0.22, z - fwd_z * 0.22
+        fur.add_tapered_cylinder(x - fwd_x * 0.12, by - 0.01, z - fwd_z * 0.12, tx, by - 0.03, tz,
+                                 0.028, 0.018, 6, 0.72, 0.60, 0.58)
+        fur.add_tapered_cylinder(tx, by - 0.03, tz,
+                                 tx - fwd_x * 0.16 + right_x * math.sin(anim_phase) * 0.05,
+                                 ground_y + 0.05,
+                                 tz - fwd_z * 0.16 + right_z * math.sin(anim_phase) * 0.05,
+                                 0.018, 0.006, 6, 0.72, 0.60, 0.58)
+        for lx, lz, swing in ((0.07, 0.13, stride), (-0.07, 0.13, -stride),
+                              (0.08, -0.12, -stride), (-0.08, -0.12, stride)):
+            px, pz = x + right_x * lx + fwd_x * lz, z + right_z * lx + fwd_z * lz
+            fur.add_tapered_cylinder(px, by - 0.08, pz,
+                                     px + math.sin(swing) * 0.04, ground_y + 0.015,
+                                     pz + math.cos(swing) * 0.02, 0.026, 0.016, 6, 0.56, 0.52, 0.48)
     elif kind == "NORTHERN_DEER":
         torso_y = ground_y + 1.02
         fur.add_shadow_disc(x, ground_y, z, 1.05, 0.36)
@@ -1482,7 +1495,7 @@ def build_shot(shot):
             if (dx_ * inv_d) * fwd_x + (dz_ * inv_d) * fwd_z < -0.35:
                 continue
         gy = terrain_height(loc, bx, bz)
-        speed = {"SNOW_HARE": 2.6, "NORTHERN_DEER": 2.1, "TIMBER_WOLF": 3.1}[beast["kind"]]
+        speed = {"TAIGA_RAT": 2.9, "NORTHERN_DEER": 2.1, "TIMBER_WOLF": 3.1}[beast["kind"]]
         add_wildlife(fur, bark, fire, beast["kind"], bx, gy, bz, beast["heading"],
                      elapsed * (4.8 + speed) + idx * 1.7)
 
@@ -1579,7 +1592,7 @@ SHOTS = [
     dict(name="01-base-clearing-campfire.png", location="BASE_CLEARING",
          pos=(2.6, 0.0, 5.2), yaw=math.atan2(-2.6, 5.2), pitch=-0.07,
          elapsed=120.0, is_snowing=True, fp_tool="AXE", campfire_level=2,
-         wildlife=[dict(kind="SNOW_HARE", x=1.6, z=2.2, heading=2.2),
+         wildlife=[dict(kind="TAIGA_RAT", x=1.6, z=2.2, heading=2.2),
                    dict(kind="NORTHERN_DEER", x=-4.2, z=-3.4, heading=0.8)],
          nodes=[dict(kind="PINE_TREE", x=-3.2, z=-8.5, available=True),
                 dict(kind="PINE_TREE", x=6.5, z=-7.0, available=True),
@@ -1590,7 +1603,7 @@ SHOTS = [
          pos=(0.5, 0.0, 15.0), yaw=math.atan2(-2.5, 17.0), pitch=-0.05,
          elapsed=205.0, is_snowing=False, fp_tool="AXE", campfire_level=3,
          wildlife=[dict(kind="NORTHERN_DEER", x=-7.5, z=3.5, heading=1.4),
-                   dict(kind="SNOW_HARE", x=3.0, z=6.0, heading=0.2)],
+                   dict(kind="TAIGA_RAT", x=3.0, z=6.0, heading=0.2)],
          nodes=[dict(kind="PINE_TREE", x=-4.5, z=-2.5, available=True),
                 dict(kind="PINE_TREE", x=5.5, z=-1.0, available=True),
                 dict(kind="STONE_OUTCROP", x=-2.2, z=-6.2, available=True),
@@ -1600,7 +1613,7 @@ SHOTS = [
          pos=(7.5, 0.0, 10.0), yaw=math.atan2(-11.5, 16.0), pitch=-0.03,
          elapsed=145.0, is_snowing=True, fp_tool="SPEAR",
          wildlife=[dict(kind="TIMBER_WOLF", x=1.5, z=2.5, heading=2.6),
-                   dict(kind="SNOW_HARE", x=-2.5, z=4.0, heading=0.7)],
+                   dict(kind="TAIGA_RAT", x=-2.5, z=4.0, heading=0.7)],
          nodes=[dict(kind="PINE_TREE", x=1.0, z=1.0, available=True),
                 dict(kind="PINE_TREE", x=-3.5, z=-1.5, available=True),
                 dict(kind="PINE_TREE", x=4.2, z=-3.2, available=True),
@@ -1613,7 +1626,7 @@ SHOTS = [
          pos=(-1.5, 0.0, 24.0), yaw=math.atan2(1.5, 24.0), pitch=-0.10,
          elapsed=95.0, is_snowing=False, fp_tool="SPEAR",
          wildlife=[dict(kind="NORTHERN_DEER", x=3.5, z=2.0, heading=1.1),
-                   dict(kind="SNOW_HARE", x=-5.5, z=8.5, heading=0.4)],
+                   dict(kind="TAIGA_RAT", x=-5.5, z=8.5, heading=0.4)],
          nodes=[dict(kind="ICE_HOLE", x=2.5, z=4.5, available=True),
                 dict(kind="ICE_HOLE", x=-7.5, z=-3.5, available=True),
                 dict(kind="SPECIAL_CACHE", x=10.5, z=-8.5, available=True)],
@@ -1639,7 +1652,7 @@ SHOTS = [
     dict(name="07-aurora-night.png", location="BASE_CLEARING",
          pos=(3.5, 0.0, 4.0), yaw=math.atan2(-3.5, 26.0), pitch=0.30,
          elapsed=455.0, is_snowing=True, fp_tool="TORCH", torch_lit=True, campfire_level=2,
-         wildlife=[dict(kind="SNOW_HARE", x=1.2, z=1.8, heading=1.0)],
+         wildlife=[dict(kind="TAIGA_RAT", x=1.2, z=1.8, heading=1.0)],
          nodes=[dict(kind="PINE_TREE", x=-3.5, z=-9.0, available=True),
                 dict(kind="PINE_TREE", x=4.8, z=-8.2, available=True),
                 dict(kind="SPECIAL_CACHE", x=4.2, z=-3.6, available=True)],

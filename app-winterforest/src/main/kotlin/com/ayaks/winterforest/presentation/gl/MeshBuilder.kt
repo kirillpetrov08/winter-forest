@@ -149,6 +149,26 @@ class MeshBuilder(initialFloatsCapacity: Int = 16384) {
         floatSize += GlMesh.FLOATS_PER_VERTEX
     }
 
+    /**
+     * §7.17: быстрое присоединение уже запечённой геометрии (без пересчёта
+     * нормалей): используется кэшем геометрии узлов, чтобы пересборка VBO
+     * при сборе ресурса не гоняла процедурные построители заново.
+     */
+    fun appendMesh(mesh: GlMesh) {
+        val src = mesh.vertexBuffer
+        for (i in 0 until mesh.vertexCount) {
+            val o = i * GlMesh.FLOATS_PER_VERTEX
+            if (floatSize + GlMesh.FLOATS_PER_VERTEX > data.size) {
+                data = data.copyOf(data.size * 2)
+            }
+            val w = floatSize
+            for (k in 0 until GlMesh.FLOATS_PER_VERTEX) {
+                data[w + k] = src.get(o + k)
+            }
+            floatSize += GlMesh.FLOATS_PER_VERTEX
+        }
+    }
+
     fun addQuad(
         x0: Float, y0: Float, z0: Float,
         x1: Float, y1: Float, z1: Float,
@@ -756,7 +776,10 @@ class MeshBuilder(initialFloatsCapacity: Int = 16384) {
 
     companion object {
         /**
-         * Анимированная 3D-модель северного животного (полярный заяц, северный олень с рогами, таёжный волк).
+         * Процедурная 3D-модель северного животного (таёжная крыса, северный олень
+         * с рогами, таёжный волк). Резервный путь рендерера: вблизи звери рисуются
+         * импортированными моделями (wolf_body / deer_body / rat_body), поэтому
+         * функция используется для дальней фауны и в юнит-тестах геометрии.
          */
         fun addWildlifeCreature(
         furBuilder: MeshBuilder,
@@ -777,44 +800,64 @@ class MeshBuilder(initialFloatsCapacity: Int = 16384) {
         val stride = sin(animPhase) * 0.34f
 
         when (kind) {
-            WildlifeKind.SNOW_HARE,
-                WildlifeKind.TAIGA_RAT -> {
-                val hop = abs(sin(animPhase * 0.85f)) * 0.14f
-                val by = groundY + 0.24f + hop
-                furBuilder.addShadowDisc(x, groundY, z, 0.42f, 0.30f)
-                // Пушистое скруглённое тело и голова зайца (снежно-белые)
-                furBuilder.addEllipsoid(x, by, z, 0.15f, 0.15f, 0.24f, yawRad = yaw, r = 1.85f, g = 1.82f, b = 1.78f, uvScale = 1.6f)
-                val hx = x + fwdX * 0.24f; val hz = z + fwdZ * 0.24f
-                furBuilder.addEllipsoid(hx, by + 0.12f, hz, 0.11f, 0.11f, 0.12f, yawRad = yaw, r = 1.88f, g = 1.85f, b = 1.80f, uvScale = 1.2f)
-                // Длинные скруглённые заячьи уши с чёрными кончиками
+            WildlifeKind.TAIGA_RAT -> {
+                // Таёжная крыса: низкое серо-бурое тело, заострённая морда, круглые
+                // уши и длинный голый хвост. Раньше в этой ветке рисовался белый
+                // заяц с длинными ушами (наследие удалённого вида «полярный беляк»,
+                // который делил с крысой одну ветку), поэтому «крыса» в процедурном
+                // резерве выглядела как заяц.
+                val by = groundY + 0.17f
+                furBuilder.addShadowDisc(x, groundY, z, 0.40f, 0.28f)
+                furBuilder.addEllipsoid(
+                    x, by, z, 0.13f, 0.13f, 0.23f, yawRad = yaw,
+                    r = 0.62f, g = 0.58f, b = 0.54f, uvScale = 1.5f
+                )
+                // Заострённая морда
+                val hx = x + fwdX * 0.22f
+                val hz = z + fwdZ * 0.22f
+                furBuilder.addTaperedCylinder(
+                    x + fwdX * 0.12f, by + 0.02f, z + fwdZ * 0.12f,
+                    hx + fwdX * 0.07f, by - 0.01f, hz + fwdZ * 0.07f,
+                    0.085f, 0.035f, 10, 0.66f, 0.62f, 0.58f
+                )
+                // Круглые уши (короткие конусы, а не заячьи «лопухи»)
                 for (side in floatArrayOf(1f, -1f)) {
                     furBuilder.addTaperedCylinder(
-                        hx + rightX * 0.05f * side, by + 0.18f, hz + rightZ * 0.05f * side,
-                        hx + rightX * 0.07f * side - fwdX * 0.03f, by + 0.40f, hz + rightZ * 0.07f * side - fwdZ * 0.03f,
-                        0.030f, 0.016f, 12, 1.80f, 1.78f, 1.75f
-                    )
-                    furBuilder.addTaperedCylinder(
-                        hx + rightX * 0.07f * side - fwdX * 0.03f, by + 0.38f, hz + rightZ * 0.07f * side - fwdZ * 0.03f,
-                        hx + rightX * 0.075f * side - fwdX * 0.05f, by + 0.44f, hz + rightZ * 0.075f * side - fwdZ * 0.05f,
-                        0.016f, 0.008f, 12, 0.22f, 0.22f, 0.26f
+                        hx - fwdX * 0.05f + rightX * 0.055f * side, by + 0.05f,
+                        hz - fwdZ * 0.05f + rightZ * 0.055f * side,
+                        hx - fwdX * 0.07f + rightX * 0.075f * side, by + 0.13f,
+                        hz - fwdZ * 0.07f + rightZ * 0.075f * side,
+                        0.042f, 0.014f, 8, 0.58f, 0.50f, 0.48f
                     )
                 }
-                furBuilder.addEllipsoid(x - fwdX * 0.24f, by + 0.05f, z - fwdZ * 0.24f, 0.07f, 0.07f, 0.07f, r = 1.9f, g = 1.88f, b = 1.82f)
-                // 4 короткие лапы с противофазным шагом — заяц перебирает ногами при беге
-                val hareLegs = listOf(
-                    Triple(0.08f, 0.15f, stride),
-                    Triple(-0.08f, 0.15f, -stride),
-                    Triple(0.09f, -0.13f, -stride),
-                    Triple(-0.09f, -0.13f, stride)
+                // Длинный голый хвост из двух сегментов
+                val tx = x - fwdX * 0.22f
+                val tz = z - fwdZ * 0.22f
+                furBuilder.addTaperedCylinder(
+                    x - fwdX * 0.12f, by - 0.01f, z - fwdZ * 0.12f,
+                    tx, by - 0.03f, tz,
+                    0.028f, 0.018f, 6, 0.72f, 0.60f, 0.58f
                 )
-                for ((lx, lz, swing) in hareLegs) {
+                furBuilder.addTaperedCylinder(
+                    tx, by - 0.03f, tz,
+                    tx - fwdX * 0.16f + rightX * sin(animPhase) * 0.05f, groundY + 0.05f,
+                    tz - fwdZ * 0.16f + rightZ * sin(animPhase) * 0.05f,
+                    0.018f, 0.006f, 6, 0.72f, 0.60f, 0.58f
+                )
+                // 4 короткие лапы с противофазным шагом
+                val ratLegs = listOf(
+                    Triple(0.07f, 0.13f, stride),
+                    Triple(-0.07f, 0.13f, -stride),
+                    Triple(0.08f, -0.12f, -stride),
+                    Triple(-0.08f, -0.12f, stride)
+                )
+                for ((lx, lz, swing) in ratLegs) {
                     val px2 = x + rightX * lx + fwdX * lz
                     val pz2 = z + rightZ * lx + fwdZ * lz
-                    val footY = groundY + 0.02f + hop * 0.55f
                     furBuilder.addTaperedCylinder(
-                        px2, by - 0.11f, pz2,
-                        px2 + sin(swing) * 0.05f, footY, pz2 + cos(swing) * 0.02f,
-                        0.038f, 0.024f, 8, 1.60f, 1.56f, 1.50f
+                        px2, by - 0.08f, pz2,
+                        px2 + sin(swing) * 0.04f, groundY + 0.015f, pz2 + cos(swing) * 0.02f,
+                        0.026f, 0.016f, 6, 0.56f, 0.52f, 0.48f
                     )
                 }
             }
@@ -948,6 +991,8 @@ class MeshBuilder(initialFloatsCapacity: Int = 16384) {
         val tipDz = -cos(yawRad) * sin(0.28f + chopArc * 0.85f)
 
         when (tool) {
+            // §7.11: пустые руки — геометрии нет (герой начинает забег без инструмента)
+            EquippedTool.NONE -> Unit
             EquippedTool.AXE -> {
                 val topX = baseX + tipDx * 0.50f
                 val topY = baseY + tipDy * 0.50f

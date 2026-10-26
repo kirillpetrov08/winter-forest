@@ -26,9 +26,59 @@ data class AddItemResult(
 @Serializable
 data class Inventory(
     val slots: List<InventorySlot> = emptyList(),
-    val specialItems: Map<SpecialLootId, Int> = emptyMap()
+    val specialItems: Map<SpecialLootId, Int> = emptyMap(),
+    /**
+     * §7.3: позиционная раскладка рюкзака (сетка MAX_SLOTS): order[i] — индекс
+     * слота в [slots], стоящего в ячейке i, либо null — пустая ячейка. Позволяет
+     * перетаскиванием сортировать предметы и оставлять «дырки». Пустой список
+     * (старые сохранения) означает тождественную раскладку без дырок.
+     */
+    val order: List<Int?> = emptyList()
 ) {
     val occupiedSlots: Int get() = slots.size
+
+    /**
+     * Нормализованная раскладка длины [MAX_SLOTS]: битые/дублирующиеся индексы
+     * отбрасываются, неназначенные слоты дописываются в первые пустые ячейки.
+     * Идемпотентна — повторный вызов ничего не меняет.
+     */
+    fun normalizedOrder(): List<Int?> {
+        val grid = ArrayList<Int?>(MAX_SLOTS)
+        for (i in 0 until MAX_SLOTS) grid += null
+        val used = HashSet<Int>()
+        for (i in order.indices) {
+            if (i >= MAX_SLOTS) break
+            val v = order[i]
+            if (v != null && v in slots.indices && used.add(v)) {
+                grid[i] = v
+            }
+        }
+        var nextFree = 0
+        for (slotIdx in slots.indices) {
+            if (used.add(slotIdx)) {
+                while (nextFree < MAX_SLOTS && grid[nextFree] != null) nextFree++
+                if (nextFree < MAX_SLOTS) {
+                    grid[nextFree] = slotIdx
+                    nextFree++
+                }
+            }
+        }
+        return grid
+    }
+
+    /** Содержимое ячейки сетки i (null — пустая ячейка). */
+    fun gridSlot(index: Int): InventorySlot? =
+        normalizedOrder().getOrNull(index)?.let { slots[it] }
+
+    /** Перестановка содержимого двух ячеек сетки (сортировка перетаскиванием). */
+    fun withSwappedCells(a: Int, b: Int): Inventory {
+        if (a == b || a !in 0 until MAX_SLOTS || b !in 0 until MAX_SLOTS) return this
+        val grid = normalizedOrder().toMutableList()
+        val tmp = grid[a]
+        grid[a] = grid[b]
+        grid[b] = tmp
+        return copy(order = grid)
+    }
     val isFull: Boolean get() = slots.size >= MAX_SLOTS && slots.all { it.count >= MAX_STACK_SIZE }
 
     fun countOf(type: ResourceType): Int =

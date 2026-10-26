@@ -13,6 +13,7 @@ import com.ayaks.winterforest.domain.model.GameRunState
 import com.ayaks.winterforest.domain.model.GraphicsQuality
 import com.ayaks.winterforest.domain.model.LocationId
 import com.ayaks.winterforest.domain.model.ResourceType
+import com.ayaks.winterforest.domain.model.SpecialLootId
 import com.ayaks.winterforest.domain.model.RunPhase
 import com.ayaks.winterforest.domain.model.StarterLoadout
 import com.ayaks.winterforest.domain.model.WorkbenchRecipe
@@ -140,6 +141,24 @@ class WinterForestViewModel(
         }
     }
 
+    /** §7.4: «Новая экспедиция» всегда ведёт через экран выбора класса. */
+    fun requestNewExpedition() {
+        _uiState.update {
+            it.copy(
+                destination = AppDestination.LOADOUT_SELECT,
+                previousDestination = it.destination
+            )
+        }
+    }
+
+    /** Применение выбранного класса к базе и старт забега с ним. */
+    fun confirmLoadoutAndStart(loadout: StarterLoadout, seed: Long = System.currentTimeMillis()) {
+        val baseWithLoadout = SurvivalEngine.selectStarterLoadout(_uiState.value.baseProgress, loadout)
+        _uiState.update { it.copy(baseProgress = baseWithLoadout) }
+        persistCheckpointAsync()
+        startNewGame(seed)
+    }
+
     fun startNewGame(seed: Long = System.currentTimeMillis()) {
         val currentBase = _uiState.value.baseProgress
         val freshRun = SurvivalEngine.createNewRun(currentBase, seed = seed)
@@ -213,6 +232,7 @@ class WinterForestViewModel(
             AppDestination.MAIN_MENU -> AppDestination.MAIN_MENU
             AppDestination.GAME -> AppDestination.MAIN_MENU
             AppDestination.RESULTS -> AppDestination.MAIN_MENU
+            AppDestination.LOADOUT_SELECT -> AppDestination.MAIN_MENU
             AppDestination.BASE_INVENTORY ->
                 if (cur.previousDestination == AppDestination.GAME && cur.hasActiveSave) {
                     AppDestination.GAME
@@ -505,6 +525,71 @@ class WinterForestViewModel(
             st.copy(activeRun = run.withHotbarSlot(index, entry))
         }
         persistCheckpointAsync()
+    }
+
+    /** §7.12: подобрать предмет под прицелом. */
+    fun onPickupNearestDropped() = applyEngineAction(cooldownId = "pickup", cooldownSec = 0.6f) { run, base ->
+        val item = run.nearestDroppedItem()
+            ?: return@applyEngineAction com.ayaks.winterforest.domain.rules.EngineStepOutcome(
+                run, base, false, "Рядом нет предметов."
+            )
+        SurvivalEngine.pickupDroppedItem(run, base, item.id)
+    }
+
+    /** §7.12: выбросить ресурс выбранной ячейки рюкзака перед собой. */
+    fun onDropResourceToGround(type: ResourceType) =
+        applyEngineAction(cooldownId = "drop", cooldownSec = 0.6f) { run, base ->
+            SurvivalEngine.dropItemNearPlayer(run, base, resourceType = type)
+        }
+
+    fun onDropSpecialToGround(id: SpecialLootId) =
+        applyEngineAction(cooldownId = "drop", cooldownSec = 0.6f) { run, base ->
+            SurvivalEngine.dropItemNearPlayer(run, base, specialLootId = id)
+        }
+
+    /** §7.3: сортировка рюкзака перетаскиванием — обмен двух ячеек сетки. */
+    fun onSwapInventoryCells(a: Int, b: Int) {
+        _uiState.update { st ->
+            val run = st.activeRun ?: return@update st
+            st.copy(activeRun = run.copy(inventory = run.inventory.withSwappedCells(a, b)))
+        }
+        persistCheckpointAsync()
+    }
+
+    /** §7.3: обмен двух слотов хотбара между собой. */
+    fun onSwapHotbarSlots(a: Int, b: Int) {
+        _uiState.update { st ->
+            val run = st.activeRun ?: return@update st
+            if (a == b) return@update st
+            val ea = run.hotbarAt(a)
+            val eb = run.hotbarAt(b)
+            st.copy(
+                activeRun = run
+                    .withHotbarSlot(a, eb)
+                    .withHotbarSlot(b, ea)
+            )
+        }
+        persistCheckpointAsync()
+    }
+
+    /** §7.3: дроп ячейки рюкзака в слот хотбара (занятый слот заменяется). */
+    fun onDropInventoryOnHotbar(gridIndex: Int, hotbarIndex: Int) {
+        _uiState.update { st ->
+            val run = st.activeRun ?: return@update st
+            val slot = run.inventory.gridSlot(gridIndex) ?: return@update st
+            val entry = com.ayaks.winterforest.domain.model.HotbarEntry(
+                titleRu = slot.type.titleRu,
+                iconPath = "",
+                resourceType = slot.type
+            )
+            st.copy(activeRun = run.withHotbarSlot(hotbarIndex, entry))
+        }
+        persistCheckpointAsync()
+    }
+
+    /** §7.3: дроп записи хотбара обратно в рюкзак — слот очищается. */
+    fun onDropHotbarToInventory(hotbarIndex: Int) {
+        onClearHotbar(hotbarIndex)
     }
 
     /** Убрать запись из слота хотбара. */

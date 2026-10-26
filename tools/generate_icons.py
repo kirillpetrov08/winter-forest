@@ -457,6 +457,190 @@ def icon_workbench():
     return finish(img, 67, 0.18)
 
 
+def icon_military_crate():
+    """Военный ящик: оливковый корпус, стальные углы, стяжные ремни и трафарет."""
+    img = canvas(); d = ImageDraw.Draw(img)
+    # корпус (фронт) и крышка (перспектива сверху)
+    d.polygon([(286, 430), (738, 430), (738, 736), (286, 736)], fill="#4e5a3a", outline="#2c341f", width=9)
+    d.polygon([(286, 430), (372, 352), (822, 352), (738, 430)], fill="#5e6c46", outline="#2c341f", width=9)
+    d.polygon([(738, 430), (822, 352), (822, 654), (738, 736)], fill="#3e482d", outline="#2c341f", width=9)
+    # дощатые швы фронта
+    for y in (512, 594, 668):
+        d.line((292, y, 732, y), fill="#3a442b", width=7)
+    # стяжные ремни с пряжками
+    for x in (404, 620):
+        d.rectangle((x - 20, 356, x + 20, 730), fill="#33391f", outline="#20251a", width=5)
+        d.rounded_rectangle((x - 28, 546, x + 28, 606), radius=10, fill="#8a8f78", outline="#3c4030", width=5)
+    # стальные уголки
+    for cx, cy in ((306, 450), (718, 450), (306, 716), (718, 716)):
+        d.rounded_rectangle((cx - 30, cy - 30, cx + 30, cy + 30), radius=8,
+                            fill="#6a727c", outline="#333a40", width=5)
+        d.ellipse((cx - 8, cy - 8, cx + 8, cy + 8), fill="#39414a")
+    # трафаретная звезда на крышке
+    star = []
+    for k in range(10):
+        a = math.radians(-90 + k * 36)
+        r = 62 if k % 2 == 0 else 26
+        star.append((560 + math.cos(a) * r, 392 + math.sin(a) * r * 0.52))
+    d.polygon(star, fill="#8d9a72", outline="#5b6647", width=4)
+    return finish(img, 71, 0.2)
+
+
+def icon_first_aid_kit():
+    """Полевая аптечка: белый кейс, красный крест, защёлка и ручка."""
+    img = canvas(); d = ImageDraw.Draw(img)
+    # ручка
+    d.rounded_rectangle((432, 268, 592, 348), radius=36, fill="#c8ccd2", outline="#6c737c", width=9)
+    d.rounded_rectangle((462, 296, 562, 336), radius=22, fill=(0, 0, 0, 0))
+    # корпус кейса
+    d.rounded_rectangle((268, 336, 756, 726), radius=34, fill="#e8ecef", outline="#8d959c", width=9)
+    vgrad_fill(d, (276, 344, 748, 718), (250, 252, 254), (206, 214, 222), radius=30)
+    # шов крышки
+    d.line((276, 470, 748, 470), fill="#b9c1c8", width=10)
+    # защёлки
+    for x in (356, 668):
+        d.rounded_rectangle((x - 34, 446, x + 34, 498), radius=10, fill="#9aa3ab", outline="#5d666e", width=5)
+    # красный крест
+    d.rounded_rectangle((462, 520, 562, 686), radius=12, fill="#c8302c", outline="#7d1c1a", width=6)
+    d.rounded_rectangle((428, 566, 596, 640), radius=12, fill="#c8302c", outline="#7d1c1a", width=6)
+    d.rounded_rectangle((470, 528, 554, 678), radius=10, fill="#dd4038")
+    d.rounded_rectangle((436, 574, 588, 632), radius=10, fill="#dd4038")
+    return finish(img, 73, 0.16)
+
+
+def icon_hunting_knife():
+    """Охотничий нож: клинок с долом и остриём, латунная гарда, клёпаная рукоять.
+
+    Геометрия собирается в локальных координатах (ось X — вдоль клинка) и одним
+    поворотом переносится на холст: отдельные «повёрнутые прямоугольники» для
+    каждой детали разъезжались и нож выглядел разорванным.
+    """
+    img = canvas(); d = ImageDraw.Draw(img)
+    ang = -0.52
+    ca, sa = math.cos(ang), math.sin(ang)
+    cx, cy = 512.0, 528.0
+
+    def pt(x, y):
+        return (cx + x * ca - y * sa, cy + x * sa + y * ca)
+
+    def poly(points, **kw):
+        d.polygon([pt(x, y) for x, y in points], **kw)
+
+    def rect(x0, y0, x1, y1, **kw):
+        poly([(x0, y0), (x1, y0), (x1, y1), (x0, y1)], **kw)
+
+    # клинок с остриём
+    poly([(-30, -52), (150, -52), (238, -6), (238, 10), (150, 54), (-30, 54)],
+         fill="#c3ccd4", outline="#5c666e", width=7)
+    # режущая кромка (нижняя фаска) и дол
+    poly([(150, 30), (232, 6), (150, 50), (-24, 50), (-24, 34)], fill="#e6edf1")
+    rect(-20, -22, 140, -2, fill="#8d979f")
+    rect(-20, -18, 140, -6, fill="#aab4bc")
+    # латунная гарда
+    rect(-72, -84, -30, 84, fill="#b9963f", outline="#6d5620", width=7)
+    rect(-66, -78, -36, 78, fill="#cfae52")
+    # деревянная рукоять с тремя клёпками
+    rect(-238, -44, -72, 44, fill="#6b4a2c", outline="#3a2716", width=8)
+    rect(-232, -36, -78, 36, fill="#7d5836")
+    for k in range(3):
+        x = -204 + k * 56
+        d.ellipse((pt(x, 0)[0] - 15, pt(x, 0)[1] - 15, pt(x, 0)[0] + 15, pt(x, 0)[1] + 15),
+                  fill="#c9a24a", outline="#6d5620", width=4)
+    # стальное навершие
+    rect(-272, -52, -238, 52, fill="#8a8f78", outline="#4a4f3c", width=6)
+    return finish(img, 79, 0.2)
+
+
+def icon_soldier_ration():
+    """Сухпай: оливковый пакет ИРП, фольгированная банка и бумажная этикетка."""
+    img = canvas(); d = ImageDraw.Draw(img)
+    # пакет ИРП (лёгкий наклон)
+    d.polygon(rotated_rect_pts(420, 560, 400, 470, -0.06), fill="#5d6847", outline="#333a24", width=9)
+    d.polygon(rotated_rect_pts(420, 336, 400, 46, -0.06), fill="#4c5639", outline="#333a24", width=7)
+    # зубчатый шов пакета
+    for k in range(9):
+        x = 246 + k * 44
+        d.polygon([(x, 322), (x + 22, 322), (x + 11, 348)], fill="#3f4830")
+    # этикетка
+    d.polygon(rotated_rect_pts(420, 546, 300, 190, -0.06), fill="#d8cfae", outline="#8c8462", width=6)
+    d.polygon(rotated_rect_pts(420, 486, 250, 30, -0.06), fill="#a8452f")
+    d.polygon(rotated_rect_pts(420, 606, 250, 22, -0.06), fill="#6d7a52")
+    d.ellipse((382, 528, 458, 604), fill="#8d9a72", outline="#5b6647", width=5)
+    # фольгированная банка готового блюда
+    d.rounded_rectangle((636, 470, 812, 700), radius=26, fill="#b9c1c6", outline="#6c747a", width=8)
+    vgrad_fill(d, (644, 478, 804, 692), (214, 220, 226), (140, 148, 156), radius=22)
+    d.ellipse((654, 440, 794, 508), fill="#d3dade", outline="#7b838a", width=7)
+    d.ellipse((676, 456, 772, 496), fill="#9aa3ab")
+    d.line((664, 566, 784, 566), fill="#8b949b", width=8)
+    d.line((664, 610, 784, 610), fill="#8b949b", width=8)
+    return finish(img, 83, 0.18)
+
+
+def icon_primitive_axe():
+    """Примитивный топор: деревянное топорище, колотый каменный камень-лезвие, кожаная обмотка."""
+    img = canvas(); d = ImageDraw.Draw(img)
+    ang = -0.72
+    ca, sa = math.cos(ang), math.sin(ang)
+    cx, cy = 512.0, 540.0
+
+    def pt(x, y):
+        return (cx + x * ca - y * sa, cy + x * sa + y * ca)
+
+    def poly(points, **kw):
+        d.polygon([pt(x, y) for x, y in points], **kw)
+
+    def rect(x0, y0, x1, y1, **kw):
+        poly([(x0, y0), (x1, y0), (x1, y1), (x0, y1)], **kw)
+
+    # топорище с изгибом
+    rect(-40, -26, 300, 26, fill="#7a5c38", outline="#43301c", width=8)
+    rect(-34, -18, 294, 18, fill="#8d6c44")
+    # колотое каменное лезвие (несимметричный скол — не «блоб»)
+    poly([(150, -96), (268, -64), (300, 6), (252, 84), (150, 70), (128, 0)],
+         fill="#8b929b", outline="#4a5058", width=8)
+    poly([(168, -70), (258, -44), (276, 4), (238, 62), (166, 50)], fill="#a2aab2")
+    poly([(196, -40), (246, -18), (238, 30), (196, 26)], fill="#6d747c")
+    # кожаная обмотка крепления
+    for k in range(4):
+        x = 96 + k * 26
+        rect(x, -44, x + 14, 44, fill="#5c4630", outline="#33261a", width=4)
+    rect(88, -50, 200, -34, fill="#6b543c", outline="#33261a", width=5)
+    rect(88, 34, 200, 50, fill="#6b543c", outline="#33261a", width=5)
+    return finish(img, 91, 0.22)
+
+
+def icon_primitive_pickaxe():
+    """Примитивная кирка: деревянное топорище и каменный клин, привязанный ремнем."""
+    img = canvas(); d = ImageDraw.Draw(img)
+    ang = -0.5
+    ca, sa = math.cos(ang), math.sin(ang)
+    cx, cy = 512.0, 520.0
+
+    def pt(x, y):
+        return (cx + x * ca - y * sa, cy + x * sa + y * ca)
+
+    def poly(points, **kw):
+        d.polygon([pt(x, y) for x, y in points], **kw)
+
+    def rect(x0, y0, x1, y1, **kw):
+        poly([(x0, y0), (x1, y0), (x1, y1), (x0, y1)], **kw)
+
+    # рукоять
+    rect(-260, -24, 240, 24, fill="#7a5c38", outline="#43301c", width=8)
+    rect(-254, -16, 234, 16, fill="#8d6c44")
+    # каменный клин-кирка: два скола к концам
+    poly([(-60, -34), (60, -34), (232, -8), (252, 4), (232, 16), (60, 40), (-60, 40),
+          (-232, 16), (-252, 4), (-232, -8)],
+         fill="#8b929b", outline="#4a5058", width=8)
+    poly([(-48, -22), (48, -22), (216, -2), (48, 28), (-48, 28), (-216, -2)], fill="#a2aab2")
+    poly([(-30, -10), (30, -10), (24, 14), (-24, 14)], fill="#6d747c")
+    # ремень крепления
+    rect(-34, -52, 34, 52, fill="#5c4630", outline="#33261a", width=5)
+    rect(-26, -60, 26, -44, fill="#6b543c", outline="#33261a", width=4)
+    rect(-26, 44, 26, 60, fill="#6b543c", outline="#33261a", width=4)
+    return finish(img, 93, 0.22)
+
+
 ICONS = [
     "icon_wood", "icon_stone", "icon_iron_ore", "icon_coal", "icon_cloth", "icon_hide", "icon_meat",
     "icon_fish", "icon_berries", "icon_resin", "icon_ice",
@@ -465,13 +649,24 @@ ICONS = [
     "icon_recipe_torch", "icon_recipe_berry_tea", "icon_recipe_roast_feast", "icon_recipe_hunting_spear",
     "icon_recipe_warm_compress", "icon_recipe_fur_boots", "icon_recipe_miners_heater",
     "icon_campfire", "icon_field_campfire", "icon_supply_crate", "icon_ice_hole", "icon_workbench",
+    # лут военных ящиков (§7.5: у каждого предмета из ящика должна быть иконка)
+    "icon_military_crate", "icon_first_aid_kit", "icon_hunting_knife", "icon_soldier_ration",
+    "icon_primitive_axe", "icon_primitive_pickaxe",
 ]
 
 
-def main():
+def main(argv=None):
+    """Генерирует иконки. Без аргументов — все из ICONS, с аргументами — только
+    перечисленные (чтобы не пересобирать 30+ готовых PNG и не раздувать дифф)."""
+    import sys
+    only = list(argv if argv is not None else sys.argv[1:])
+    unknown = [n for n in only if n not in ICONS]
+    if unknown:
+        raise SystemExit("неизвестные иконки: %s" % ", ".join(unknown))
+    names = only or ICONS
     os.makedirs(OUT, exist_ok=True)
-    print(f"Generating {len(ICONS)} icons -> {os.path.abspath(OUT)}")
-    for name in ICONS:
+    print(f"Generating {len(names)} icons -> {os.path.abspath(OUT)}")
+    for name in names:
         img = globals()[name]()
         save(img, name)
     print("ALL ICONS DONE")

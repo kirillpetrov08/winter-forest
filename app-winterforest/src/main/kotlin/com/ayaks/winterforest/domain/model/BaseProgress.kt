@@ -23,7 +23,7 @@ enum class GraphicsQuality(
     ),
     MEDIUM(
         titleRu = "Среднее",
-        subtitleRu = "Плавный рендеринг без лимита FPS и сбалансированная дальность",
+        subtitleRu = "Плавный рендеринг на 60 FPS и сбалансированная дальность",
         textureSize = 512,
         terrainSteps = 84,
         perimeterTrees = 30,
@@ -62,6 +62,12 @@ enum class EquippedTool(
     val reachMeters: Float,
     val swingDurationSec: Float
 ) {
+    NONE(
+        titleRu = "Пустые руки",
+        shortLabelRu = "рука",
+        reachMeters = 1.7f,
+        swingDurationSec = 0.44f
+    ),
     AXE(
         titleRu = "Топор лесоруба",
         shortLabelRu = "Топор",
@@ -167,6 +173,22 @@ enum class WorkbenchRecipe(
     /** Открывается после постройки Каменной печи и плавки железа. */
     val requiresFurnace: Boolean = false
 ) {
+    CRAFT_PRIMITIVE_AXE(
+        titleRu = "Примитивный топор",
+        descriptionRu = "Первый инструмент: открывает рубку деревьев и добычу дерева",
+        minWorkbenchLevel = 1,
+        requiresPickaxe = false,
+        cost = mapOf(ResourceType.WOOD to 3, ResourceType.STONE to 2),
+        category = RecipeCategory.TOOLS
+    ),
+    CRAFT_PRIMITIVE_PICKAXE(
+        titleRu = "Примитивная кирка",
+        descriptionRu = "Первый инструмент: открывает добычу камня, угля и руды",
+        minWorkbenchLevel = 1,
+        requiresPickaxe = false,
+        cost = mapOf(ResourceType.WOOD to 2, ResourceType.STONE to 3),
+        category = RecipeCategory.TOOLS
+    ),
     CRAFT_RESIN_TORCH(
         titleRu = "Смоляной факел",
         descriptionRu = "+50% тепла, яркий свет на 3 минуты и защита от волков",

@@ -8,6 +8,7 @@ import com.ayaks.winterforest.domain.model.SpecialLootId
 import com.ayaks.winterforest.domain.model.WildlifeEntity
 import com.ayaks.winterforest.domain.model.WildlifeKind
 import com.ayaks.winterforest.domain.model.WorldObjectKind
+import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.hypot
 import kotlin.math.sin
@@ -143,37 +144,40 @@ object WorldPopulator {
         seed: Long = 20261021L
     ): List<WildlifeEntity> {
         val rng = Random(seed)
-        // На Базовой поляне — только мирная дичь (зайцы и северный олень), без хищников!
+        // На Базовой поляне — только мирная дичь (крысы и северный олень), без хищников!
+        // «Полярный беляк» удалён: отдельной модели у него не было, рендерер рисовал
+        // его моделью оленя (wildlifeModelId), поэтому на карте стояли два одинаковых
+        // оленя разного размера. Мелкая дичь теперь одна — таёжная крыса.
         val roster: List<WildlifeKind> = when (location) {
             LocationId.BASE_CLEARING -> listOf(
-                WildlifeKind.SNOW_HARE,
                 WildlifeKind.TAIGA_RAT,
-                WildlifeKind.SNOW_HARE,
+                WildlifeKind.TAIGA_RAT,
+                WildlifeKind.TAIGA_RAT,
                 WildlifeKind.NORTHERN_DEER,
                 WildlifeKind.NORTHERN_DEER
             )
             LocationId.DENSE_SPRUCE -> listOf(
-                WildlifeKind.SNOW_HARE,
-                WildlifeKind.SNOW_HARE,
+                WildlifeKind.TAIGA_RAT,
+                WildlifeKind.TAIGA_RAT,
                 WildlifeKind.NORTHERN_DEER,
                 WildlifeKind.NORTHERN_DEER,
                 WildlifeKind.TIMBER_WOLF,
                 WildlifeKind.TIMBER_WOLF
             )
             LocationId.FROZEN_LAKE -> listOf(
-                WildlifeKind.SNOW_HARE,
+                WildlifeKind.TAIGA_RAT,
                 WildlifeKind.NORTHERN_DEER,
                 WildlifeKind.NORTHERN_DEER,
                 WildlifeKind.TIMBER_WOLF
             )
             LocationId.ABANDONED_MINE -> listOf(
-                WildlifeKind.SNOW_HARE,
+                WildlifeKind.TAIGA_RAT,
                 WildlifeKind.TIMBER_WOLF,
                 WildlifeKind.TIMBER_WOLF
             )
             LocationId.HUNTERS_CABIN -> listOf(
-                WildlifeKind.SNOW_HARE,
-                WildlifeKind.SNOW_HARE,
+                WildlifeKind.TAIGA_RAT,
+                WildlifeKind.TAIGA_RAT,
                 WildlifeKind.NORTHERN_DEER,
                 WildlifeKind.NORTHERN_DEER,
                 WildlifeKind.TIMBER_WOLF,
@@ -223,12 +227,15 @@ object WorldPopulator {
             LocationId.HUNTERS_CABIN -> 52
         }
 
+        // §7.10: пуассон-диск вместо «колец»: узлы равномерно разбросаны по всей
+        // площади района, не опираются на постройки (≥ 8 м) и не слипаются
+        // (≥ 4.2 м между узлами). Прежняя формула angle = idx/count·2π рисовала
+        // «опоясывающее кольцо» вокруг центра, где стоят ключевые строения.
+        val taken = ArrayList<Pair<Float, Float>>(nodeCount + 32)
+        val forbidden = structureSpots(location)
         for (index in 0 until nodeCount) {
-            val angle = (index.toFloat() / nodeCount.toFloat()) * (Math.PI.toFloat() * 2f) +
-                rng.nextFloat() * 0.35f
-            val radius = 7.5f + rng.nextFloat() * 36.5f
-            val x = (cos(angle) * radius).coerceIn(-46f, 46f)
-            val z = (sin(angle) * radius).coerceIn(-46f, 46f)
+            val (x, z) = sampleSpreadSpot(rng, taken, forbidden, minDist = 4.2f, forbiddenRadius = 8f)
+            taken += x to z
 
             val roll = rng.nextFloat() * totalWeight
             var acc = 0f
@@ -272,13 +279,7 @@ object WorldPopulator {
         // Обычные ящики с припасами: по 2 на район у троп. Ткань теперь добывается
         // с куста, поэтому ящики больше не появляются «сами» из весов ресурсов —
         // их выдаём фиксированными точками, чтобы лут ящиков не пропал из игры.
-        val supplySpots = when (location) {
-            LocationId.BASE_CLEARING -> listOf(9.6f to -6.4f, -11.8f to 7.9f)
-            LocationId.DENSE_SPRUCE -> listOf(7.4f to 15.2f, -16.4f to 4.8f)
-            LocationId.FROZEN_LAKE -> listOf(12.6f to 9.4f, -9.2f to -15.8f)
-            LocationId.ABANDONED_MINE -> listOf(9.8f to 6.2f, -11.4f to -14.8f)
-            LocationId.HUNTERS_CABIN -> listOf(12.4f to 4.2f, -8.6f to 12.8f)
-        }
+        val supplySpots = supplySpotsFor(location)
         supplySpots.forEachIndexed { sIdx, (sx, sz) ->
             trimmed += ResourceNode(
                 id = "${location.name.lowercase()}_supply_$sIdx",
@@ -292,26 +293,83 @@ object WorldPopulator {
             )
         }
 
-        // 2 военных ящика с редким лутом на район (у троп и строений)
-        val militarySpots = when (location) {
-            LocationId.BASE_CLEARING -> listOf(11.4f to 8.2f, -14.2f to -12.4f)
-            LocationId.DENSE_SPRUCE -> listOf(13.6f to 14.1f, -13.2f to -6.5f)
-            LocationId.FROZEN_LAKE -> listOf(-15.4f to 12.8f, 8.9f to 14.6f)
-            LocationId.ABANDONED_MINE -> listOf(12.8f to -12.2f, -13.6f to -8.4f)
-            LocationId.HUNTERS_CABIN -> listOf(-11.8f to 13.4f, 13.2f to -6.2f)
-        }
-        militarySpots.forEachIndexed { mIdx, (mx, mz) ->
+        // Военные ящики: ровно 3 на всю карту (раньше 2 на район = 10 — лут
+        // обесценивался, а ящики мелькали повсюду). Каждый стоит осмысленной
+        // точкой маршрута и несёт ГАРАНТИРОВАННЫЙ предмет: игроку не приходится
+        // вскрывать десяток ящиков ради шанса на аптечку.
+        val militarySpot = militarySpotFor(location)
+        val militaryLoot = militaryLootFor(location)
+        if (militarySpot != null && militaryLoot != null) {
             trimmed += ResourceNode(
-                id = "${location.name.lowercase()}_military_$mIdx",
+                id = "${location.name.lowercase()}_military_0",
                 location = location,
                 kind = WorldObjectKind.MILITARY_CRATE,
-                x = mx,
-                z = mz,
+                x = militarySpot.first,
+                z = militarySpot.second,
                 resourceType = null,
+                specialLootId = militaryLoot,
+                baseYield = 1
+            )
+        }
+
+        // Штольня: стенки галереи теперь ДОБЫВАЕМЫЕ узлы (уголь слева, железо
+        // справа) — прежде это был чистый декор rock_moss_* (§7.10).
+        if (location == LocationId.ABANDONED_MINE) {
+            for ((i, zStep) in listOf(-18f, -10f, -2f, 6f, 14f, 22f).withIndex()) {
+                trimmed += ResourceNode(
+                    id = "${location.name.lowercase()}_gallery_coal_$i",
+                    location = location,
+                    kind = WorldObjectKind.COAL_SEAM,
+                    x = -4.6f,
+                    z = zStep + 2.2f,
+                    resourceType = ResourceType.COAL,
+                    specialLootId = null,
+                    baseYield = 2
+                )
+                trimmed += ResourceNode(
+                    id = "${location.name.lowercase()}_gallery_iron_$i",
+                    location = location,
+                    kind = WorldObjectKind.IRON_VEIN,
+                    x = 4.6f,
+                    z = zStep - 1.8f,
+                    resourceType = ResourceType.IRON,
+                    specialLootId = null,
+                    baseYield = 1
+                )
+            }
+        }
+
+        // §7.11: валежник и галька — ручная добыча дерева и камня на старте
+        // забега (до первого топора/кирки). Раскиданы кольцом по всей площади
+        // района, вдали от построек, чтобы старт не зависел от одной точки.
+        val handSpots = 8
+        for (k in 0 until handSpots) {
+            val (hx, hz) = sampleSpreadSpot(rng, taken, forbidden, minDist = 5.0f, forbiddenRadius = 8f)
+            taken += hx to hz
+            val (px, pz) = sampleSpreadSpot(rng, taken, forbidden, minDist = 5.0f, forbiddenRadius = 8f)
+            taken += px to pz
+            trimmed += ResourceNode(
+                id = "${location.name.lowercase()}_fallen_$k",
+                location = location,
+                kind = WorldObjectKind.FALLEN_BRANCH,
+                x = hx,
+                z = hz,
+                resourceType = ResourceType.WOOD,
+                specialLootId = null,
+                baseYield = 1
+            )
+            trimmed += ResourceNode(
+                id = "${location.name.lowercase()}_pebble_$k",
+                location = location,
+                kind = WorldObjectKind.PEBBLES,
+                x = px,
+                z = pz,
+                resourceType = ResourceType.STONE,
                 specialLootId = null,
                 baseYield = 1
             )
         }
+
         result.clear()
         result.addAll(trimmed)
 
@@ -375,4 +433,79 @@ object WorldPopulator {
             ResourceType.IRON_INGOT -> WorldObjectKind.IRON_VEIN
             ResourceType.MEAT, ResourceType.HIDE -> WorldObjectKind.GAME_CARCASS
         }
+
+    /**
+     * Точки построек/тайников района (локальные координаты): вокруг них узлы
+     * не spawn'ятся, чтобы не возникало «кучи ресурсов у сруба» (§7.10).
+     */
+    private fun structureSpots(location: LocationId): List<Pair<Float, Float>> {
+        val spots = mutableListOf<Pair<Float, Float>>()
+        spots += specialCacheCoordinates(location)
+        spots += supplySpotsFor(location)
+        militarySpotFor(location)?.let { spots += it }
+        when (location) {
+            LocationId.BASE_CLEARING -> {
+                spots += -6.8f to -5.8f // сруб базы
+                spots += 4.8f to -4.5f // верстак-тележка
+            }
+            LocationId.HUNTERS_CABIN -> {
+                spots += 7.2f to 8.8f  // зимовьё
+                spots += 7.2f to 4.7f  // ворота у тропы
+            }
+            LocationId.ABANDONED_MINE -> spots += -8.0f to 7.6f
+            else -> Unit
+        }
+        return spots
+    }
+
+    /**
+     * Выбор точки Пуассон-дискoм: rejection sampling с детерминированным rng.
+     * Возвращает первую точку не ближе [minDist] к занятым и не ближе
+     * [forbiddenRadius] к запретным; если за 48 попыток такой нет — лучшую из
+     * найденных (карта не должна терять узлы).
+     */
+    private fun sampleSpreadSpot(
+        rng: Random,
+        taken: List<Pair<Float, Float>>,
+        forbidden: List<Pair<Float, Float>>,
+        minDist: Float,
+        forbiddenRadius: Float
+    ): Pair<Float, Float> {
+        var best: Pair<Float, Float>? = null
+        var bestScore = -1f
+        for (attempt in 0 until 48) {
+            val x = -44f + rng.nextFloat() * 88f
+            val z = -44f + rng.nextFloat() * 88f
+            if (forbidden.any { hypot(x - it.first, z - it.second) < forbiddenRadius }) continue
+            val nearest = taken.minOfOrNull { hypot(x - it.first, z - it.second) } ?: Float.MAX_VALUE
+            if (nearest >= minDist) return x to z
+            if (nearest > bestScore) {
+                bestScore = nearest
+                best = x to z
+            }
+        }
+        return best ?: (-40f to -40f)
+    }
+
+    private fun supplySpotsFor(location: LocationId): List<Pair<Float, Float>> = when (location) {
+        LocationId.BASE_CLEARING -> listOf(9.6f to -6.4f, -11.8f to 7.9f)
+        LocationId.DENSE_SPRUCE -> listOf(7.4f to 15.2f, -16.4f to 4.8f)
+        LocationId.FROZEN_LAKE -> listOf(12.6f to 9.4f, -9.2f to -15.8f)
+        LocationId.ABANDONED_MINE -> listOf(9.8f to 6.2f, -11.4f to -14.8f)
+        LocationId.HUNTERS_CABIN -> listOf(12.4f to 4.2f, -8.6f to 12.8f)
+    }
+
+    private fun militarySpotFor(location: LocationId): Pair<Float, Float>? = when (location) {
+        LocationId.BASE_CLEARING -> 11.4f to 8.2f      // у северной тропы поляны
+        LocationId.ABANDONED_MINE -> 12.8f to -12.2f   // в тупике штольни
+        LocationId.HUNTERS_CABIN -> -11.8f to 13.4f    // за зимовьем, у леса
+        else -> null
+    }
+
+    private fun militaryLootFor(location: LocationId): SpecialLootId? = when (location) {
+        LocationId.BASE_CLEARING -> SpecialLootId.FIRST_AID_KIT
+        LocationId.ABANDONED_MINE -> SpecialLootId.SOLDIER_RATION
+        LocationId.HUNTERS_CABIN -> SpecialLootId.HUNTING_KNIFE
+        else -> null
+    }
 }

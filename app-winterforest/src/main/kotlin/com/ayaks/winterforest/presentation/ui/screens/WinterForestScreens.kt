@@ -7,6 +7,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -38,10 +39,17 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.foundation.layout.offset
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
@@ -53,6 +61,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import com.ayaks.winterforest.presentation.ui.HudZones
 import com.ayaks.winterforest.domain.model.BaseProgress
 import com.ayaks.winterforest.domain.model.BaseUpgradeType
 import com.ayaks.winterforest.domain.model.GraphicsQuality
@@ -251,7 +260,7 @@ fun MainMenuScreen(
                         GlassMenuButton(
                             text = "Новая экспедиция",
                             icon = rememberAssetIcon("glyphs/glyph_snowfall.png"),
-                            onClick = { viewModel.startNewGame() },
+                            onClick = { viewModel.requestNewExpedition() },
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .testTag("btn_new_game")
@@ -260,7 +269,7 @@ fun MainMenuScreen(
                         PrimaryGameButton(
                             text = "Новая экспедиция",
                             icon = rememberAssetIcon("glyphs/glyph_snowfall.png"),
-                            onClick = { viewModel.startNewGame() },
+                            onClick = { viewModel.requestNewExpedition() },
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .testTag("btn_new_game")
@@ -325,7 +334,20 @@ fun GameScreen(
     val context = LocalContext.current
     val activity = context as? Activity
 
-    Box(modifier = Modifier.fillMaxSize().testTag("screen_game_3d")) {
+    // Единая сетка HUD (§7.14): ВЕРХНЯЯ и НИЖНЯЯ строки собраны структурными Row,
+    // поэтому зоны физически не могут наехать друг на друга — ширина каждой
+    // колонки известна заранее (HudZones), остатки распределяют Spacer(weight).
+    // Компактный профиль включается на узких ландшафтных экранах (< 760 dp):
+    // радар прячется, слоты и джойстик уменьшаются, надписи короче.
+    BoxWithConstraints(modifier = Modifier.fillMaxSize().testTag("screen_game_3d")) {
+        val compact = maxWidth < HudZones.COMPACT_WIDTH_DP.dp
+        val statsWidth = if (compact) HudZones.COMPACT_STATS_WIDTH_DP.dp else HudZones.STATS_WIDTH_DP.dp
+        val slotSize = if (compact) HudZones.COMPACT_HOTBAR_SLOT_DP else HudZones.HOTBAR_SLOT_DP
+        val joystickSize = if (compact) HudZones.COMPACT_JOYSTICK_DP else HudZones.JOYSTICK_DP
+        val actionsWidth =
+            if (compact) HudZones.COMPACT_ACTIONS_WIDTH_DP.dp else HudZones.ACTIONS_WIDTH_DP.dp
+        val widthDp = maxWidth.value
+
         // 1. Живая 3D-сцена уже отрисовывается корневым PersistentForestScene —
         // здесь только прозрачный слой свайп-обзора камеры поверх неё.
         Box(
@@ -348,18 +370,20 @@ fun GameScreen(
             modifier = Modifier.align(Alignment.Center)
         )
 
-        // 3. Левый верхний компактный HUD показателей и текущей цели дня (не закрывает обзор!)
-        Column(
+        // 3. ВЕРХНЯЯ строка: статы | таймеры | меню+радар
+        Row(
             modifier = Modifier
-                .align(Alignment.TopStart)
+                .fillMaxWidth()
+                .align(Alignment.TopCenter)
                 .displayCutoutPadding()
-                .padding(start = 12.dp, top = 8.dp)
-                .width(268.dp),
-            verticalArrangement = Arrangement.spacedBy(5.dp)
+                .padding(horizontal = 10.dp)
+                .padding(top = 8.dp),
+            verticalAlignment = Alignment.Top
         ) {
+            // 3a. Панель показателей и текущей цели дня (не закрывает обзор)
             Column(
                 modifier = Modifier
-                    .fillMaxWidth()
+                    .width(statsWidth)
                     .clip(RoundedCornerShape(12.dp))
                     .background(Color(0xBA091520))
                     .border(1.dp, Color(0x327CC6FE), RoundedCornerShape(12.dp))
@@ -375,7 +399,7 @@ fun GameScreen(
                         text = run.currentLocation.titleRu,
                         color = SnowCrispText,
                         fontWeight = FontWeight.Bold,
-                        fontSize = 13.sp
+                        fontSize = if (compact) 12.sp else 13.sp
                     )
                     val phaseLabel = if (run.isNight) "Полярная ночь" else "День"
                     val weatherLabel = if (run.isSnowing) "Метель" else "Мороз"
@@ -403,45 +427,26 @@ fun GameScreen(
                     Modifier.fillMaxWidth()
                 )
             }
-        }
 
-        // 4. Кнопка «Восстановить ресурсы» — кверху экрана, освобождает игровую зону
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            modifier = Modifier
-                .align(Alignment.TopCenter)
-                .padding(top = 8.dp)
-                .width(340.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            Button(
-                onClick = { viewModel.onRestoreResources() },
-                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
-                modifier = Modifier.width(220.dp).height(40.dp)
-            ) {
-                Text("Восстановить ресурсы", fontSize = 12.sp)
-            }
+            Spacer(Modifier.weight(1f))
 
-            // Строка активного таймера — под кнопкой восстановления
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier.width(340.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-            val activeTimer = run.activeSkippableTimer()
-            if (activeTimer != null) {
-                Row(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(9.dp))
-                        .background(Color(0xCC162D40))
-                        .padding(horizontal = 9.dp, vertical = 4.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
+            // 3b. Строка активного таймера (статус, НЕ действие): «Ресурс
+            // восстановится через N с» + реклама-пропуск. Кнопки восстановления
+            // здесь больше нет — она одна, внизу, в панели действий (§7.2).
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                val activeTimer = run.activeSkippableTimer()
+                if (activeTimer != null) {
+                    // Чип статуса и кнопка рекламы — СТОЛБИКОМ: в ландшафте каждая
+                    // лишняя сотня dp ширины сверху съедает место статов и меню
+                    // (бюджеты зон посчитаны в HudZones).
                     Text(
                         text = "${activeTimer.first.titleRu}: ${activeTimer.second.roundToInt()} с",
                         color = HearthAmberAccent,
-                        fontSize = 10.sp
+                        fontSize = 10.sp,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(9.dp))
+                            .background(Color(0xCC162D40))
+                            .padding(horizontal = 9.dp, vertical = 4.dp)
                     )
                     if (state.isSkipTimerAdButtonVisible) {
                         Button(
@@ -454,106 +459,119 @@ fun GameScreen(
                     }
                 }
             }
-        }
-        }
 
-        // 5. Правый верхний узел: кнопки Лагеря / Меню + опциональный FPS + круговой 3D-радар
-        Row(
-            verticalAlignment = Alignment.Top,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .displayCutoutPadding()
-                .padding(end = 12.dp, top = 8.dp)
-        ) {
-            Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Button(
-                        onClick = { viewModel.navigateTo(AppDestination.BASE_INVENTORY) },
-                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                        modifier = Modifier.height(34.dp)
-                    ) {
-                        Text("База / Рюкзак (${run.inventory.occupiedSlots}/${Inventory.MAX_SLOTS})", fontSize = 11.sp)
+            Spacer(Modifier.weight(1f))
+
+            // 3c. Меню-кластер + круговой радар
+            Row(
+                verticalAlignment = Alignment.Top,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.End,
+                    verticalArrangement = Arrangement.spacedBy(5.dp)
+                ) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Button(
+                            onClick = { viewModel.navigateTo(AppDestination.BASE_INVENTORY) },
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                            modifier = Modifier.height(32.dp)
+                        ) {
+                            Text(
+                                text = if (compact) {
+                                    "База (${run.inventory.occupiedSlots}/${Inventory.MAX_SLOTS})"
+                                } else {
+                                    "База / Рюкзак (${run.inventory.occupiedSlots}/${Inventory.MAX_SLOTS})"
+                                },
+                                fontSize = 11.sp
+                            )
+                        }
+                        OutlinedButton(
+                            onClick = { viewModel.navigateTo(AppDestination.MAIN_MENU) },
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                            modifier = Modifier.height(32.dp)
+                        ) {
+                            Text("Меню", fontSize = 11.sp)
+                        }
                     }
-                    OutlinedButton(
-                        onClick = { viewModel.navigateTo(AppDestination.MAIN_MENU) },
-                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                        modifier = Modifier.height(34.dp)
-                    ) {
-                        Text("Меню", fontSize = 11.sp)
+                    if (state.settings.showFpsCounter) {
+                        Text(
+                            text = "${state.measuredFps} FPS • VBO",
+                            color = SpruceEmerald,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(Color(0xBA091520))
+                                .padding(horizontal = 7.dp, vertical = 2.dp)
+                        )
+                    }
+                    if (run.currentLocation != LocationId.BASE_CLEARING) {
+                        OutlinedButton(
+                            onClick = { viewModel.onReturnToBase() },
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                            modifier = Modifier.height(30.dp)
+                        ) {
+                            Text("← В лагерь", fontSize = 10.sp)
+                        }
                     }
                 }
-                if (state.settings.showFpsCounter) {
-                    Text(
-                        text = "${state.measuredFps} FPS • VBO",
-                        color = SpruceEmerald,
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(Color(0xBA091520))
-                            .padding(horizontal = 7.dp, vertical = 2.dp)
-                    )
-                }
-                if (run.currentLocation != LocationId.BASE_CLEARING) {
-                    OutlinedButton(
-                        onClick = { viewModel.onReturnToBase() },
-                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
-                        modifier = Modifier.height(30.dp)
-                    ) {
-                        Text("← В лагерь", fontSize = 10.sp)
-                    }
+
+                if (HudZones.radarVisible(widthDp)) {
+                    MiniRadarHud(run = run)
                 }
             }
-
-            MiniRadarHud(run = run)
         }
 
-        // 6. Левый нижний плавающий джойстик
-        VirtualJoystick(
-            onJoystickChanged = { fwd, str -> viewModel.updateJoystick(fwd, str) },
-            modifier = Modifier
-                .align(Alignment.BottomStart)
-                .displayCutoutPadding()
-                .padding(start = 14.dp, bottom = 10.dp)
-        )
-
-        // 7. Нижний центральный хотбар: 6 пустых слотов, заполняются из рюкзака
-        QuickEquipmentHotbar(
-            run = run,
-            onUseSlot = { viewModel.onUseHotbar(it) },
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(bottom = 10.dp)
-        )
-
-        // 8. Правый нижний кластер действий под большой палец правой руки
+        // 4. НИЖНЯЯ строка: джойстик | хотбар | действия
         val targetPrompt = run.activeTargetPrompt()
         val primaryLabel = when {
+            targetPrompt?.isDroppedItem == true -> "Подобрать"
             targetPrompt?.isSpecialRelic == true -> "Забрать находку"
             targetPrompt != null -> targetPrompt.actionVerbRu
             else -> "Удар (${run.equippedTool.shortLabelRu})"
         }
-        val primaryColor = when {
-            targetPrompt?.isSpecialRelic == true -> HearthAmberAccent
-            targetPrompt?.isHostile == true -> CrimsonDanger
-            targetPrompt != null -> SpruceEmerald
-            else -> IceCyanPrimary
-        }
-
-        Column(
-            horizontalAlignment = Alignment.End,
-            verticalArrangement = Arrangement.spacedBy(7.dp),
+        // §7.12: кнопка действия подбирает предмет с земли, когда цель — дроп
+        val primaryCooldownId = if (targetPrompt?.isDroppedItem == true) "pickup" else "strike"
+        val onPrimaryAction: () -> Unit =
+            if (targetPrompt?.isDroppedItem == true) {
+                { viewModel.onPickupNearestDropped() }
+            } else {
+                { viewModel.onActionStrike() }
+            }
+        Row(
             modifier = Modifier
-                .align(Alignment.BottomEnd)
+                .fillMaxWidth()
+                .align(Alignment.BottomCenter)
                 .displayCutoutPadding()
-                .padding(end = 14.dp, bottom = 10.dp)
+                .padding(horizontal = 10.dp)
+                .padding(bottom = 10.dp),
+            verticalAlignment = Alignment.Bottom
         ) {
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            VirtualJoystick(
+                sizeDp = joystickSize,
+                onJoystickChanged = { fwd, str -> viewModel.updateJoystick(fwd, str) }
+            )
+
+            Spacer(Modifier.weight(1f))
+
+            QuickEquipmentHotbar(
+                run = run,
+                slotSizeDp = slotSize,
+                onUseSlot = { viewModel.onUseHotbar(it) }
+            )
+
+            Spacer(Modifier.weight(1f))
+
+            Column(
+                horizontalAlignment = Alignment.End,
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+                modifier = Modifier.width(actionsWidth)
+            ) {
                 OutlinedButton(
                     onClick = { viewModel.onToggleSprint() },
-                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                    modifier = Modifier.height(34.dp)
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                    modifier = Modifier.height(30.dp)
                 ) {
                     Text(
                         text = if (run.isSprinting) "Бег: ВКЛ" else "Бег",
@@ -561,40 +579,124 @@ fun GameScreen(
                         fontSize = 11.sp
                     )
                 }
+
+                // Действия с перезарядкой: внутри кнопки прогресс слева направо
+                com.ayaks.winterforest.presentation.ui.components.CooldownButton(
+                    label = "Добыть",
+                    cooldownRemainingSec = state.cooldowns["gather"] ?: 0f,
+                    cooldownTotalSec = 1.2f,
+                    onClick = { viewModel.onActionGather() },
+                    modifier = Modifier.width(actionsWidth)
+                )
+                com.ayaks.winterforest.presentation.ui.components.CooldownButton(
+                    label = "Рыбалка",
+                    cooldownRemainingSec = state.cooldowns["fish"] ?: 0f,
+                    cooldownTotalSec = 6.0f,
+                    onClick = { viewModel.onFishAtHole() },
+                    modifier = Modifier.width(actionsWidth)
+                )
+                com.ayaks.winterforest.presentation.ui.components.CooldownButton(
+                    label = "Укрытие",
+                    cooldownRemainingSec = state.cooldowns["shelter"] ?: 0f,
+                    cooldownTotalSec = 6.0f,
+                    onClick = { viewModel.onPlaceSnowShelter() },
+                    modifier = Modifier.width(actionsWidth)
+                )
+
+                com.ayaks.winterforest.presentation.ui.components.CooldownButton(
+                    label = primaryLabel,
+                    cooldownRemainingSec = state.cooldowns[primaryCooldownId] ?: 0f,
+                    cooldownTotalSec = 1.0f,
+                    onClick = onPrimaryAction,
+                    modifier = Modifier.width(actionsWidth).height(48.dp)
+                )
+
+                // ЕДИНСТВЕННАЯ кнопка восстановления ресурсов (§7.2): внизу,
+                // в панели действий под большим пальцем; сверху её больше нет.
+                OutlinedButton(
+                    onClick = { viewModel.onRestoreResources() },
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                    modifier = Modifier.height(30.dp).testTag("btn_restore_resources")
+                ) {
+                    Text("Восстановить ресурсы", fontSize = 10.sp)
+                }
             }
-
-            // Действия с перезарядкой: внутри кнопки прогресс слева направо
-            com.ayaks.winterforest.presentation.ui.components.CooldownButton(
-                label = "Добыть",
-                cooldownRemainingSec = state.cooldowns["gather"] ?: 0f,
-                cooldownTotalSec = 1.2f,
-                onClick = { viewModel.onActionGather() },
-                modifier = Modifier.width(120.dp)
-            )
-            com.ayaks.winterforest.presentation.ui.components.CooldownButton(
-                label = "Рыбалка",
-                cooldownRemainingSec = state.cooldowns["fish"] ?: 0f,
-                cooldownTotalSec = 6.0f,
-                onClick = { viewModel.onFishAtHole() },
-                modifier = Modifier.width(120.dp)
-            )
-            com.ayaks.winterforest.presentation.ui.components.CooldownButton(
-                label = "Укрытие",
-                cooldownRemainingSec = state.cooldowns["shelter"] ?: 0f,
-                cooldownTotalSec = 6.0f,
-                onClick = { viewModel.onPlaceSnowShelter() },
-                modifier = Modifier.width(120.dp)
-            )
-
-            // Еда/Костёр живут в хотбаре (слоты 5–6) — дублирующая кнопка «Еда / Тепло» убрана
-            com.ayaks.winterforest.presentation.ui.components.CooldownButton(
-                label = primaryLabel,
-                cooldownRemainingSec = state.cooldowns["strike"] ?: 0f,
-                cooldownTotalSec = 1.0f,
-                onClick = { viewModel.onActionStrike() },
-                modifier = Modifier.width(150.dp).height(54.dp)
-            )
         }
+    }
+}
+
+/**
+ * §7.4: выбор класса ПЕРЕД каждым новым забегом. Три стеклянные карточки со
+ * стартовым набором; выбор применяется к забегу сразу при старте.
+ */
+@Composable
+fun LoadoutSelectScreen(
+    state: WinterForestUiState,
+    viewModel: WinterForestViewModel
+) {
+    var chosen by remember { mutableStateOf(state.baseProgress.selectedLoadout) }
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xC4060C14))
+            .displayCutoutPadding()
+            .padding(18.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("Класс экспедиции", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = SnowCrispText)
+            OutlinedButton(onClick = { viewModel.navigateTo(AppDestination.MAIN_MENU) }) {
+                Text("← Меню")
+            }
+        }
+        Text(
+            text = "Класс определяет стартовый набор каждого нового забега. Выбор делается перед стартом, а не в базе.",
+            color = MistMutedText,
+            fontSize = 12.sp
+        )
+        Row(
+            modifier = Modifier.weight(1f),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            for (loadout in StarterLoadout.entries) {
+                val selected = chosen == loadout
+                Card(
+                    colors = CardDefaults.cardColors(
+                        containerColor = if (selected) Color(0x337CC6FE) else FrostedCardSurface
+                    ),
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .clickable { chosen = loadout }
+                ) {
+                    Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(
+                            text = (if (selected) "✓ " else "") + loadout.titleRu,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = SnowCrispText
+                        )
+                        Text(text = loadout.descriptionRu, color = MistMutedText, fontSize = 12.sp)
+                        Text(
+                            text = "Стартовый набор: " + loadout.items.entries
+                                .joinToString(", ") { "${it.key.titleRu} ×${it.value}" },
+                            color = IceCyanPrimary,
+                            fontSize = 12.sp
+                        )
+                    }
+                }
+            }
+        }
+        PrimaryGameButton(
+            text = "Начать забег",
+            icon = rememberAssetIcon("glyphs/glyph_snowfall.png"),
+            onClick = { viewModel.confirmLoadoutAndStart(chosen) },
+            modifier = Modifier.fillMaxWidth().testTag("btn_start_run")
+        )
     }
 }
 
@@ -844,6 +946,8 @@ private fun recipeIconPath(recipe: WorkbenchRecipe): String = when (recipe) {
     WorkbenchRecipe.CRAFT_IRON_AXE -> "icons/icon_axe.png"
     WorkbenchRecipe.CRAFT_IRON_PICKAXE -> "icons/icon_pickaxe.png"
     WorkbenchRecipe.CRAFT_IRON_SPEARHEAD -> "icons/icon_spear.png"
+    WorkbenchRecipe.CRAFT_PRIMITIVE_AXE -> "icons/icon_primitive_axe.png"
+    WorkbenchRecipe.CRAFT_PRIMITIVE_PICKAXE -> "icons/icon_primitive_pickaxe.png"
 }
 
 @Composable
@@ -983,167 +1087,308 @@ private fun InventoryStorageTab(
     val inv = run?.inventory ?: Inventory(specialItems = base.persistentSpecialLoot.associateWith { 1 })
     var selectedType by remember { mutableStateOf<ResourceType?>(null) }
 
-    Card(colors = CardDefaults.cardColors(containerColor = FrostedCardSurface)) {
-        Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text(
-                "Рюкзак • ${inv.occupiedSlots}/${Inventory.MAX_SLOTS} ячеек",
-                fontWeight = FontWeight.Bold,
-                color = SnowCrispText
-            )
+    // §7.3: настоящий drag&drop. Состояние перетаскивания живёт здесь: что
+    // тащим (ячейка сетки или слот хотбара), где палец, и прямоугольники целей
+    // в координатах корня вкладки (снимаются onGloballyPositioned).
+    val view = androidx.compose.ui.platform.LocalView.current
+    var dragGrid by remember { mutableStateOf<Int?>(null) }
+    var dragHotbar by remember { mutableStateOf<Int?>(null) }
+    var dragType by remember { mutableStateOf<ResourceType?>(null) }
+    var dragPos by remember { mutableStateOf(Offset.Zero) }
+    val gridRects = remember { mutableStateMapOf<Int, Rect>() }
+    val hotbarRects = remember { mutableStateMapOf<Int, Rect>() }
+    val dragging = dragGrid != null || dragHotbar != null
 
-            // Сетка ячеек 5×4 — как в классических RPG: слоты, стаки, выделение
-            com.ayaks.winterforest.presentation.ui.components.InventorySlotGrid(
-                inventory = inv,
-                selectedType = selectedType,
-                onSelectType = { selectedType = it }
-            )
+    fun dropTargetGrid(): Int? =
+        gridRects.entries.firstOrNull { it.value.contains(dragPos) }?.key
 
-            // Панель выбранного предмета
-            val selectedSlot = inv.slots.firstOrNull { it.type == selectedType }
-            if (selectedSlot != null) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(Color(0x18FFFFFF))
-                        .padding(10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    com.ayaks.winterforest.presentation.ui.components.ResourceTypeGlyph(type = selectedSlot.type)
-                    Column(Modifier.weight(1f)) {
-                        Text(
-                            "${selectedSlot.type.titleRu} • ${selectedSlot.count}/${Inventory.MAX_STACK_SIZE}",
-                            color = SnowCrispText,
-                            fontWeight = FontWeight.SemiBold,
-                            fontSize = 12.sp
-                        )
-                        Text(
-                            when (selectedSlot.type.category) {
-                                com.ayaks.winterforest.domain.model.ResourceCategory.FUEL -> "Топливо: поддерживает огонь и тепло"
-                                com.ayaks.winterforest.domain.model.ResourceCategory.FOOD -> "Пища: восстанавливает сытость"
-                                com.ayaks.winterforest.domain.model.ResourceCategory.MATERIAL -> "Материал: крафт на верстаке"
-                            },
-                            color = MistMutedText,
-                            fontSize = 10.5.sp
-                        )
-                    }
-                    if (run != null && (selectedSlot.type.isEdible || selectedSlot.type.isFuel)) {
-                        Button(
-                            onClick = { viewModel.onUseSpecificResource(selectedSlot.type) },
-                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                            modifier = Modifier.height(34.dp)
-                        ) {
-                            Text("Использовать", fontSize = 11.sp)
-                        }
-                    }
-                }
-            } else {
-                Text("Коснитесь ячейки, чтобы выбрать предмет.", color = MistMutedText, fontSize = 11.sp)
-            }
+    fun dropTargetHotbar(): Int? =
+        hotbarRects.entries.firstOrNull { it.value.contains(dragPos) }?.key
 
-            if (base.storageResources.isNotEmpty()) {
-                HorizontalDivider(color = Color(0x33FFFFFF))
-                val storageSummary = base.storageResources.entries
-                    .joinToString(" • ") { "${it.key.titleRu}: ${it.value}" }
-                Text("Склад лагеря: $storageSummary", color = IceCyanPrimary, fontSize = 11.5.sp)
-            }
+    fun endDrag() {
+        dragGrid = null
+        dragHotbar = null
+        dragType = null
+    }
 
-            HorizontalDivider(color = Color(0x33FFFFFF))
-            Text("Специальные предметы", fontWeight = FontWeight.Bold, color = HearthAmberAccent)
-            if (inv.specialItems.isEmpty()) {
-                Text("Специальные предметы ещё не найдены.", color = MistMutedText, fontSize = 12.sp)
-            } else {
-                for ((loot, qty) in inv.specialItems) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(Modifier.weight(1f)) {
-                            Text("${loot.titleRu} ×$qty (${loot.sourceLocationNameRu})", color = SnowCrispText, fontWeight = FontWeight.SemiBold)
-                            Text(loot.descriptionRu, color = MistMutedText, fontSize = 11.5.sp)
-                        }
-                        if (run != null && loot == SpecialLootId.RESIN_TORCH) {
-                            Button(onClick = { viewModel.onIgniteResinTorch() }) {
-                                Text("Зажечь", fontSize = 11.sp)
-                            }
-                        }
-                    }
-                }
-            // Хотбар быстрого доступа: 6 слотов, заполняются вручную из рюкзака
-            HorizontalDivider(color = Color(0x33FFFFFF))
-            Text(
-                "Хотбар быстрого доступа",
-                fontWeight = FontWeight.Bold,
-                color = HearthAmberAccent,
-                fontSize = 12.sp
-            )
-            Text(
-                "Перетащите еду, инструменты и расходники из рюкзака в слоты хотбара — они будут доступны одной кнопкой в игре.",
-                color = MistMutedText,
-                fontSize = 10.5.sp
-            )
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                for (slotIdx in 0..5) {
-                    val current = run?.hotbarAt(slotIdx)
-                    Column(
-                        modifier = Modifier
-                            .width(64.dp)
-                            .height(72.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .width(52.dp)
-                                .height(52.dp)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(Color(0x18FFFFFF))
-                                .border(1.dp, if (current != null) Color(0xFF7CC6FE) else Color(0x33FFFFFF), RoundedCornerShape(8.dp))
-                        ) {
-                            current?.let { entry ->
-                                if (entry.resourceType != null) {
-                                    com.ayaks.winterforest.presentation.ui.components.ResourceTypeGlyph(
-                                        type = entry.resourceType!!,
-                                        modifier = Modifier.size(28.dp)
-                                    )
-                                } else {
-                                    Text(
-                                        text = "🔧",
-                                        fontSize = 20.sp,
-                                        modifier = Modifier.align(Alignment.Center)
-                                    )
+    fun finishDrop() {
+        val g = dragGrid
+        val h = dragHotbar
+        val targetHot = dropTargetHotbar()
+        val targetGrid = dropTargetGrid()
+        when {
+            g != null && targetHot != null -> viewModel.onDropInventoryOnHotbar(g, targetHot)
+            g != null && targetGrid != null -> viewModel.onSwapInventoryCells(g, targetGrid)
+            h != null && targetGrid != null -> viewModel.onDropHotbarToInventory(h)
+            h != null && targetHot != null && targetHot != h -> viewModel.onSwapHotbarSlots(h, targetHot)
+        }
+        view.performHapticFeedback(android.view.HapticFeedbackConstants.CLOCK_TICK)
+        endDrag()
+    }
+
+    Box(modifier = Modifier.fillMaxSize()) {
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Card(colors = CardDefaults.cardColors(containerColor = FrostedCardSurface)) {
+                Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        "Рюкзак • ${inv.occupiedSlots}/${Inventory.MAX_SLOTS}",
+                        fontWeight = FontWeight.Bold,
+                        color = SnowCrispText
+                    )
+
+                    // Сетка 5×4 БЕЗ подписей под ячейками: иконка + счётчик.
+                    // Ячейки сортируются перетаскиванием, пустые «дырки» держатся.
+                    for (row in 0 until 4) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            for (col in 0 until 5) {
+                                val idx = row * 5 + col
+                                val slot = inv.gridSlot(idx)
+                                val isTarget = dragging && dropTargetGrid() == idx &&
+                                    (dragGrid != idx)
+                                Box(
+                                    modifier = Modifier
+                                        .size(64.dp)
+                                        .onGloballyPositioned { gridRects[idx] = it.boundsInRoot() }
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(if (slot != null) Color(0x22FFFFFF) else Color(0x0DFFFFFF))
+                                        .border(
+                                            1.4.dp,
+                                            when {
+                                                isTarget -> HearthAmberAccent
+                                                slot != null && slot.type == selectedType -> IceCyanPrimary
+                                                slot != null -> Color(0x33FFFFFF)
+                                                else -> Color(0x1AFFFFFF)
+                                            },
+                                            RoundedCornerShape(10.dp)
+                                        )
+                                        .clickable { selectedType = slot?.type }
+                                        .pointerInput(idx, slot?.type, slot?.count) {
+                                            if (slot == null) return@pointerInput
+                                            detectDragGestures(
+                                                onDragStart = {
+                                                    dragGrid = idx
+                                                    dragHotbar = null
+                                                    dragType = slot.type
+                                                    dragPos = gridRects[idx]?.topLeft ?: Offset.Zero
+                                                    view.performHapticFeedback(
+                                                        android.view.HapticFeedbackConstants.LONG_PRESS
+                                                    )
+                                                },
+                                                onDragEnd = { finishDrop() },
+                                                onDragCancel = { endDrag() }
+                                            ) { change, _ ->
+                                                change.consume()
+                                                val origin = gridRects[idx]?.topLeft ?: Offset.Zero
+                                                dragPos = origin + change.position
+                                            }
+                                        }
+                                ) {
+                                    if (slot != null) {
+                                        com.ayaks.winterforest.presentation.ui.components.ResourceTypeGlyph(
+                                            type = slot.type,
+                                            modifier = Modifier.size(34.dp).align(Alignment.Center)
+                                        )
+                                        if (slot.count > 1) {
+                                            Text(
+                                                text = "${slot.count}",
+                                                color = SnowCrispText,
+                                                fontSize = 10.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                modifier = Modifier
+                                                    .align(Alignment.BottomEnd)
+                                                    .padding(3.dp)
+                                            )
+                                        }
+                                    }
                                 }
                             }
                         }
-                        Text(
-                            text = current?.titleRu ?: "Слот ${slotIdx + 1}",
-                            color = if (current != null) SnowCrispText else MistMutedText,
-                            fontSize = 9.5.sp,
-                            maxLines = 1
-                        )
-                        val assignable = selectedType
-                        if (assignable != null && run != null && viewModel.canAssignToHotbar(assignable)) {
-                            Button(
-                                onClick = { viewModel.onAssignHotbarFromInventory(slotIdx, assignable) },
-                                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
-                                modifier = Modifier.height(22.dp)
+                    }
+
+                    // Хотбар стоит ВПЛОТНУЮ к сетке: без заголовков, пояснений и
+                    // разделителей между ними (§7.3).
+                    Row(
+                        modifier = Modifier.padding(top = 6.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        for (slotIdx in 0..5) {
+                            val current = run?.hotbarAt(slotIdx)
+                            val isTarget = dragging && dropTargetHotbar() == slotIdx
+                            Box(
+                                modifier = Modifier
+                                    .size(56.dp)
+                                    .onGloballyPositioned { hotbarRects[slotIdx] = it.boundsInRoot() }
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(Color(0x18FFFFFF))
+                                    .border(
+                                        1.4.dp,
+                                        when {
+                                            isTarget -> HearthAmberAccent
+                                            current != null -> Color(0xFF7CC6FE)
+                                            else -> Color(0x33FFFFFF)
+                                        },
+                                        RoundedCornerShape(10.dp)
+                                    )
+                                    .pointerInput(slotIdx, current?.titleRu) {
+                                        if (current == null) return@pointerInput
+                                        detectDragGestures(
+                                            onDragStart = {
+                                                dragHotbar = slotIdx
+                                                dragGrid = null
+                                                dragType = current.resourceType
+                                                dragPos = hotbarRects[slotIdx]?.topLeft ?: Offset.Zero
+                                                view.performHapticFeedback(
+                                                    android.view.HapticFeedbackConstants.LONG_PRESS
+                                                )
+                                            },
+                                            onDragEnd = { finishDrop() },
+                                            onDragCancel = { endDrag() }
+                                        ) { change, _ ->
+                                            change.consume()
+                                            val origin = hotbarRects[slotIdx]?.topLeft ?: Offset.Zero
+                                            dragPos = origin + change.position
+                                        }
+                                    }
                             ) {
-                                Text("В слот ${slotIdx + 1}", fontSize = 9.sp)
+                                current?.let { entry ->
+                                    if (entry.resourceType != null) {
+                                        com.ayaks.winterforest.presentation.ui.components.ResourceTypeGlyph(
+                                            type = entry.resourceType!!,
+                                            modifier = Modifier.size(30.dp).align(Alignment.Center)
+                                        )
+                                    } else {
+                                        Text(
+                                            text = "🔧",
+                                            fontSize = 20.sp,
+                                            modifier = Modifier.align(Alignment.Center)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Панель выбранного предмета — ПОД хотбаром, а не между ним и сеткой
+                    val selectedSlot = inv.slots.firstOrNull { it.type == selectedType }
+                    if (selectedSlot != null) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(Color(0x18FFFFFF))
+                                .padding(10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            com.ayaks.winterforest.presentation.ui.components.ResourceTypeGlyph(type = selectedSlot.type)
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    "${selectedSlot.type.titleRu} • ${selectedSlot.count}/${Inventory.MAX_STACK_SIZE}",
+                                    color = SnowCrispText,
+                                    fontWeight = FontWeight.SemiBold,
+                                    fontSize = 12.sp
+                                )
+                            }
+                            if (run != null && (selectedSlot.type.isEdible || selectedSlot.type.isFuel)) {
+                                Button(
+                                    onClick = { viewModel.onUseSpecificResource(selectedSlot.type) },
+                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                                    modifier = Modifier.height(34.dp)
+                                ) {
+                                    Text("Использовать", fontSize = 11.sp)
+                                }
+                            }
+                            if (run != null) {
+                                OutlinedButton(
+                                    onClick = { viewModel.onDropResourceToGround(selectedSlot.type) },
+                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                                    modifier = Modifier.height(34.dp)
+                                ) {
+                                    Text("Выбросить", fontSize = 11.sp)
+                                }
+                            }
+                        }
+                    }
+
+                    if (base.storageResources.isNotEmpty()) {
+                        val storageSummary = base.storageResources.entries
+                            .joinToString(" • ") { "${it.key.titleRu}: ${it.value}" }
+                        Text("Склад лагеря: $storageSummary", color = IceCyanPrimary, fontSize = 11.5.sp)
+                    }
+
+                    Text("Спецпредметы", fontWeight = FontWeight.Bold, color = HearthAmberAccent)
+                    if (inv.specialItems.isEmpty()) {
+                        Text("Специальные предметы ещё не найдены.", color = MistMutedText, fontSize = 12.sp)
+                    } else {
+                        for ((loot, qty) in inv.specialItems) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(Modifier.weight(1f)) {
+                                    Text("${loot.titleRu} ×$qty (${loot.sourceLocationNameRu})", color = SnowCrispText, fontWeight = FontWeight.SemiBold)
+                                    Text(loot.descriptionRu, color = MistMutedText, fontSize = 11.5.sp)
+                                }
+                                if (run != null && loot == SpecialLootId.RESIN_TORCH) {
+                                    Button(onClick = { viewModel.onIgniteResinTorch() }) {
+                                        Text("Зажечь", fontSize = 11.sp)
+                                    }
+                                }
+                                if (run != null && !loot.persistsAcrossRuns) {
+                                    OutlinedButton(onClick = { viewModel.onDropSpecialToGround(loot) }) {
+                                        Text("Выбросить", fontSize = 11.sp)
+                                    }
+                                }
                             }
                         }
                     }
                 }
             }
+        }
+
+        // «Призрак» перетаскиваемого предмета под пальцем + подсветка цели
+        if (dragging) {
+            val ghostType = dragType
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .pointerInput(Unit) {
+                        // перехватываем жест выше целей, пока идёт перетаскивание
+                        awaitPointerEventScope {
+                            while (true) {
+                                val event = awaitPointerEvent()
+                                event.changes.forEach { it.consume() }
+                            }
+                        }
+                    }
+            ) {
+                Box(
+                    modifier = Modifier
+                        .offset {
+                            IntOffset(
+                                (dragPos.x - 28.dp.toPx()).toInt(),
+                                (dragPos.y - 28.dp.toPx()).toInt()
+                            )
+                        }
+                        .size(56.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(Color(0xAA091520))
+                        .border(1.6.dp, HearthAmberAccent, RoundedCornerShape(10.dp))
+                ) {
+                    if (ghostType != null) {
+                        com.ayaks.winterforest.presentation.ui.components.ResourceTypeGlyph(
+                            type = ghostType,
+                            modifier = Modifier.size(32.dp).align(Alignment.Center)
+                        )
+                    } else {
+                        Text("🔧", fontSize = 20.sp, modifier = Modifier.align(Alignment.Center))
+                    }
+                }
             }
         }
     }
 }
-
 @Composable
 private fun ExpeditionMapTab(
     run: com.ayaks.winterforest.domain.model.GameRunState?,
@@ -1208,21 +1453,17 @@ private fun RelicsAndLoadoutTab(
     base: BaseProgress,
     viewModel: WinterForestViewModel
 ) {
+    // §7.4: выбор класса убран из базы — он происходит перед каждым забегом
+    // на экране LOADOUT_SELECT («Новая экспедиция» в главном меню).
     Card(colors = CardDefaults.cardColors(containerColor = FrostedCardSurface)) {
-        Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Выбор стартовой экипировки экспедиции", fontWeight = FontWeight.Bold, color = SnowCrispText)
-            for (loadout in StarterLoadout.entries) {
-                val selected = base.selectedLoadout == loadout
-                OutlinedButton(
-                    onClick = { viewModel.onSelectLoadout(loadout) },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text(
-                        (if (selected) "✓ " else "") + "${loadout.titleRu} — ${loadout.descriptionRu}",
-                        fontSize = 12.sp
-                    )
-                }
-            }
+        Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text("Класс экспедиции", fontWeight = FontWeight.Bold, color = SnowCrispText)
+            Text(
+                text = "Текущий класс: «${base.selectedLoadout.titleRu}». Класс выбирается перед стартом " +
+                    "нового забега в главном меню («Новая экспедиция»).",
+                color = MistMutedText,
+                fontSize = 12.sp
+            )
         }
     }
 
@@ -1305,7 +1546,7 @@ fun ResultsScreen(
             }
 
             Button(
-                onClick = { viewModel.startNewGame() },
+                onClick = { viewModel.requestNewExpedition() },
                 colors = ButtonDefaults.buttonColors(containerColor = HearthAmberAccent),
                 modifier = Modifier.fillMaxWidth().height(48.dp)
             ) {
@@ -1449,20 +1690,9 @@ fun SettingsScreen(
                         valueRange = 0.3f..2.5f
                     )
 
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(Modifier.weight(1f)) {
-                            Text("Персонализация рекламы (РСЯ)", color = SnowCrispText, fontSize = 13.sp)
-                            Text("Геолокация отключена постоянно.", color = MistMutedText, fontSize = 11.sp)
-                        }
-                        Switch(
-                            checked = state.settings.gdprUserConsent,
-                            onCheckedChange = { viewModel.onGdprConsentSelected(it) }
-                        )
-                    }
+                    // Настройки персонализации рекламы РСЯ в меню НЕТ: согласие
+                    // запрашивается один раз юридически обязательным диалогом
+                    // первого запуска (MainMenuScreen) и меняется только там.
 
                     Button(
                         onClick = { viewModel.requestResetProgressDialog() },
@@ -1521,10 +1751,11 @@ private fun SkillsAndDailyTab(
     viewModel: WinterForestViewModel
 ) {
     val am = com.ayaks.winterforest.domain.rules.AdvancedMechanics
+    // ВАЖНО: скролл здесь запрещён. Правая область BaseInventoryScreen уже
+    // прокручивается, а вложенный verticalScroll получает бесконечную высоту
+    // и Compose падает с «infinity maximum height constraints» при открытии вкладки.
     Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .verticalScroll(rememberScrollState()),
+        modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         Card(colors = CardDefaults.cardColors(containerColor = FrostedCardSurface)) {

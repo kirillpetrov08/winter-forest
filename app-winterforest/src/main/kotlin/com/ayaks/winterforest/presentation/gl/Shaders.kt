@@ -66,6 +66,24 @@ object Shaders {
             return uPointLightColor * atten * (diff + spec);
         }
 
+        // ---- Гамма и тонмаппинг (единая кривая для мира и неба) ----
+        // Раньше цвет уходил в framebuffer как есть: тёмные участки тонули в черноте,
+        // а снег и небо клиппились в плоский белый (картинка «серая/выжженная»).
+        // ACES-аппроксимация даёт мягкий роллофф светов, pow(0.92) — подъём теней.
+        // Константы подобраны замером на палитрах LocationId так, чтобы дневной
+        // снег и зенит остались на прежней яркости (в пределах 2%), а ночное небо
+        // не превращалось в молочную кашу.
+        const float GAMMA_INV = 0.92;
+        const float EXPOSURE = 0.92;
+
+        vec3 acesApprox(vec3 x) {
+            return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0);
+        }
+
+        vec3 toDisplay(vec3 linear) {
+            return pow(acesApprox(max(linear, 0.0) * EXPOSURE), vec3(GAMMA_INV));
+        }
+
         void main() {
             vec4 texel = texture2D(uTexture, vTexCoord) * vColor;
             if (texel.a < 0.05) {
@@ -118,7 +136,7 @@ object Shaders {
             float linFog = clamp((camDist - uFogNear) / max(uFogFar - uFogNear, 0.001), 0.0, 1.0);
             float fogFactor = clamp(linFog * linFog * (3.0 - 2.0 * linFog), 0.0, 1.0);
             vec3 finalRgb = mix(litColor, uFogColor, fogFactor);
-            gl_FragColor = vec4(finalRgb, texel.a);
+            gl_FragColor = vec4(toDisplay(finalRgb), texel.a);
         }
     """
 
@@ -143,9 +161,12 @@ object Shaders {
         uniform float uAspect;
         uniform float uTime;
         uniform float uAuroraStrength;
+        uniform float uNightAmount;
+        uniform vec3 uDiscColor;
         uniform sampler2D uCloudsHigh;
         uniform sampler2D uCloudsLow;
         uniform sampler2D uSunDisc;
+        uniform sampler2D uMoonDisc;
         varying vec2 vScreenUv;
 
         float hash21(vec2 p) {
@@ -189,6 +210,24 @@ object Shaders {
             h += 0.28 * abs(noise1D(az * freq * 2.13 + seedShift * 1.7) * 2.0 - 1.0);
             h += 0.14 * abs(noise1D(az * freq * 4.41 + seedShift * 2.3) * 2.0 - 1.0);
             return h;
+        }
+
+        // ---- Гамма и тонмаппинг (единая кривая для мира и неба) ----
+        // Раньше цвет уходил в framebuffer как есть: тёмные участки тонули в черноте,
+        // а снег и небо клиппились в плоский белый (картинка «серая/выжженная»).
+        // ACES-аппроксимация даёт мягкий роллофф светов, pow(0.92) — подъём теней.
+        // Константы подобраны замером на палитрах LocationId так, чтобы дневной
+        // снег и зенит остались на прежней яркости (в пределах 2%), а ночное небо
+        // не превращалось в молочную кашу.
+        const float GAMMA_INV = 0.92;
+        const float EXPOSURE = 0.92;
+
+        vec3 acesApprox(vec3 x) {
+            return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0);
+        }
+
+        vec3 toDisplay(vec3 linear) {
+            return pow(acesApprox(max(linear, 0.0) * EXPOSURE), vec3(GAMMA_INV));
         }
 
         void main() {
@@ -261,11 +300,21 @@ object Shaders {
             vec2 sunTexUv = (vScreenUv - uSunScreenUv) / 0.085 + 0.5;
             vec4 sunTex = vec4(0.0);
             if (sunTexUv.x > 0.0 && sunTexUv.x < 1.0 && sunTexUv.y > 0.0 && sunTexUv.y < 1.0) {
-                sunTex = texture2D(uSunDisc, sunTexUv);
+                // Ночью на том же месте неба — луна: маска своя, цвет холодный.
+                // Ветвление по uniform (одинаково для всех фрагментов) — без расхождения волн.
+                sunTex = (uNightAmount > 0.5)
+                    ? texture2D(uMoonDisc, sunTexUv)
+                    : texture2D(uSunDisc, sunTexUv);
             }
             float halo = exp(-dScreen * 5.6) * 0.36 + exp(-dScreen * 1.7) * 0.10;
             col += uSunHaloColor * halo;
-            col = mix(col, sunTex.rgb * 1.08, sunTex.a);
+            // Диск светила — АДДИТИВНО по альфа-маске, цвет из uDiscColor.
+            // sun_disc.png / moon_disc.png являются чистыми масками: их RGB равен
+            // (1,0,0) и (0,0,0) во всех пикселях, поэтому прежний
+            // mix(col, sunTex.rgb, sunTex.a) подставлял почти чёрный цвет ровно там,
+            // где маска непрозрачна (35% площади солнца, 23% луны) — в небе висел
+            // чёрный круг с ярким гало вокруг. Теперь маска только добавляет свет.
+            col += uDiscColor * clamp(sunTex.a, 0.0, 1.0) * 1.35;
 
             // 7. Три эшелона заснеженных горных хребтов 360°
             float farPeak = 0.150 * mountainRidge(az, 2.6, 4.2) + 0.012;
@@ -296,7 +345,7 @@ object Shaders {
             float dither = (hash21(vScreenUv * vec2(1913.0, 1171.0) + uTime) - 0.5) * 0.012;
             col += dither;
 
-            gl_FragColor = vec4(col, 1.0);
+            gl_FragColor = vec4(toDisplay(col), 1.0);
         }
     """
 }

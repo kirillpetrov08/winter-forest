@@ -2,60 +2,44 @@ package com.ayaks.winterforest
 
 import com.ayaks.winterforest.presentation.gl.FramePacing
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNull
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * Логика разблокировки частоты кадров (лимит 60 FPS снят) и сглаживания
+ * Кадровая дисциплина: целевые 60 FPS (лимит больше НЕ снимается) и сглаживание
  * движения камеры между 20-герцевыми тиками симуляции.
  */
 class FramePacingTest {
 
-    private fun mode(id: Int, w: Int, h: Int, hz: Float) =
-        FramePacing.DisplayModeInfo(id, w, h, hz)
-
     @Test
-    fun `picks fastest mode with current resolution`() {
-        val modes = listOf(
-            mode(1, 1920, 1080, 60f),
-            mode(2, 1920, 1080, 120f),
-            mode(3, 1280, 720, 144f)
-        )
-        val picked = FramePacing.pickFastestMode(modes, 1920, 1080)
-        assertEquals(2, picked?.id)
-        assertEquals(120f, picked!!.refreshRate, 0f)
+    fun `game targets exactly 60 frames per second`() {
+        // Пользовательский дефект: «при включённых 120 FPS постоянные микрофризы».
+        // Цель игры — 60 кадров, поэтому ни запрос режима дисплея, ни swap interval
+        // не имеют права уходить выше.
+        assertEquals(60, FramePacing.TARGET_FPS)
+        assertEquals(60f, FramePacing.TARGET_SURFACE_FRAME_RATE, 0f)
     }
 
     @Test
-    fun `ignores faster modes with different resolution`() {
-        // 144 Гц, но 720p — переключение разрешения ломает вьюпорт, нужен свой режим
-        val modes = listOf(
-            mode(1, 2400, 1080, 60f),
-            mode(2, 1280, 720, 144f)
-        )
-        val picked = FramePacing.pickFastestMode(modes, 2400, 1080)
-        assertEquals(1, picked?.id)
+    fun `swap interval waits for vsync`() {
+        // 0 = рендер без ожидания вертикального синхроимпульса (прежнее поведение,
+        // которое разогревало SoC). 1 = ровно один кадр на vsync.
+        assertEquals(1, FramePacing.TARGET_SWAP_INTERVAL)
     }
 
     @Test
-    fun `falls back to fastest overall when resolution unknown`() {
-        val modes = listOf(mode(7, 1, 1, 60f), mode(9, 2, 2, 90f))
-        val picked = FramePacing.pickFastestMode(modes, 999, 999)
-        assertEquals(9, picked?.id)
+    fun `sustained slowdown detected below target fps`() {
+        // 30 мс/кадр ≈ 33 FPS — устойчивая просадка
+        assertTrue(FramePacing.isSustainedSlowdown(30f))
+        // 16.7 мс/кадр = 60 FPS — норма
+        assertFalse(FramePacing.isSustainedSlowdown(16.7f))
     }
 
     @Test
-    fun `empty modes list gives null`() {
-        assertNull(FramePacing.pickFastestMode(emptyList(), 1080, 1920))
-    }
-
-    @Test
-    fun `tie on refresh rate resolves deterministically`() {
-        val modes = listOf(mode(4, 10, 10, 120f), mode(3, 10, 10, 120f))
-        val a = FramePacing.pickFastestMode(modes, 10, 10)
-        val b = FramePacing.pickFastestMode(modes.reversed(), 10, 10)
-        assertEquals(a, b)
+    fun `smoothed frame time follows measurement with weight`() {
+        assertEquals(20f, FramePacing.smoothedFrameMs(0f, 20f), 1e-4f)
+        assertEquals(18f, FramePacing.smoothedFrameMs(20f, 10f, weight = 0.2f), 1e-4f)
     }
 
     @Test

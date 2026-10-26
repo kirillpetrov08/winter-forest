@@ -66,7 +66,7 @@ object SurvivalEngine {
             warmth = GameRunState.MAX_STAT,
             stamina = GameRunState.MAX_STAT,
             isSprinting = false,
-            equippedTool = EquippedTool.AXE,
+            equippedTool = EquippedTool.NONE,
             xp = 0,
             level = 1,
             elapsedRealSeconds = 0f,
@@ -198,7 +198,7 @@ object SurvivalEngine {
             }
         }
 
-        // Живая фауна (зайцы, северные олени, ночные волки)
+        // Живая фауна (таёжные крысы, северные олени, ночные волки)
         val enteredNight = !wasNight && nowNight
         val (updatedWildlifeMap, wolfBiteDamage, faunaMessage) = stepWildlifeSimulation(
             run = run,
@@ -428,7 +428,7 @@ object SurvivalEngine {
                                 nextHeading += sin(run.elapsedRealSeconds * 0.7f + idx * 1.9f) * 0.65f * deltaSeconds
                             }
                         } else {
-                            // Мирные зайцы/крысы и северные олени пасутся и стремительно убегают при приближении
+                            // Мирные крысы и северные олени пасутся и стремительно убегают при приближении
                             if (nextFlee > 0f || distToPlayer < 7.4f) {
                                 nextHeading = atan2(-dzToPlayer, -dxToPlayer)
                                 speed = entity.kind.cruiseSpeedMps * 1.75f
@@ -618,6 +618,77 @@ object SurvivalEngine {
         return gatherNearest(run, base, withToolStrikeBonus)
     }
 
+    /**
+     * §7.12: выбросить предмет из инвентаря на землю перед игроком.
+     * Ресурс снимается со стака (1 ед. за бросок), спецпредмет — целиком.
+     */
+    fun dropItemNearPlayer(
+        run: GameRunState,
+        base: BaseProgress,
+        resourceType: ResourceType? = null,
+        specialLootId: SpecialLootId? = null
+    ): EngineStepOutcome {
+        if (resourceType == null && specialLootId == null) {
+            return EngineStepOutcome(run, base, false, "Нечего выбрасывать.")
+        }
+        val nextInv = when {
+            resourceType != null ->
+                run.inventory.tryConsumeResource(resourceType, 1) ?: return EngineStepOutcome(
+                    run, base, false, "Нет ${resourceType.titleRu} в рюкзаке."
+                )
+            else ->
+                run.inventory.consumeSpecialLoot(specialLootId!!) ?: return EngineStepOutcome(
+                    run, base, false, "Нет предмета «${specialLootId.titleRu}»."
+                )
+        }
+        val yawRad = Math.toRadians(run.yawDeg.toDouble()).toFloat()
+        val dx = kotlin.math.sin(yawRad) * 1.25f
+        val dz = -kotlin.math.cos(yawRad) * 1.25f
+        val item = com.ayaks.winterforest.domain.model.DroppedItem(
+            id = "drop_${run.elapsedRealSeconds.toInt()}_${run.droppedItems.size}",
+            resourceType = resourceType,
+            specialLootId = specialLootId,
+            count = 1,
+            x = run.playerX + dx,
+            z = run.playerZ + dz,
+            yawRad = yawRad
+        )
+        val title = item.titleRu
+        val msg = "Выброшено: $title."
+        return EngineStepOutcome(
+            run.copy(
+                inventory = nextInv,
+                droppedItems = run.droppedItems + item,
+                lastStatusMessage = msg
+            ),
+            base, true, msg
+        )
+    }
+
+    /** §7.12: подобрать предмет с земли кнопкой «Подобрать». */
+    fun pickupDroppedItem(run: GameRunState, base: BaseProgress, itemId: String): EngineStepOutcome {
+        val item = run.droppedItems.firstOrNull { it.id == itemId }
+            ?: return EngineStepOutcome(run, base, false, "Предмет уже подобран.")
+        val withLoot = if (item.resourceType != null) {
+            val add = run.inventory.tryAddResource(item.resourceType, item.count)
+            if (add.isFullBlocked) {
+                val msg = "Инвентарь полон (${Inventory.MAX_SLOTS}/${Inventory.MAX_SLOTS} слотов)!"
+                return EngineStepOutcome(run.copy(lastStatusMessage = msg), base, false, msg)
+            }
+            run.copy(inventory = add.inventory)
+        } else {
+            run.copy(inventory = run.inventory.grantSpecialLoot(item.specialLootId!!, item.count))
+        }
+        val msg = "Подобрано: ${item.titleRu}."
+        return EngineStepOutcome(
+            withLoot.copy(
+                droppedItems = run.droppedItems.filterNot { it.id == itemId },
+                lastStatusMessage = msg
+            ),
+            base, true, msg
+        )
+    }
+
     fun strikeWildlifeTarget(
         run: GameRunState,
         base: BaseProgress,
@@ -633,6 +704,8 @@ object SurvivalEngine {
             EquippedTool.AXE -> 28f + knifeBonus
             EquippedTool.PICKAXE -> 24f + knifeBonus
             EquippedTool.TORCH -> 18f + knifeBonus
+            // голыми руками зверя не остановить: урон символический
+            EquippedTool.NONE -> 6f + knifeBonus
         }
         val hitY = WorldPopulator.terrainHeight(run.currentLocation, target.x, target.z) + 0.6f
         val remainingHp = (target.hp - damage * AdvancedMechanics.hunterDamageMultiplier(base)).coerceAtLeast(0f)
@@ -769,9 +842,20 @@ object SurvivalEngine {
         // После вскрытия узел уходит в перезарядку и рисуется ОТКРЫТЫМ ящиком.
         if (target.kind == WorldObjectKind.SUPPLY_CRATE || target.kind == WorldObjectKind.MILITARY_CRATE) {
             val isMilitary = target.kind == WorldObjectKind.MILITARY_CRATE
-            val seed = target.id.hashCode().toLong() * 7919L + run.totalResourcesGathered * 13L +
-                run.elapsedRealSeconds.toLong()
-            val loot = AdvancedMechanics.rollCrateLoot(isMilitary, seed)
+            // Гарантированный предмет военного ящика (specialLootId узла) важнее
+            // случайного броска: три ящика на карте несут аптечку, сухпай и нож.
+            val loot = if (isMilitary && target.specialLootId != null) {
+                listOf(
+                    AdvancedMechanics.CrateLootItem(
+                        target.specialLootId.titleRu,
+                        specialLootId = target.specialLootId
+                    )
+                )
+            } else {
+                val seed = target.id.hashCode().toLong() * 7919L + run.totalResourcesGathered * 13L +
+                    run.elapsedRealSeconds.toLong()
+                AdvancedMechanics.rollCrateLoot(isMilitary, seed)
+            }
             val looted = AdvancedMechanics.applyCrateLoot(run.copy(
                 swingAnimRemainingSec = run.equippedTool.swingDurationSec,
                 hitFeedbackTimerSec = 0.4f,
@@ -825,19 +909,36 @@ object SurvivalEngine {
             base.ironAxeCrafted && resType == ResourceType.WOOD -> 1
             else -> 0
         }
-        // Жёсткое правило выживания: профильный ресурс без инструмента — максимум 1 ед. руками
-        val requiredToolMissing = when (resType) {
-            ResourceType.WOOD -> run.equippedTool != EquippedTool.AXE
-            ResourceType.STONE, ResourceType.COAL, ResourceType.IRON ->
-                run.equippedTool != EquippedTool.PICKAXE &&
-                    SpecialLootId.PICKAXE !in base.persistentSpecialLoot
-            else -> false
+        // §7.11: ЖЁСТКИЙ гейт профильных узлов. Большое дерево без топора и
+        // порода/руда без кирки не добываются вовсе — подсказка ведёт к крафту
+        // примитивного инструмента. Мелкие узлы (валежник, галька, ягоды,
+        // ткань, смола, рыба) собираются руками всегда.
+        val missingToolMsg: String? = when {
+            target.kind == WorldObjectKind.PINE_TREE || target.kind == WorldObjectKind.OAK_TREE ->
+                if (run.equippedTool == EquippedTool.AXE) null
+                else "Большое дерево голыми руками не свалить: скрафтите Примитивный топор (верстак: 3 дерева + 2 камня)"
+            target.kind == WorldObjectKind.STONE_OUTCROP ||
+                target.kind == WorldObjectKind.COAL_SEAM ||
+                target.kind == WorldObjectKind.IRON_VEIN ->
+                if (run.equippedTool == EquippedTool.PICKAXE ||
+                    SpecialLootId.PICKAXE in base.persistentSpecialLoot
+                ) null
+                else "Породу и руду голыми руками не добыть: скрафтите Примитивную кирку (верстак: 2 дерева + 3 камня)"
+            else -> null
         }
-        val rawYield = if (requiredToolMissing) {
-            1
-        } else {
+        if (missingToolMsg != null) {
+            return EngineStepOutcome(
+                run.copy(
+                    swingAnimRemainingSec = run.equippedTool.swingDurationSec,
+                    lastStatusMessage = missingToolMsg
+                ),
+                base,
+                actionSucceeded = false,
+                message = missingToolMsg
+            )
+        }
+        val rawYield =
             (target.baseYield + pickaxeBonus + axeWoodBonus + ironToolBonus + levelBonus).coerceIn(1, 6)
-        }
         val addResult = run.inventory.tryAddResource(resType, rawYield)
 
         if (addResult.isFullBlocked) {
@@ -868,11 +969,9 @@ object SurvivalEngine {
         val xpEarned = resType.xpReward * added
         val (nextXp, nextLevel) = applyXpGain(run.xp, run.level, xpEarned)
         val maxHp = GameRunState.BASE_MAX_HEALTH + (nextLevel - 1) * GameRunState.HEALTH_PER_LEVEL
-        val toolNote = if (requiredToolMissing) {
-            " Без профильного инструмента руками — только 1 ед. (−7 сил)."
-        } else {
-            ""
-        }
+        // §7.11: мягкого штрафа «руками 1 ед.» больше нет — профильные узлы
+        // без инструмента просто не добываются (жёсткий гейт выше)
+        val toolNote = ""
         val msg = "Собрано: ${resType.titleRu} +$added (+$xpEarned опыта)$toolNote"
 
         val updatedRun = run.copy(
@@ -883,11 +982,7 @@ object SurvivalEngine {
             xp = nextXp,
             level = nextLevel,
             health = run.health.coerceAtMost(maxHp),
-            stamina = if (requiredToolMissing) {
-                (run.stamina - 7f).coerceIn(0f, GameRunState.MAX_STAT)
-            } else {
-                run.stamina
-            },
+            stamina = run.stamina,
             swingAnimRemainingSec = run.equippedTool.swingDurationSec,
             hitFeedbackTimerSec = 0.36f,
             hitWorldX = target.x,
@@ -1331,6 +1426,21 @@ object SurvivalEngine {
         }
         val (invAfterCost, baseAfterCost) = spent
         return when (recipe) {
+            // Первые инструменты забега: герой начинает с пустыми руками (§7.11)
+            WorkbenchRecipe.CRAFT_PRIMITIVE_AXE -> {
+                val msg = "Собран Примитивный топор: деревья и валежник теперь поддаются!"
+                EngineStepOutcome(
+                    run.copy(inventory = invAfterCost, equippedTool = EquippedTool.AXE, lastStatusMessage = msg),
+                    baseAfterCost, true, msg
+                )
+            }
+            WorkbenchRecipe.CRAFT_PRIMITIVE_PICKAXE -> {
+                val msg = "Собрана Примитивная кирка: камень, уголь и руда теперь поддаются!"
+                EngineStepOutcome(
+                    run.copy(inventory = invAfterCost, equippedTool = EquippedTool.PICKAXE, lastStatusMessage = msg),
+                    baseAfterCost, true, msg
+                )
+            }
             WorkbenchRecipe.CRAFT_RESIN_TORCH -> {
                 val withTorch = invAfterCost.grantSpecialLoot(SpecialLootId.RESIN_TORCH, 1)
                 val msg = "Изготовлен «Смоляной факел»!"
