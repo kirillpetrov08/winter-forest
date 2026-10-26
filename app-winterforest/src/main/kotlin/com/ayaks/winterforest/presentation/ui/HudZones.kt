@@ -38,8 +38,8 @@ object HudZones {
     const val ACTIONS_WIDTH_DP = 150f
     const val COMPACT_ACTIONS_WIDTH_DP = 132f
 
-    /** Горизонтальные отступы окна сверху и снизу (10 dp × 2). */
-    const val SIDE_PADDING_DP = 20f
+    /** Горизонтальные отступы окна сверху и снизу (6 dp × 2 — HUD прижат к краям). */
+    const val SIDE_PADDING_DP = 12f
 
     fun isCompact(widthDp: Float): Boolean = widthDp < COMPACT_WIDTH_DP
 
@@ -52,7 +52,7 @@ object HudZones {
         if (isCompact(widthDp)) COMPACT_TIMER_WIDTH_DP else TIMER_WIDTH_DP
 
     fun menuWidth(widthDp: Float): Float =
-        if (isCompact(widthDp)) COMPACT_MENU_WIDTH_DP else MENU_WIDTH_DP +
+        (if (isCompact(widthDp)) COMPACT_MENU_WIDTH_DP else MENU_WIDTH_DP) +
             if (radarVisible(widthDp)) RADAR_WIDTH_DP else 0f
 
     fun joystickWidth(widthDp: Float): Float =
