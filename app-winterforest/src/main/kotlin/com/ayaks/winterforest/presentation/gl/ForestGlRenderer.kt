@@ -34,6 +34,10 @@ data class RenderSceneSnapshot(
     val run: GameRunState = GameRunState(),
     val base: BaseProgress = BaseProgress(),
     val quality: GraphicsQuality = GraphicsQuality.HIGH,
+    /** Радиус обзора камеры из настроек (вертикальный FOV, градусы). */
+    val fovDegrees: Float = 62f,
+    /** Дальность прорисовки из настроек: множитель кулл-дистанции узлов. */
+    val drawDistanceScale: Float = 1f,
     val menuOrbitMode: Boolean = false
 )
 
@@ -289,6 +293,11 @@ class ForestGlRenderer(
     // Преаллоцированные 3D-массивы без мусора в куче
     private val viewMatrix = FloatArray(16)
     private val projMatrix = FloatArray(16)
+    private var appliedFovDeg = -1f
+    private var appliedDrawScale = -1f
+    private var cachedNodeDrawScale = -1f
+
+    private fun drawScale(): Float = snapshot.drawDistanceScale.coerceIn(0.6f, 1.5f)
     private val vpMatrix = FloatArray(16)
     private val modelMatrix = FloatArray(16)
     private val mvpMatrix = FloatArray(16)
@@ -386,6 +395,16 @@ class ForestGlRenderer(
         val base = snap.base
         val quality = snap.quality
         val loc = run.currentLocation
+
+        // Настройки «радиус обзора» и «дальность прорисовки» применяются на лету
+        if (snap.fovDegrees != appliedFovDeg || drawScale() != appliedDrawScale) {
+            appliedFovDeg = snap.fovDegrees
+            appliedDrawScale = drawScale()
+            Matrix.perspectiveM(
+                projMatrix, 0, snap.fovDegrees.coerceIn(35f, 100f), aspectRatio,
+                0.12f, 135f * drawScale()
+            )
+        }
 
         val animTimeSec = if (snap.menuOrbitMode) {
             18f + ((nowNs - orbitTimeNs) / 1_000_000_000.0).toFloat()
@@ -812,13 +831,14 @@ class ForestGlRenderer(
         val nodeSig = computeNodeAvailabilitySignature(
             run.playerX, run.playerZ, nodes, run.droppedItems
         )
-        if (nodeSig != cachedNodeStateHash) {
+        if (nodeSig != cachedNodeStateHash || cachedNodeDrawScale != drawScale()) {
             rebuildInteractiveNodesVbo(
                 nodes, run.playerX, run.playerZ, quality,
                 droppedItems = run.droppedItems,
                 highlightDropId = run.nearestDroppedItem()?.id
             )
             cachedNodeStateHash = nodeSig
+            cachedNodeDrawScale = drawScale()
         }
     }
 
@@ -1120,6 +1140,7 @@ class ForestGlRenderer(
         // [x, y, z, yaw, scale, tintR, tintG, tintB] — камни-ресурсы моделями автора
         val nodeRockSpots = HashMap<String, MutableList<FloatArray>>()
         val terrainSteps = worldTerrainSteps(quality)
+        val cullSq = (118f * drawScale()).let { it * it }
         if (nodeCacheQuality != quality) {
             nodeGeometryCache.clear()
             nodeCacheQuality = quality
@@ -1140,7 +1161,7 @@ class ForestGlRenderer(
                 if (node.kind == WorldObjectKind.SUPPLY_CRATE || node.kind == WorldObjectKind.MILITARY_CRATE) {
                     val ndx2 = node.x - playerX
                     val ndz2 = node.z - playerZ
-                    if (ndx2 * ndx2 + ndz2 * ndz2 <= 118f * 118f) {
+                    if (ndx2 * ndx2 + ndz2 * ndz2 <= cullSq) {
                         val y2 = MeshBuilder.sampleWorldHeight(node.x, node.z, terrainSteps)
                         nodeRockSpots.getOrPut("cache_crate_open") { mutableListOf() }
                             .add(floatArrayOf(node.x, y2, node.z, idx * 0.7f, 1.0f, 1f, 1f, 1f))
@@ -1151,7 +1172,7 @@ class ForestGlRenderer(
             // Дальние узлы не пекутся: VBO пересобирается при смене района игрока
             val ndx = node.x - playerX
             val ndz = node.z - playerZ
-            if (ndx * ndx + ndz * ndz > 118f * 118f) continue
+            if (ndx * ndx + ndz * ndz > cullSq) continue
             val y = MeshBuilder.sampleWorldHeight(node.x, node.z, terrainSteps)
             // §7.17: геометрия узла печётся ОДИН раз на id узла и переиспользуется
             // при каждой пересборке VBO (сбор ресурса больше не перегоняет
@@ -1189,7 +1210,7 @@ class ForestGlRenderer(
         for (item in droppedItems) {
             val dx = item.x - playerX
             val dz = item.z - playerZ
-            if (dx * dx + dz * dz > 118f * 118f) continue
+            if (dx * dx + dz * dz > cullSq) continue
             val iy = MeshBuilder.sampleWorldHeight(item.x, item.z, terrainSteps)
             addDroppedItemProp(bark, foliage, stone, cloth, metal, fire, ice, item, iy)
             if (item.id == highlightDropId) {

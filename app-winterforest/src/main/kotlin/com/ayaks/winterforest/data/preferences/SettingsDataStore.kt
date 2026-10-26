@@ -25,6 +25,8 @@ class SettingsDataStore(private val dataStore: DataStore<Preferences>) {
             graphicsQuality = GraphicsQuality.fromOrdinal(
                 prefs[KEY_GRAPHICS_QUALITY] ?: GraphicsQuality.HIGH.ordinal
             ),
+            fovDegrees = (prefs[KEY_FOV_DEGREES] ?: 62).coerceIn(45, 85),
+            drawDistanceScale = (prefs[KEY_DRAW_DISTANCE] ?: 1.0f).coerceIn(0.6f, 1.5f),
             showFpsCounter = prefs[KEY_SHOW_FPS] ?: false,
             autoSprintEnabled = prefs[KEY_AUTO_SPRINT] ?: true,
             gdprUserConsent = prefs[KEY_GDPR_CONSENT] ?: false,
@@ -44,6 +46,14 @@ class SettingsDataStore(private val dataStore: DataStore<Preferences>) {
 
     suspend fun setGraphicsQuality(quality: GraphicsQuality) {
         dataStore.edit { it[KEY_GRAPHICS_QUALITY] = quality.ordinal }
+    }
+
+    suspend fun setFovDegrees(fov: Int) {
+        dataStore.edit { it[KEY_FOV_DEGREES] = fov.coerceIn(45, 85) }
+    }
+
+    suspend fun setDrawDistanceScale(scale: Float) {
+        dataStore.edit { it[KEY_DRAW_DISTANCE] = scale.coerceIn(0.6f, 1.5f) }
     }
 
     suspend fun setShowFpsCounter(enabled: Boolean) {
@@ -69,6 +79,8 @@ class SettingsDataStore(private val dataStore: DataStore<Preferences>) {
         private val KEY_SOUND_VOLUME = floatPreferencesKey("sound_volume")
         private val KEY_LOOK_SENSITIVITY = floatPreferencesKey("look_sensitivity")
         private val KEY_GRAPHICS_QUALITY = intPreferencesKey("graphics_quality")
+        private val KEY_FOV_DEGREES = intPreferencesKey("fov_degrees")
+        private val KEY_DRAW_DISTANCE = floatPreferencesKey("draw_distance_scale")
         private val KEY_SHOW_FPS = booleanPreferencesKey("show_fps_counter")
         private val KEY_AUTO_SPRINT = booleanPreferencesKey("auto_sprint_enabled")
         private val KEY_GDPR_CONSENT = booleanPreferencesKey("gdpr_user_consent")

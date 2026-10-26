@@ -62,7 +62,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.ayaks.winterforest.presentation.ui.HudZones
+import com.ayaks.winterforest.presentation.ui.components.toolIcon
+import com.ayaks.winterforest.presentation.viewmodel.RESTORE_RESOURCES_COOLDOWN_SEC
 import com.ayaks.winterforest.domain.model.BaseProgress
+import com.ayaks.winterforest.domain.model.EquippedTool
+import com.ayaks.winterforest.domain.model.HotbarEntry
 import com.ayaks.winterforest.domain.model.BaseUpgradeType
 import com.ayaks.winterforest.domain.model.GraphicsQuality
 import com.ayaks.winterforest.domain.model.Inventory
@@ -611,15 +615,15 @@ fun GameScreen(
                     modifier = Modifier.width(actionsWidth).height(48.dp)
                 )
 
-                // ЕДИНСТВЕННАЯ кнопка восстановления ресурсов (§7.2): внизу,
-                // в панели действий под большим пальцем; сверху её больше нет.
-                OutlinedButton(
+                // ЕДИНСТВЕННАЯ кнопка восстановления ресурсов: внизу, в панели
+                // действий под большим пальцем; кулдаун — 5 минут (видно прогресс).
+                com.ayaks.winterforest.presentation.ui.components.CooldownButton(
+                    label = if (compact) "Восстановить" else "Восстановить ресурсы",
+                    cooldownRemainingSec = state.cooldowns["restore"] ?: 0f,
+                    cooldownTotalSec = RESTORE_RESOURCES_COOLDOWN_SEC,
                     onClick = { viewModel.onRestoreResources() },
-                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                    modifier = Modifier.height(30.dp).testTag("btn_restore_resources")
-                ) {
-                    Text("Восстановить ресурсы", fontSize = 10.sp)
-                }
+                    modifier = Modifier.width(actionsWidth).testTag("btn_restore_resources")
+                )
             }
         }
     }
@@ -1091,13 +1095,17 @@ private fun InventoryStorageTab(
     // тащим (ячейка сетки или слот хотбара), где палец, и прямоугольники целей
     // в координатах корня вкладки (снимаются onGloballyPositioned).
     val view = androidx.compose.ui.platform.LocalView.current
+    var selectedTool by remember { mutableStateOf<EquippedTool?>(null) }
     var dragGrid by remember { mutableStateOf<Int?>(null) }
     var dragHotbar by remember { mutableStateOf<Int?>(null) }
+    var dragTool by remember { mutableStateOf<EquippedTool?>(null) }
     var dragType by remember { mutableStateOf<ResourceType?>(null) }
     var dragPos by remember { mutableStateOf(Offset.Zero) }
+    var overlayOrigin by remember { mutableStateOf(Offset.Zero) }
     val gridRects = remember { mutableStateMapOf<Int, Rect>() }
     val hotbarRects = remember { mutableStateMapOf<Int, Rect>() }
-    val dragging = dragGrid != null || dragHotbar != null
+    val toolRects = remember { mutableStateMapOf<Int, Rect>() }
+    val dragging = dragGrid != null || dragHotbar != null || dragTool != null
 
     fun dropTargetGrid(): Int? =
         gridRects.entries.firstOrNull { it.value.contains(dragPos) }?.key
@@ -1105,21 +1113,34 @@ private fun InventoryStorageTab(
     fun dropTargetHotbar(): Int? =
         hotbarRects.entries.firstOrNull { it.value.contains(dragPos) }?.key
 
+    fun dropTargetTools(): Int? =
+        toolRects.entries.firstOrNull { it.value.contains(dragPos) }?.key
+
     fun endDrag() {
         dragGrid = null
         dragHotbar = null
+        dragTool = null
         dragType = null
     }
 
     fun finishDrop() {
         val g = dragGrid
         val h = dragHotbar
+        val t = dragTool
         val targetHot = dropTargetHotbar()
         val targetGrid = dropTargetGrid()
+        val targetTools = dropTargetTools()
         when {
+            // инструмент из ряда рюкзака — в хотбар
+            t != null && targetHot != null -> viewModel.onAssignHotbar(
+                targetHot,
+                HotbarEntry(titleRu = t.titleRu, iconPath = "", tool = t)
+            )
             g != null && targetHot != null -> viewModel.onDropInventoryOnHotbar(g, targetHot)
             g != null && targetGrid != null -> viewModel.onSwapInventoryCells(g, targetGrid)
+            // запись хотбара убирается обратно в рюкзак (на сетку или на ряд инструментов)
             h != null && targetGrid != null -> viewModel.onDropHotbarToInventory(h)
+            h != null && targetTools != null -> viewModel.onDropHotbarToInventory(h)
             h != null && targetHot != null && targetHot != h -> viewModel.onSwapHotbarSlots(h, targetHot)
         }
         view.performHapticFeedback(android.view.HapticFeedbackConstants.CLOCK_TICK)
@@ -1161,7 +1182,7 @@ private fun InventoryStorageTab(
                                             },
                                             RoundedCornerShape(10.dp)
                                         )
-                                        .clickable { selectedType = slot?.type }
+                                        .clickable { selectedType = slot?.type; selectedTool = null }
                                         .pointerInput(idx, slot?.type, slot?.count) {
                                             if (slot == null) return@pointerInput
                                             detectDragGestures(
@@ -1205,6 +1226,76 @@ private fun InventoryStorageTab(
                         }
                     }
 
+                    // Инструменты — отдельные предметы рюкзака: перетаскиваются
+                    // в хотбар, экипируются и убираются (ряд вплотную к сетке).
+                    val toolList = inv.tools.entries.toList()
+                    if (toolList.isNotEmpty()) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            for ((tIdx, toolEntry) in toolList.withIndex()) {
+                                val tool = toolEntry.key
+                                val qty = toolEntry.value
+                                val isTarget = dragging && dropTargetTools() == tIdx
+                                Box(
+                                    modifier = Modifier
+                                        .size(56.dp)
+                                        .onGloballyPositioned { toolRects[tIdx] = it.boundsInRoot() }
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(
+                                            if (run?.equippedTool == tool) Color(0x33203040) else Color(0x18FFFFFF)
+                                        )
+                                        .border(
+                                            1.4.dp,
+                                            when {
+                                                isTarget -> HearthAmberAccent
+                                                selectedTool == tool -> IceCyanPrimary
+                                                run?.equippedTool == tool -> HearthAmberAccent.copy(alpha = 0.7f)
+                                                else -> Color(0x33FFFFFF)
+                                            },
+                                            RoundedCornerShape(10.dp)
+                                        )
+                                        .clickable { selectedTool = tool; selectedType = null }
+                                        .pointerInput(tIdx, tool, qty) {
+                                            detectDragGestures(
+                                                onDragStart = {
+                                                    dragTool = tool
+                                                    dragGrid = null
+                                                    dragHotbar = null
+                                                    dragType = null
+                                                    dragPos = toolRects[tIdx]?.topLeft ?: Offset.Zero
+                                                    view.performHapticFeedback(
+                                                        android.view.HapticFeedbackConstants.LONG_PRESS
+                                                    )
+                                                },
+                                                onDragEnd = { finishDrop() },
+                                                onDragCancel = { endDrag() }
+                                            ) { change, _ ->
+                                                change.consume()
+                                                val origin = toolRects[tIdx]?.topLeft ?: Offset.Zero
+                                                dragPos = origin + change.position
+                                            }
+                                        }
+                                ) {
+                                    Text(
+                                        text = toolIcon(tool),
+                                        fontSize = 22.sp,
+                                        modifier = Modifier.align(Alignment.Center)
+                                    )
+                                    if (qty > 1) {
+                                        Text(
+                                            text = "×$qty",
+                                            color = SnowCrispText,
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            modifier = Modifier
+                                                .align(Alignment.BottomEnd)
+                                                .padding(3.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     // Хотбар стоит ВПЛОТНУЮ к сетке: без заголовков, пояснений и
                     // разделителей между ними (§7.3).
                     Row(
@@ -1235,6 +1326,7 @@ private fun InventoryStorageTab(
                                             onDragStart = {
                                                 dragHotbar = slotIdx
                                                 dragGrid = null
+                                                dragTool = null
                                                 dragType = current.resourceType
                                                 dragPos = hotbarRects[slotIdx]?.topLeft ?: Offset.Zero
                                                 view.performHapticFeedback(
@@ -1251,13 +1343,27 @@ private fun InventoryStorageTab(
                                     }
                             ) {
                                 current?.let { entry ->
-                                    if (entry.resourceType != null) {
-                                        com.ayaks.winterforest.presentation.ui.components.ResourceTypeGlyph(
-                                            type = entry.resourceType!!,
-                                            modifier = Modifier.size(30.dp).align(Alignment.Center)
+                                    when {
+                                        entry.resourceType != null ->
+                                            com.ayaks.winterforest.presentation.ui.components.ResourceTypeGlyph(
+                                                type = entry.resourceType!!,
+                                                modifier = Modifier.size(30.dp).align(Alignment.Center)
+                                            )
+                                        entry.specialLootId != null ->
+                                            com.ayaks.winterforest.presentation.ui.components.rememberAssetIcon(entry.specialLootId.iconPath)
+                                                ?.let { bmp ->
+                                                    androidx.compose.foundation.Image(
+                                                        bitmap = bmp,
+                                                        contentDescription = entry.titleRu,
+                                                        modifier = Modifier.size(30.dp).align(Alignment.Center)
+                                                    )
+                                                }
+                                        entry.tool != null -> Text(
+                                            text = toolIcon(entry.tool!!),
+                                            fontSize = 22.sp,
+                                            modifier = Modifier.align(Alignment.Center)
                                         )
-                                    } else {
-                                        Text(
+                                        else -> Text(
                                             text = "🔧",
                                             fontSize = 20.sp,
                                             modifier = Modifier.align(Alignment.Center)
@@ -1310,6 +1416,51 @@ private fun InventoryStorageTab(
                         }
                     }
 
+                    // Панель выбранного инструмента: взять в руки / убрать
+                    val selTool = selectedTool
+                    if (run != null && selTool != null) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(Color(0x18FFFFFF))
+                                .padding(10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Text(toolIcon(selTool), fontSize = 26.sp)
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    selTool.titleRu,
+                                    color = SnowCrispText,
+                                    fontWeight = FontWeight.SemiBold,
+                                    fontSize = 12.sp
+                                )
+                                Text(
+                                    if (run.equippedTool == selTool) "В руках" else "В рюкзаке",
+                                    color = MistMutedText,
+                                    fontSize = 11.sp
+                                )
+                            }
+                            Button(
+                                onClick = { viewModel.onEquipTool(selTool) },
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                                modifier = Modifier.height(34.dp)
+                            ) {
+                                Text("Взять в руки", fontSize = 11.sp)
+                            }
+                            if (run.equippedTool == selTool) {
+                                OutlinedButton(
+                                    onClick = { viewModel.onEquipTool(EquippedTool.NONE) },
+                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                                    modifier = Modifier.height(34.dp)
+                                ) {
+                                    Text("Убрать", fontSize = 11.sp)
+                                }
+                            }
+                        }
+                    }
+
                     if (base.storageResources.isNotEmpty()) {
                         val storageSummary = base.storageResources.entries
                             .joinToString(" • ") { "${it.key.titleRu}: ${it.value}" }
@@ -1347,12 +1498,17 @@ private fun InventoryStorageTab(
             }
         }
 
-        // «Призрак» перетаскиваемого предмета под пальцем + подсветка цели
+        // «Призрак» перетаскиваемого предмета ТОЧНО под пальцем: dragPos — в
+        // координатах корня, а offset считается от левого верхнего угла этого
+        // оверлея (иначе призрак уезжал на величину отступов вкладки).
         if (dragging) {
             val ghostType = dragType
+            val ghostTool = dragTool
+                ?: (dragHotbar?.let { run?.hotbarAt(it)?.tool })
             Box(
                 modifier = Modifier
                     .fillMaxSize()
+                    .onGloballyPositioned { overlayOrigin = it.boundsInRoot().topLeft }
                     .pointerInput(Unit) {
                         // перехватываем жест выше целей, пока идёт перетаскивание
                         awaitPointerEventScope {
@@ -1367,8 +1523,8 @@ private fun InventoryStorageTab(
                     modifier = Modifier
                         .offset {
                             IntOffset(
-                                (dragPos.x - 28.dp.toPx()).toInt(),
-                                (dragPos.y - 28.dp.toPx()).toInt()
+                                (dragPos.x - overlayOrigin.x - 28.dp.toPx()).toInt(),
+                                (dragPos.y - overlayOrigin.y - 28.dp.toPx()).toInt()
                             )
                         }
                         .size(56.dp)
@@ -1376,13 +1532,18 @@ private fun InventoryStorageTab(
                         .background(Color(0xAA091520))
                         .border(1.6.dp, HearthAmberAccent, RoundedCornerShape(10.dp))
                 ) {
-                    if (ghostType != null) {
-                        com.ayaks.winterforest.presentation.ui.components.ResourceTypeGlyph(
-                            type = ghostType,
-                            modifier = Modifier.size(32.dp).align(Alignment.Center)
+                    when {
+                        ghostType != null ->
+                            com.ayaks.winterforest.presentation.ui.components.ResourceTypeGlyph(
+                                type = ghostType,
+                                modifier = Modifier.size(32.dp).align(Alignment.Center)
+                            )
+                        ghostTool != null -> Text(
+                            toolIcon(ghostTool),
+                            fontSize = 24.sp,
+                            modifier = Modifier.align(Alignment.Center)
                         )
-                    } else {
-                        Text("🔧", fontSize = 20.sp, modifier = Modifier.align(Alignment.Center))
+                        else -> Text("🔧", fontSize = 20.sp, modifier = Modifier.align(Alignment.Center))
                     }
                 }
             }

@@ -218,6 +218,8 @@ private fun PersistentForestScene(
                     run = state.activeRun ?: GameRunState(),
                     base = state.baseProgress,
                     quality = state.settings.graphicsQuality,
+                    fovDegrees = state.settings.fovDegrees.toFloat(),
+                    drawDistanceScale = state.settings.drawDistanceScale,
                     menuOrbitMode = orbitMode
                 )
             }
@@ -227,6 +229,8 @@ private fun PersistentForestScene(
                 run = state.activeRun ?: GameRunState(),
                 base = state.baseProgress,
                 quality = state.settings.graphicsQuality,
+                fovDegrees = state.settings.fovDegrees.toFloat(),
+                drawDistanceScale = state.settings.drawDistanceScale,
                 menuOrbitMode = orbitMode
             )
         },

@@ -366,9 +366,19 @@ fun QuickEquipmentHotbar(
     ) {
         for (slotIdx in 0..5) {
             val entry = run.hotbarAt(slotIdx)
+            // Количество еды/ресурсов/инструментов прямо на ячейке хотбара
+            val count = entry?.let { e ->
+                when {
+                    e.resourceType != null -> run.inventory.countOf(e.resourceType!!)
+                    e.specialLootId != null -> run.inventory.specialCount(e.specialLootId!!)
+                    e.tool != null -> run.inventory.toolCount(e.tool!!)
+                    else -> 0
+                }
+            } ?: 0
             HotbarSlotChip(
                 indexLabel = (slotIdx + 1).toString(),
                 entry = entry,
+                countBadge = if (count > 0) "×$count" else null,
                 slotSizeDp = slotSizeDp,
                 onClick = { onUseSlot(slotIdx) }
             )
@@ -377,7 +387,7 @@ fun QuickEquipmentHotbar(
 }
 
 /** Иконка инструмента (Unicode-символ, пока не привезены иконки-картинки). */
-private fun toolIcon(tool: EquippedTool): String = when (tool) {
+fun toolIcon(tool: EquippedTool): String = when (tool) {
     EquippedTool.NONE -> "✋"
     EquippedTool.AXE -> "🪓"
     EquippedTool.PICKAXE -> "⛏️"
@@ -385,19 +395,20 @@ private fun toolIcon(tool: EquippedTool): String = when (tool) {
     EquippedTool.TORCH -> "🔥"
 }
 
-/** Ячейка слота хотбара: иконка + подпись, либо пустая ячейка. */
+/** Ячейка слота хотбара: иконка + подпись + счётчик количества, либо пустая ячейка. */
 @Composable
 private fun HotbarSlotChip(
     indexLabel: String,
     entry: com.ayaks.winterforest.domain.model.HotbarEntry?,
+    countBadge: String? = null,
     slotSizeDp: Int = 56,
     onClick: () -> Unit
 ) {
     val bg = FrostedCardSurface.copy(alpha = 0.72f)
     val borderCol = Color(0x28FFFFFF)
 
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
+    Box(
+        contentAlignment = Alignment.Center,
         modifier = Modifier
             .clip(RoundedCornerShape(10.dp))
             .background(bg)
@@ -405,37 +416,51 @@ private fun HotbarSlotChip(
             .clickable(enabled = true, onClick = onClick)
             .size(slotSizeDp.dp)
     ) {
-        if (entry != null) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
-                val customIcon = entry.specialLootId?.let { rememberAssetIcon(specialLootIconPath(it)) }
-                when {
-                    entry.isTool -> Text(
-                        text = toolIcon(entry.tool!!),
-                        fontSize = 20.sp
-                    )
-                    entry.resourceType != null && customIcon == null -> {
-                        ResourceTypeGlyph(
-                            type = entry.resourceType!!,
-                            modifier = Modifier.size(26.dp)
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            if (entry != null) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
+                    val customIcon = entry.specialLootId?.let { rememberAssetIcon(specialLootIconPath(it)) }
+                    when {
+                        entry.isTool -> Text(
+                            text = toolIcon(entry.tool!!),
+                            fontSize = 20.sp
                         )
+                        entry.resourceType != null && customIcon == null -> {
+                            ResourceTypeGlyph(
+                                type = entry.resourceType!!,
+                                modifier = Modifier.size(26.dp)
+                            )
+                        }
+                        customIcon != null -> androidx.compose.foundation.Image(
+                            bitmap = customIcon,
+                            contentDescription = entry.titleRu,
+                            modifier = Modifier.size(30.dp),
+                            contentScale = androidx.compose.ui.layout.ContentScale.Fit
+                        )
+                        else -> Text(text = "📦", fontSize = 20.sp)
                     }
-                    customIcon != null -> androidx.compose.foundation.Image(
-                        bitmap = customIcon,
-                        contentDescription = entry.titleRu,
-                        modifier = Modifier.size(30.dp),
-                        contentScale = androidx.compose.ui.layout.ContentScale.Fit
-                    )
-                    else -> Text(text = "📦", fontSize = 20.sp)
                 }
+                Text(
+                    text = entry.titleRu,
+                    color = SnowCrispText,
+                    fontSize = 9.sp,
+                    maxLines = 1
+                )
+            } else {
+                Text(text = indexLabel, color = MistMutedText, fontSize = 10.sp)
+                Text(text = "—", color = MistMutedText.copy(alpha = 0.5f), fontSize = 16.sp)
             }
+        }
+        if (countBadge != null) {
             Text(
-                text = entry.titleRu,
+                text = countBadge,
                 color = SnowCrispText,
-                fontSize = 9.sp
+                fontSize = 9.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(end = 3.dp, bottom = 1.dp)
             )
-        } else {
-            Text(text = indexLabel, color = MistMutedText, fontSize = 10.sp)
-            Text(text = "—", color = MistMutedText.copy(alpha = 0.5f), fontSize = 16.sp)
         }
     }
 }
