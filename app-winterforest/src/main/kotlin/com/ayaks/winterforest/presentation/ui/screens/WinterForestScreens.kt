@@ -191,122 +191,136 @@ fun MainMenuScreen(
                 .padding(horizontal = 24.dp, vertical = 14.dp),
             verticalArrangement = Arrangement.SpaceBetween
         ) {
-            Row(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(24.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                // Левая колонка: логотип, атмосфера и сводка мета-прогресса выжившего
+            // «Экспедиционный журнал»: меню — узкая колонка у самого левого края,
+            // правая половина экрана полностью отдана живой 3D-панораме лагеря.
+            Row(modifier = Modifier.weight(1f).fillMaxWidth()) {
                 Column(
-                    modifier = Modifier.weight(1.15f),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                    modifier = Modifier
+                        .width(392.dp)
+                        .fillMaxHeight()
+                        .padding(start = 22.dp, top = 14.dp, bottom = 8.dp, end = 10.dp),
+                    verticalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Text(
-                        text = "WINTER FOREST",
-                        fontSize = 38.sp,
-                        fontWeight = FontWeight.ExtraBold,
-                        color = SnowCrispText,
-                        letterSpacing = 3.sp
-                    )
-                    Text(
-                        text = "Выживание от первого лица в суровой арктической тайге",
-                        fontSize = 14.sp,
-                        color = IceCyanPrimary,
-                        fontWeight = FontWeight.Medium
-                    )
-
-                    GlassStatRow(
-                        items = listOf(
-                            Triple(
-                                rememberAssetIcon("glyphs/glyph_timer.png"),
-                                "${state.baseProgress.bestDaysSurvived}",
-                                "Рекорд, дн."
-                            ),
-                            Triple(
-                                rememberAssetIcon("glyphs/glyph_home.png"),
-                                "${state.baseProgress.totalBaseLevel}/20",
-                                "Уровень базы"
-                            ),
-                            Triple(
-                                rememberAssetIcon("glyphs/glyph_backpack.png"),
-                                "${state.baseProgress.persistentSpecialLoot.size}/${SpecialLootId.entries.size}",
-                                "Реликвии"
-                            ),
-                            Triple(
-                                rememberAssetIcon("glyphs/glyph_xp.png"),
-                                "${state.baseProgress.totalWildlifeHunted}",
-                                "Охота"
-                            )
-                        ),
-                        modifier = Modifier.fillMaxWidth()
-                    )
-
-                    GlassChip(
-                        text = "Снаряжение: «${state.baseProgress.selectedLoadout.titleRu}»  •  Графика: ${state.settings.graphicsQuality.titleRu}",
-                        fill = Color(0x7AFFFFFF),
-                        textColor = MistMutedText,
-                        fontSize = 11
-                    )
-                }
-
-                // Правая колонка: один крупный CTA + стеклянные кнопки навигации с иконками
-                Column(
-                    modifier = Modifier.weight(0.95f),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    if (state.hasActiveSave) {
-                        PrimaryGameButton(
-                            text = "Продолжить • День ${state.activeRun?.dayNumberDisplay ?: 1}",
-                            icon = rememberAssetIcon("glyphs/glyph_map.png"),
-                            onClick = { viewModel.continueSavedGame() },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .testTag("btn_continue")
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        // Название кириллицей: две строки, как вырезанные на снегу
+                        Text(
+                            text = "ЗИМНИЙ",
+                            fontSize = 44.sp,
+                            fontWeight = FontWeight.Black,
+                            color = SnowCrispText,
+                            letterSpacing = 7.sp
                         )
-                        GlassMenuButton(
-                            text = "Новая экспедиция",
-                            icon = rememberAssetIcon("glyphs/glyph_snowfall.png"),
-                            onClick = { viewModel.requestNewExpedition() },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .testTag("btn_new_game")
+                        Text(
+                            text = "Л Е С",
+                            fontSize = 28.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = HearthAmberAccent,
+                            letterSpacing = 12.sp
                         )
-                    } else {
-                        PrimaryGameButton(
-                            text = "Новая экспедиция",
-                            icon = rememberAssetIcon("glyphs/glyph_snowfall.png"),
-                            onClick = { viewModel.requestNewExpedition() },
+                        Box(
                             modifier = Modifier
-                                .fillMaxWidth()
-                                .testTag("btn_new_game")
+                                .width(118.dp)
+                                .height(2.dp)
+                                .background(HearthAmberAccent.copy(alpha = 0.72f))
+                        )
+                        Text(
+                            text = "тайга • выживание • одиночество",
+                            fontSize = 12.sp,
+                            color = IceCyanPrimary,
+                            fontWeight = FontWeight.Medium
+                        )
+
+                        GlassStatRow(
+                            items = listOf(
+                                Triple(
+                                    rememberAssetIcon("glyphs/glyph_timer.png"),
+                                    "${state.baseProgress.bestDaysSurvived}",
+                                    "Рекорд, дн."
+                                ),
+                                Triple(
+                                    rememberAssetIcon("glyphs/glyph_home.png"),
+                                    "${state.baseProgress.totalBaseLevel}/20",
+                                    "Уровень базы"
+                                ),
+                                Triple(
+                                    rememberAssetIcon("glyphs/glyph_backpack.png"),
+                                    "${state.baseProgress.persistentSpecialLoot.size}/${SpecialLootId.entries.size}",
+                                    "Реликвии"
+                                ),
+                                Triple(
+                                    rememberAssetIcon("glyphs/glyph_xp.png"),
+                                    "${state.baseProgress.totalWildlifeHunted}",
+                                    "Охота"
+                                )
+                            ),
+                            modifier = Modifier.fillMaxWidth()
                         )
                     }
 
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        if (state.hasActiveSave) {
+                            PrimaryGameButton(
+                                text = "Продолжить • День ${state.activeRun?.dayNumberDisplay ?: 1}",
+                                icon = rememberAssetIcon("glyphs/glyph_map.png"),
+                                onClick = { viewModel.continueSavedGame() },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("btn_continue")
+                            )
+                            GlassMenuButton(
+                                text = "Новая экспедиция",
+                                icon = rememberAssetIcon("glyphs/glyph_snowfall.png"),
+                                onClick = { viewModel.requestNewExpedition() },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("btn_new_game")
+                            )
+                        } else {
+                            PrimaryGameButton(
+                                text = "Новая экспедиция",
+                                icon = rememberAssetIcon("glyphs/glyph_snowfall.png"),
+                                onClick = { viewModel.requestNewExpedition() },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("btn_new_game")
+                            )
+                        }
+
                         GlassMenuButton(
                             text = "База и крафт",
                             icon = rememberAssetIcon("glyphs/glyph_home.png"),
                             onClick = { viewModel.navigateTo(AppDestination.BASE_INVENTORY) },
-                            modifier = Modifier.weight(1.15f)
+                            modifier = Modifier.fillMaxWidth()
                         )
-                        GlassMenuButton(
-                            text = "Настройки",
-                            icon = rememberAssetIcon("glyphs/glyph_settings.png"),
-                            onClick = { viewModel.navigateTo(AppDestination.SETTINGS) },
-                            modifier = Modifier.weight(0.85f)
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                            GlassMenuButton(
+                                text = "Настройки",
+                                icon = rememberAssetIcon("glyphs/glyph_settings.png"),
+                                onClick = { viewModel.navigateTo(AppDestination.SETTINGS) },
+                                modifier = Modifier.weight(1f),
+                                height = 40.dp,
+                                fontSize = 12
+                            )
+                            GlassMenuButton(
+                                text = "Об игре",
+                                onClick = { viewModel.navigateTo(AppDestination.ABOUT) },
+                                modifier = Modifier.weight(1f),
+                                height = 40.dp,
+                                fontSize = 12
+                            )
+                        }
+
+                        GlassChip(
+                            text = "Снаряжение: «${state.baseProgress.selectedLoadout.titleRu}»  •  Графика: ${state.settings.graphicsQuality.titleRu}",
+                            fill = Color(0x7AFFFFFF),
+                            textColor = MistMutedText,
+                            fontSize = 11
                         )
                     }
-
-                    GlassMenuButton(
-                        text = "Об игре и управлении",
-                        onClick = { viewModel.navigateTo(AppDestination.ABOUT) },
-                        modifier = Modifier.fillMaxWidth(),
-                        height = 40.dp,
-                        fontSize = 12
-                    )
                 }
+
+                // Правая половина — живая 3D-панорама без стекла и карточек
+                Spacer(modifier = Modifier.weight(1f))
             }
 
             // ЕДИНСТВЕННОЕ место показа баннера РСЯ во всём приложении — низ главного меню
@@ -1942,6 +1956,29 @@ fun SettingsScreen(
                             }
                         }
                     }
+
+                    // Радиус обзора и дальность прорисовки (запрос пользователя)
+                    Text(
+                        "Радиус обзора: ${state.settings.fovDegrees}°",
+                        color = SnowCrispText,
+                        fontSize = 13.sp
+                    )
+                    Slider(
+                        value = state.settings.fovDegrees.toFloat(),
+                        onValueChange = { viewModel.onFovDegreesChanged(it.roundToInt()) },
+                        valueRange = 45f..85f
+                    )
+
+                    Text(
+                        "Дальность прорисовки: ${(state.settings.drawDistanceScale * 100).roundToInt()}%",
+                        color = SnowCrispText,
+                        fontSize = 13.sp
+                    )
+                    Slider(
+                        value = state.settings.drawDistanceScale,
+                        onValueChange = { viewModel.onDrawDistanceScaleChanged(it) },
+                        valueRange = 0.6f..1.5f
+                    )
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
