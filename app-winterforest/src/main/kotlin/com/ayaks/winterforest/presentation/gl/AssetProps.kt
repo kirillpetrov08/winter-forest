@@ -29,8 +29,8 @@ object AssetProps {
         "dry_branches_a", "dry_branches_b", "tree_bark",
         "cabin_wood", "cabin_bark", "cabin_stone", "cabin_shingle", "cabin_burned",
         "wolf_body", "deer_body", "rat_body",
-        "spear", "pickaxe", "winter_tree", "workbench", "barrel",
-        "gate", "lantern", "cache_crate", "cache_crate_open", "woodstack", "crate", "cloth_bush",
+        "spear", "pickaxe", "workbench", "barrel",
+        "lantern", "cache_crate", "cache_crate_open", "woodstack", "crate", "cloth_bush",
         "oak_a", "oak_b", "oak_c", "bush_green", "bush_dry", "bush_thicket"
     )
 
@@ -63,9 +63,7 @@ object AssetProps {
             Placement("woodstack", -7.65f, -5.25f, 0.25f, 1.0f),
             Placement("woodstack", -7.25f, -5.75f, 1.15f, 1.0f),
             Placement("woodstack", -7.5f, -4.7f, 2.05f, 1.0f),
-            // заборов нет — открытая поляна, ничего не мешает обзору
-            Placement("winter_tree", -16.8f, 13.2f, 0.55f, 0.95f),
-            // листва и кусты пака Trees & Bushes (модель пользователя)
+            // заборов и декоративных деревьев нет: каждое видимое дерево — узел добычи
         )
         LocationId.HUNTERS_CABIN -> listOf(
             // Масштаб 1.0: сруб высотой 1.86 м. При 0.78 крыша опускалась до 1.45 м —
@@ -76,20 +74,16 @@ object AssetProps {
             Placement("cabin_shingle", 7.2f, 8.8f, 3.6f, 1.0f),
             Placement("cabin_burned", 7.2f, 8.8f, 3.6f, 1.0f),
             Placement("fire_pit", 4.5f, 6.3f, 1.1f, 0.72f),
-            // ворота у тропы, фонарь у света избы (7.2, 6.2), закрытый ящик на тайнике (9, 9.5)
-            Placement("gate", 7.2f, 4.7f, 3.35f, 0.9f),
+            // железные ворота убраны (запрос пользователя); фонарь у избы, ящик на тайнике
             Placement("lantern", 7.2f, 6.2f, 0.2f, 1.0f),
             Placement("cache_crate", 9.0f, 9.5f, 1.25f, 1.0f),
             Placement("barrel", 5.35f, 8.25f, 0.8f, 1.0f),
             Placement("woodstack", 9.7f, 7.25f, 1.9f, 1.0f),
             Placement("woodstack", 10.05f, 7.75f, 2.6f, 1.0f),
-            Placement("crate", 8.45f, 5.45f, 0.4f, 1.0f),
-            Placement("winter_tree", 14.6f, 5.9f, 2.25f, 0.85f),
+            Placement("crate", 8.45f, 5.45f, 0.4f, 1.0f)
             // листва и кусты пака Trees & Bushes (модель пользователя)
         )
         LocationId.DENSE_SPRUCE -> listOf(
-            Placement("winter_tree", -12.9f, 8.1f, 0.35f, 1.0f),
-            Placement("winter_tree", 11.7f, -14.3f, 1.85f, 1.0f),
             Placement("cache_crate", -9.5f, -11.0f, 2.4f, 1.0f),
             Placement("woodstack", 6.45f, -9.15f, 1.35f, 1.0f),
             Placement("barrel", -13.55f, -2.25f, 2.1f, 1.0f),
@@ -104,8 +98,7 @@ object AssetProps {
             // листва и кусты пака Trees & Bushes (модель пользователя)
         )
         LocationId.ABANDONED_MINE -> listOf(
-            // врата к жиле, тайник шахты (-8, 10)
-            Placement("gate", -8.0f, 7.6f, 0.0f, 0.85f),
+            // железные врата убраны (запрос пользователя); тайник шахты (-8, 10)
             Placement("cache_crate", -8.0f, 10.0f, 3.0f, 1.0f),
             Placement("lantern", -7.05f, 8.45f, 2.2f, 1.0f),
             Placement("barrel", -4.45f, 12.55f, 1.7f, 1.0f),

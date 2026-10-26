@@ -34,6 +34,10 @@ data class RenderSceneSnapshot(
     val run: GameRunState = GameRunState(),
     val base: BaseProgress = BaseProgress(),
     val quality: GraphicsQuality = GraphicsQuality.HIGH,
+    /** Радиус обзора камеры из настроек (вертикальный FOV, градусы). */
+    val fovDegrees: Float = 62f,
+    /** Дальность прорисовки из настроек: множитель кулл-дистанции узлов. */
+    val drawDistanceScale: Float = 1f,
     val menuOrbitMode: Boolean = false
 )
 
@@ -252,26 +256,19 @@ class ForestGlRenderer(
 
     // Уровень 2.5: Импортированные 3D-модели (Poly Haven: камни, кострище, топор, ветви, растение, деревья)
     private val assetMeshCache = HashMap<String, FloatArray>()
+
+    // Раскрытые меши моделей ресурсных узлов (камни/кусты/дубы/ящики) живут всю
+    // сессию: раньше каждый gather перечитывал и парсил OBJ с диска (микрофриз).
+    // Набор моделей ограничен узлами (~10 шт, ~8 МБ), не все 33 модели пропа.
+    private val nodeModelFloats = HashMap<String, FloatArray>()
+
+    // VBO каждой уздовой модели пересоздаётся ТОЛЬКО при изменении её набора
+    // пятен (сигнатура): сбор ресурса перепекает 1 модель вместо десятка.
+    private val rockBatchCache = HashMap<String, Pair<Int, GlVbo>>()
     private val assetTextures = HashMap<String, Int>()
     private val assetPropBatches = HashMap<String, GlVbo>()
     private var assetPropsBuiltQuality: GraphicsQuality? = null
     private var assetTexturesQuality: GraphicsQuality? = null
-
-    // Железные ворота на тропах между районами: рама + две створки на петлях.
-    // Створки распахиваются, когда игрок подходит к проходу, и закрываются позади.
-    private class TrailGate(val x: Float, val z: Float, val yawRad: Float)
-    private val trailGates = listOf(
-        TrailGate(0f, -48f, 0f),
-        TrailGate(48f, 0f, (Math.PI / 2.0).toFloat()),
-        TrailGate(-48f, 0f, (Math.PI / 2.0).toFloat()),
-        TrailGate(0f, 48f, 0f)
-    )
-    private var gateFrameVbo: GlVbo? = null
-    private var gateDoorLVbo: GlVbo? = null
-    private var gateDoorRVbo: GlVbo? = null
-    private val gateOpenAmount = FloatArray(4)
-    private var gateAnimPrevNs = 0L
-
 
     // Камни-ресурсы (камень/руда/уголь) рисуются МОДЕЛЯМИ автора (rock_09 / rock_moss_*),
     // а не процедурными «булыжниками»: батчи перестраиваются вместе с узлами локации.
@@ -289,6 +286,11 @@ class ForestGlRenderer(
     // Преаллоцированные 3D-массивы без мусора в куче
     private val viewMatrix = FloatArray(16)
     private val projMatrix = FloatArray(16)
+    private var appliedFovDeg = -1f
+    private var appliedDrawScale = -1f
+    private var cachedNodeDrawScale = -1f
+
+    private fun drawScale(): Float = snapshot.drawDistanceScale.coerceIn(0.6f, 1.5f)
     private val vpMatrix = FloatArray(16)
     private val modelMatrix = FloatArray(16)
     private val mvpMatrix = FloatArray(16)
@@ -346,6 +348,9 @@ class ForestGlRenderer(
         entityParts.clear()
         rockNodeBatches.values.forEach { it.release() }
         rockNodeBatches.clear()
+        // VBO уже отпущены выше через rockNodeBatches — кэш сигнатур очищаем,
+        // чтобы после воссоздания поверхности не переиспользовать мёртвые буферы
+        rockBatchCache.clear()
         toolHandVbos.values.forEach { it.release() }
         toolHandVbos.clear()
         assetTextures.values.forEach { id -> if (id != 0) GLES20.glDeleteTextures(1, intArrayOf(id), 0) }
@@ -386,6 +391,16 @@ class ForestGlRenderer(
         val base = snap.base
         val quality = snap.quality
         val loc = run.currentLocation
+
+        // Настройки «радиус обзора» и «дальность прорисовки» применяются на лету
+        if (snap.fovDegrees != appliedFovDeg || drawScale() != appliedDrawScale) {
+            appliedFovDeg = snap.fovDegrees
+            appliedDrawScale = drawScale()
+            Matrix.perspectiveM(
+                projMatrix, 0, snap.fovDegrees.coerceIn(35f, 100f), aspectRatio,
+                0.12f, 135f * drawScale()
+            )
+        }
 
         val animTimeSec = if (snap.menuOrbitMode) {
             18f + ((nowNs - orbitTimeNs) / 1_000_000_000.0).toFloat()
@@ -556,8 +571,6 @@ class ForestGlRenderer(
         for ((modelId, vbo) in assetPropBatches) {
             drawVbo(vbo, assetTextures[modelId] ?: 0, unlit = false, specStrength = 0.18f)
         }
-        // 6b-2. Железные ворота на тропах: створки распахиваются при подходе игрока
-        drawTrailGates(camX, camZ, quality)
         // 6c. Камни-ресурсы (камень/руда/уголь) моделями автора
         for ((modelId, vbo) in rockNodeBatches) {
             drawVbo(vbo, assetTextures[modelId] ?: 0, unlit = false, specStrength = 0.18f)
@@ -626,27 +639,7 @@ class ForestGlRenderer(
         }
         if (assetPropsBuiltQuality != quality) {
             rebuildAssetPropsVbo(quality)
-            buildTrailGateVbos()
             assetPropsBuiltQuality = quality
-        }
-    }
-
-    /** VBO железных ворот: рама + левая и правая створки (общая нормализация мешей). */
-    private fun buildTrailGateVbos() {
-        val ctx = appContext ?: return
-        gateFrameVbo?.release(); gateDoorLVbo?.release(); gateDoorRVbo?.release()
-        gateFrameVbo = null; gateDoorLVbo = null; gateDoorRVbo = null
-        val frame = readAssetFloats(ctx, "models/gate/mesh_frame.obj")
-        val left = readAssetFloats(ctx, "models/gate/mesh_left.obj")
-        val right = readAssetFloats(ctx, "models/gate/mesh_right.obj")
-        if (frame.isNotEmpty()) {
-            gateFrameVbo = GlVbo().also { it.uploadStatic(floatsToBuilder(frame)) }
-        }
-        if (left.isNotEmpty()) {
-            gateDoorLVbo = GlVbo().also { it.uploadStatic(floatsToBuilder(left)) }
-        }
-        if (right.isNotEmpty()) {
-            gateDoorRVbo = GlVbo().also { it.uploadStatic(floatsToBuilder(right)) }
         }
     }
 
@@ -812,13 +805,14 @@ class ForestGlRenderer(
         val nodeSig = computeNodeAvailabilitySignature(
             run.playerX, run.playerZ, nodes, run.droppedItems
         )
-        if (nodeSig != cachedNodeStateHash) {
+        if (nodeSig != cachedNodeStateHash || cachedNodeDrawScale != drawScale()) {
             rebuildInteractiveNodesVbo(
                 nodes, run.playerX, run.playerZ, quality,
                 droppedItems = run.droppedItems,
                 highlightDropId = run.nearestDroppedItem()?.id
             )
             cachedNodeStateHash = nodeSig
+            cachedNodeDrawScale = drawScale()
         }
     }
 
@@ -946,6 +940,65 @@ class ForestGlRenderer(
                 cx = shX, baseY = shY, cz = shZ,
                 width = 4.6f, wallHeight = wallH, depth = 4.2f
             )
+            // ── Интерьер сруба: связная раскладка вдоль осей дома (пол уже внутри).
+            //    Печь в северо-восточном углу точно под существующей трубой, кровать у
+            //    западной стены, стол со скамьями у южного окна, полки с добром на
+            //    северной стене — проход от двери (x ≈ shX-0.85) остаётся свободным.
+            val flY = shY + 0.31f // верх дощатого пола внутри сруба
+            // Каменная печь: корпус под трубой (cx+hw*0.55, cz+hd*0.25) из addDetailedLogCabin
+            val stX = shX + 1.27f; val stZ = shZ + 0.53f
+            stone.addBox(stX, flY, stZ, 1.05f, 1.10f, 0.95f, 1f, 1.4f)
+            stone.addBox(stX, flY + 1.10f, stZ, 1.18f, 0.12f, 1.06f)
+            metal.addBox(stX - 0.55f, flY + 0.26f, stZ, 0.06f, 0.52f, 0.44f, 0.30f, 0.31f, 0.34f)
+            fire.addBox(stX - 0.57f, flY + 0.34f, stZ, 0.03f, 0.36f, 0.30f, 1.0f, 0.62f, 0.26f, 1f)
+            // Половичок перед печью
+            cloth.addBox(stX - 0.85f, flY, stZ + 0.10f, 1.35f, 0.03f, 1.05f, 0.55f, 0.26f, 0.22f)
+            // Кровать у западной стены: рама, матрас, подушка
+            timber.addBox(shX - 1.45f, flY + 0.01f, shZ - 0.75f, 0.95f, 0.30f, 1.85f, 0.66f, 0.52f, 0.36f, 1f, 1.6f)
+            cloth.addBox(shX - 1.45f, flY + 0.30f, shZ - 0.72f, 0.86f, 0.16f, 1.66f, 0.62f, 0.42f, 0.34f)
+            cloth.addBox(shX - 1.45f, flY + 0.40f, shZ - 1.42f, 0.58f, 0.13f, 0.34f, 0.88f, 0.86f, 0.80f)
+            // Сундук с добром у изголовья
+            timber.addBox(shX - 1.50f, flY + 0.01f, shZ + 0.62f, 0.62f, 0.50f, 0.44f, 0.58f, 0.44f, 0.30f, 1f, 1.6f)
+            metal.addBox(shX - 1.50f, flY + 0.49f, shZ + 0.62f, 0.64f, 0.06f, 0.46f, 0.46f, 0.42f, 0.36f)
+            // Стол со скамьями у южного окна (проход от двери не пересекает)
+            val tbX = shX + 0.45f; val tbZ = shZ + 1.05f
+            timber.addBox(tbX, flY + 0.615f, tbZ, 1.15f, 0.09f, 0.82f, 0.74f, 0.60f, 0.44f, 1f, 1.6f)
+            timber.addBox(tbX - 0.46f, flY + 0.01f, tbZ, 0.10f, 0.64f, 0.70f, 0.66f, 0.52f, 0.36f, 1f, 1.6f)
+            timber.addBox(tbX + 0.46f, flY + 0.01f, tbZ, 0.10f, 0.64f, 0.70f, 0.66f, 0.52f, 0.36f, 1f, 1.6f)
+            timber.addBox(tbX, flY + 0.255f, tbZ - 0.62f, 0.95f, 0.09f, 0.30f, 0.70f, 0.56f, 0.40f, 1f, 1.6f)
+            timber.addBox(tbX, flY + 0.255f, tbZ + 0.62f, 0.95f, 0.09f, 0.30f, 0.70f, 0.56f, 0.40f, 1f, 1.6f)
+            // Фонарь на столе: тёплая точка света в интерьере
+            metal.addBox(tbX + 0.30f, flY + 0.705f, tbZ, 0.10f, 0.06f, 0.10f, 0.40f, 0.41f, 0.44f)
+            fire.addBox(tbX + 0.30f, flY + 0.765f, tbZ, 0.09f, 0.14f, 0.09f, 1.0f, 0.78f, 0.38f, 1f)
+            // Полки с припасами на северной стене
+            for (row in 0 until 2) {
+                val shelfY = flY + 1.02f + row * 0.42f
+                timber.addBox(shX + 0.30f, shelfY - 0.03f, shZ - 1.62f, 2.30f, 0.06f, 0.32f, 0.70f, 0.56f, 0.40f, 1f, 1.6f)
+                for (k in 0 until 3) {
+                    val jx = shX - 0.55f + k * 0.78f + row * 0.24f
+                    if (row == 0) {
+                        bark.addTaperedCylinder(jx, shelfY + 0.03f, shZ - 1.62f, jx, shelfY + 0.30f, shZ - 1.62f, 0.11f, 0.09f, 8, 0.62f, 0.48f, 0.34f)
+                    } else {
+                        cloth.addBox(jx, shelfY + 0.03f, shZ - 1.62f, 0.24f, 0.26f, 0.22f, 0.80f, 0.72f, 0.56f)
+                    }
+                }
+            }
+            // Обшивка интерьера: дощатые лайнеры стен и потолок с нормальной
+            // плотностью текстуры (uvDensity 2.0) — внутри дом читается деревом,
+            // а не растянутыми брёвнами. Юг и восток разорваны дверью и окном.
+            val inH = wallH - 0.10f
+            val linY = flY + inH * 0.5f
+            timber.addOrientedBox(shX, linY, shZ - 1.77f, 4.0f, inH, 0.06f, 0f, 0f, 0f, 0.80f, 0.66f, 0.48f, 1f, 2.0f)
+            timber.addOrientedBox(shX - 1.715f, linY, shZ + 1.77f, 0.57f, inH, 0.06f, 0f, 0f, 0f, 0.80f, 0.66f, 0.48f, 1f, 2.0f)
+            timber.addOrientedBox(shX + 0.865f, linY, shZ + 1.77f, 1.73f, inH, 0.06f, 0f, 0f, 0f, 0.80f, 0.66f, 0.48f, 1f, 2.0f)
+            timber.addOrientedBox(shX - 1.97f, linY, shZ, 0.06f, inH, 3.6f, 0f, 0f, 0f, 0.78f, 0.64f, 0.46f, 1f, 2.0f)
+            timber.addOrientedBox(shX + 1.97f, linY, shZ - 1.115f, 0.06f, inH, 1.37f, 0f, 0f, 0f, 0.78f, 0.64f, 0.46f, 1f, 2.0f)
+            timber.addOrientedBox(shX + 1.97f, linY, shZ + 1.115f, 0.06f, inH, 1.37f, 0f, 0f, 0f, 0.78f, 0.64f, 0.46f, 1f, 2.0f)
+            // Потолок: изнутри не видно стропил, доска с плотной текстурой
+            timber.addOrientedBox(shX, shY + 0.22f + wallH - 0.07f, shZ, 4.0f, 0.10f, 3.6f, 0f, 0f, 0f, 0.72f, 0.58f, 0.42f, 1f, 2.0f)
+            // Бочка в хозяйственном углу (дров внутри дома больше нет)
+            bark.addTaperedCylinder(shX + 1.62f, flY, shZ + 1.42f, shX + 1.62f, flY + 0.72f, shZ + 1.42f, 0.26f, 0.22f, 9, 0.55f, 0.42f, 0.30f)
+
             // Поленница дров у стены сруба
             for (row in 0 until 3) {
                 for (col in 0 until 4) {
@@ -1078,27 +1131,9 @@ class ForestGlRenderer(
             }
         }
 
-        // Ели по периметру района: живая стена с четырьмя проходами-коридорами к соседям
-        val ringCount = maxOf(8, quality.perimeterTrees / 2)
-        for (i in 0 until ringCount) {
-            val ang = (i.toFloat() / ringCount.toFloat()) * Math.PI.toFloat() * 2f
-            if (abs(sin(ang)) < 0.13f || abs(cos(ang)) < 0.13f) continue
-            val radInner = 40.2f + (i % 3) * 1.6f
-            val bx = sin(ang) * radInner
-            val bz = -cos(ang) * radInner
-            val by = WorldPopulator.terrainHeight(loc, bx, bz)
-            addDetailedPineTree(bark, foliage, bx, by, bz, scale = 1.25f + (i % 4) * 0.16f, seed = i * 13)
-        }
-        val outerCount = (ringCount * 3) / 4
-        for (i in 0 until outerCount) {
-            val ang = (i.toFloat() / outerCount.toFloat()) * Math.PI.toFloat() * 2f + 0.11f
-            if (abs(sin(ang)) < 0.13f || abs(cos(ang)) < 0.13f) continue
-            val radOuter = 45.5f + (i % 2) * 1.8f
-            val bx = sin(ang) * radOuter
-            val bz = -cos(ang) * radOuter
-            val by = WorldPopulator.terrainHeight(loc, bx, bz)
-            addDetailedPineTree(bark, foliage, bx, by, bz, scale = 1.55f + (i % 3) * 0.18f, seed = 500 + i, drawShadow = false)
-        }
+        // Ели по периметру района больше НЕ декор: внешнее кольцо генерируется
+        // узлами добычи (WorldPopulator ring_inner/ring_outer) — каждое дерево
+        // на карте можно срубить, текстуры у всех деревьев одинаковые.
     }
 
     /**
@@ -1120,6 +1155,7 @@ class ForestGlRenderer(
         // [x, y, z, yaw, scale, tintR, tintG, tintB] — камни-ресурсы моделями автора
         val nodeRockSpots = HashMap<String, MutableList<FloatArray>>()
         val terrainSteps = worldTerrainSteps(quality)
+        val cullSq = (118f * drawScale()).let { it * it }
         if (nodeCacheQuality != quality) {
             nodeGeometryCache.clear()
             nodeCacheQuality = quality
@@ -1140,7 +1176,7 @@ class ForestGlRenderer(
                 if (node.kind == WorldObjectKind.SUPPLY_CRATE || node.kind == WorldObjectKind.MILITARY_CRATE) {
                     val ndx2 = node.x - playerX
                     val ndz2 = node.z - playerZ
-                    if (ndx2 * ndx2 + ndz2 * ndz2 <= 118f * 118f) {
+                    if (ndx2 * ndx2 + ndz2 * ndz2 <= cullSq) {
                         val y2 = MeshBuilder.sampleWorldHeight(node.x, node.z, terrainSteps)
                         nodeRockSpots.getOrPut("cache_crate_open") { mutableListOf() }
                             .add(floatArrayOf(node.x, y2, node.z, idx * 0.7f, 1.0f, 1f, 1f, 1f))
@@ -1151,7 +1187,7 @@ class ForestGlRenderer(
             // Дальние узлы не пекутся: VBO пересобирается при смене района игрока
             val ndx = node.x - playerX
             val ndz = node.z - playerZ
-            if (ndx * ndx + ndz * ndz > 118f * 118f) continue
+            if (ndx * ndx + ndz * ndz > cullSq) continue
             val y = MeshBuilder.sampleWorldHeight(node.x, node.z, terrainSteps)
             // §7.17: геометрия узла печётся ОДИН раз на id узла и переиспользуется
             // при каждой пересборке VBO (сбор ресурса больше не перегоняет
@@ -1189,7 +1225,7 @@ class ForestGlRenderer(
         for (item in droppedItems) {
             val dx = item.x - playerX
             val dz = item.z - playerZ
-            if (dx * dx + dz * dz > 118f * 118f) continue
+            if (dx * dx + dz * dz > cullSq) continue
             val iy = MeshBuilder.sampleWorldHeight(item.x, item.z, terrainSteps)
             addDroppedItemProp(bark, foliage, stone, cloth, metal, fire, ice, item, iy)
             if (item.id == highlightDropId) {
@@ -1208,11 +1244,20 @@ class ForestGlRenderer(
             nodeBatches[mat]?.uploadStatic(builder)
         }
 
-        // Камни-ресурсы моделями автора: отдельные батчи по моделям (пересборка при изменении узлов)
-        rockNodeBatches.values.forEach { it.release() }
-        rockNodeBatches.clear()
+        // Камни-ресурсы моделями автора: батч модели пересобирается только если
+        // её набор пятен реально изменился (сигнатура включает качество рельефа —
+        // от него зависит высота посадки). Остальные VBO переиспользуются как есть.
+        val nextRockBatches = HashMap<String, GlVbo>()
         for ((modelId, spots) in nodeRockSpots) {
-            val floats = assetMeshCache.getOrPut(modelId) {
+            var sig = quality.hashCode() * 31 + modelId.hashCode()
+            for (sp in spots) sig = sig * 31 + sp.contentHashCode()
+            val cached = rockBatchCache[modelId]
+            if (cached != null && cached.first == sig) {
+                nextRockBatches[modelId] = cached.second
+                continue
+            }
+            cached?.second?.release()
+            val floats = nodeModelFloats.getOrPut(modelId) {
                 val ctx = appContext
                 if (ctx != null) readAssetFloats(ctx, "models/$modelId/mesh.obj") else FloatArray(0)
             }
@@ -1228,9 +1273,16 @@ class ForestGlRenderer(
             }
             val vbo = GlVbo()
             vbo.uploadStatic(builder)
-            rockNodeBatches[modelId] = vbo
+            nextRockBatches[modelId] = vbo
+            rockBatchCache[modelId] = sig to vbo
         }
-        assetMeshCache.clear()
+        // Модели, исчезнувшие из кадра (смена района), отпускают GL-память
+        for ((modelId, cached) in rockBatchCache) {
+            if (!nextRockBatches.containsKey(modelId)) cached.second.release()
+        }
+        rockBatchCache.keys.retainAll(nextRockBatches.keys)
+        rockNodeBatches.clear()
+        rockNodeBatches.putAll(nextRockBatches)
     }
 
     private fun buildAndDrawDynamicFrameLayer(
@@ -1576,7 +1628,7 @@ class ForestGlRenderer(
                     nodeRockSpots.getOrPut("cloth_bush") { mutableListOf() }
                         .add(
                             floatArrayOf(
-                                node.x, y, node.z,
+                                node.x, y - 0.03f, node.z,
                                 idx * 1.37f,
                                 0.92f + (idx % 4) * 0.09f,
                                 1f, 1f, 1f
@@ -1600,14 +1652,14 @@ class ForestGlRenderer(
                 WorldObjectKind.PEBBLES -> {
                     // галька: тот же авторский валун, но мелкий и высветленный
                     nodeRockSpots.getOrPut("rock_09") { mutableListOf() }
-                        .add(floatArrayOf(node.x, y, node.z, idx * 0.97f, 0.40f, 0.88f, 0.90f, 0.94f))
+                        .add(floatArrayOf(node.x, y - 0.06f, node.z, idx * 0.97f, 0.40f, 0.88f, 0.90f, 0.94f))
                 }
                 WorldObjectKind.RESIN_STUMP -> {
                     // §7.10: смоляной ствол — авторская модель tree_bark (не процедурный
                     // цилиндр): каждое видимое дерево в мире обязано быть узлом
                     foliage.addShadowDisc(node.x, y, node.z, 0.95f, 0.34f)
                     nodeRockSpots.getOrPut("tree_bark") { mutableListOf() }
-                        .add(floatArrayOf(node.x, y, node.z, idx * 0.83f, 1.0f, 1f, 1f, 1f))
+                        .add(floatArrayOf(node.x, y - 0.03f, node.z, idx * 0.83f, 1.0f, 1f, 1f, 1f))
                     fire.addSculptedBoulder(node.x + 0.34f, y + 0.44f, node.z + 0.12f, 0.16f, 0.22f, 0.15f, 310 + idx, 1f, 0.72f, 0.16f, false)
                     fire.addSculptedBoulder(node.x - 0.28f, y + 0.62f, node.z - 0.20f, 0.12f, 0.16f, 0.12f, 340 + idx, 1f, 0.78f, 0.22f, false)
                 }
@@ -1623,7 +1675,7 @@ class ForestGlRenderer(
                     foliage.addShadowDisc(node.x, y, node.z, 1.45f, 0.38f)
                     // Угольная жила — тёмная тонировка светлой породы
                     nodeRockSpots.getOrPut("rock_09") { mutableListOf() }
-                        .add(floatArrayOf(node.x, y, node.z, idx * 1.37f, 1.18f, 0.30f, 0.30f, 0.34f))
+                        .add(floatArrayOf(node.x, y - 0.06f, node.z, idx * 1.37f, 1.18f, 0.30f, 0.30f, 0.34f))
                     nodeRockSpots.getOrPut("rock_moss_a") { mutableListOf() }
                         .add(floatArrayOf(node.x + 0.52f, y - 0.05f, node.z + 0.34f, idx * 2.1f, 0.55f, 0.26f, 0.26f, 0.30f))
                 }
@@ -1631,7 +1683,7 @@ class ForestGlRenderer(
                     foliage.addShadowDisc(node.x, y, node.z, 1.45f, 0.38f)
                     // Тёмная порода автора (rock_moss) — из неё падает Железная руда
                     nodeRockSpots.getOrPut("rock_moss_b") { mutableListOf() }
-                        .add(floatArrayOf(node.x, y, node.z, idx * 1.13f, 1.12f, 1f, 1f, 1f))
+                        .add(floatArrayOf(node.x, y - 0.06f, node.z, idx * 1.13f, 1.12f, 1f, 1f, 1f))
                     nodeRockSpots.getOrPut("rock_moss_a") { mutableListOf() }
                         .add(floatArrayOf(node.x - 0.48f, y - 0.04f, node.z + 0.42f, idx * 2.31f, 0.62f, 1f, 1f, 1f))
                 }
@@ -1650,13 +1702,13 @@ class ForestGlRenderer(
                     foliage.addShadowDisc(node.x, y, node.z, 1.55f, 0.36f)
                     val oakId = OAK_MODELS[idx % OAK_MODELS.size]
                     nodeRockSpots.getOrPut(oakId) { mutableListOf() }
-                        .add(floatArrayOf(node.x, y, node.z, idx * 1.71f, 0.92f + (idx % 3) * 0.12f, 0.94f, 0.97f, 1f))
+                        .add(floatArrayOf(node.x, y - 0.04f, node.z, idx * 1.71f, 0.92f + (idx % 3) * 0.12f, 0.94f, 0.97f, 1f))
                 }
                 WorldObjectKind.SCRUB_BUSH -> {
                     foliage.addShadowDisc(node.x, y, node.z, 1.05f, 0.34f)
                     val bushId = SCRUB_MODELS[idx % SCRUB_MODELS.size]
                     nodeRockSpots.getOrPut(bushId) { mutableListOf() }
-                        .add(floatArrayOf(node.x, y, node.z, idx * 2.13f, 0.94f + (idx % 3) * 0.10f, 0.96f, 0.97f, 1f))
+                        .add(floatArrayOf(node.x, y - 0.03f, node.z, idx * 2.13f, 0.94f + (idx % 3) * 0.10f, 0.96f, 0.97f, 1f))
                     // Ягоды утоплены в крону куста — признак добычи
                     for (b in 0 until 5) {
                         val ba = b * 1.1f + idx
@@ -1867,8 +1919,9 @@ class ForestGlRenderer(
         if (lintelH > 0.05f) {
             timber.addBox(doorCx, doorTopY + lintelH * 0.5f, cz + hd - wallT * 0.5f, doorHalf * 2f + 0.1f, lintelH, wallT)
         }
-        // Пол внутри сруба
-        timber.addBox(cx, baseY + 0.26f, cz, width - wallT * 1.6f, 0.10f, depth - wallT * 1.6f)
+        // Пол внутри сруба: доска с реальной плотностью текстуры (uvDensity 2.2),
+        // а не растянутая на всю комнату поверхность
+        timber.addBox(cx, baseY + 0.26f, cz, width - wallT * 1.6f, 0.10f, depth - wallT * 1.6f, 0.74f, 0.60f, 0.44f, 1f, 2.2f)
         // Выступающие венцы брёвен («перерубы» на углах); фасадный ряд прерывается дверью
         val courses = 7
         val stepY = wallHeight / courses
@@ -2157,71 +2210,6 @@ class ForestGlRenderer(
         GLES20.glUniform1f(uFogFarLoc, fogFar)
     }
 
-    /**
-     * Ворота на тропах: рама стоит на земле, обе створки висят на петлях у
-     * внешних краёв и распахиваются на 95°, когда игрок ближе 7.5 м.
-     * Дальние ворота не рисуются (они в тумане и за деревьями) — 0 лишних треугольников.
-     */
-    private fun drawTrailGates(camX: Float, camZ: Float, quality: GraphicsQuality) {
-        val frame = gateFrameVbo ?: return
-        val left = gateDoorLVbo ?: return
-        val right = gateDoorRVbo ?: return
-        val tex = assetTextures["gate"] ?: return
-
-        val nowNs = System.nanoTime()
-        val dt = if (gateAnimPrevNs == 0L) 0f else ((nowNs - gateAnimPrevNs) / 1_000_000_000.0).toFloat()
-        gateAnimPrevNs = nowNs
-        val step = (dt.coerceIn(0f, 0.12f) * 2.6f)
-
-        for ((idx, gate) in trailGates.withIndex()) {
-            val dx = camX - gate.x
-            val dz = camZ - gate.z
-            val dist = sqrt(dx * dx + dz * dz)
-            val target = if (dist < 7.5f) 1f else 0f
-            val cur = gateOpenAmount[idx]
-            gateOpenAmount[idx] = when {
-                cur < target -> (cur + step).coerceAtMost(target)
-                cur > target -> (cur - step).coerceAtLeast(target)
-                else -> cur
-            }
-            if (dist > 46f) continue
-
-            val gy = MeshBuilder.sampleWorldHeight(gate.x, gate.z, worldTerrainSteps(quality))
-            drawTrailGatePart(frame, tex, gate, gy, 0f, 0f)
-            val openness = gateOpenAmount[idx]
-            val swing = openness * 95f
-            drawGateDoor(left, tex, gate, gy, -GATE_HINGE_X, -swing)
-            drawGateDoor(right, tex, gate, gy, GATE_HINGE_X, swing)
-        }
-
-        Matrix.setIdentityM(modelMatrix, 0)
-        System.arraycopy(vpMatrix, 0, mvpMatrix, 0, 16)
-        GLES20.glUniformMatrix4fv(uMvpLoc, 1, false, mvpMatrix, 0)
-        GLES20.glUniformMatrix4fv(uModelLoc, 1, false, modelMatrix, 0)
-    }
-
-    /** Рама ворот (статичная часть) в точке тропы. */
-    private fun drawTrailGatePart(vbo: GlVbo, tex: Int, gate: TrailGate, groundY: Float, hingeX: Float, angleDeg: Float) {
-        Matrix.setIdentityM(modelMatrix, 0)
-        Matrix.translateM(modelMatrix, 0, gate.x, groundY, gate.z)
-        Matrix.rotateM(modelMatrix, 0, gate.yawRad * 180f / Math.PI.toFloat(), 0f, 1f, 0f)
-        Matrix.scaleM(modelMatrix, 0, GATE_SCALE, GATE_SCALE, GATE_SCALE)
-        if (hingeX != 0f || angleDeg != 0f) {
-            Matrix.translateM(modelMatrix, 0, hingeX, 0f, 0f)
-            Matrix.rotateM(modelMatrix, 0, angleDeg, 0f, 1f, 0f)
-            Matrix.translateM(modelMatrix, 0, -hingeX, 0f, 0f)
-        }
-        Matrix.multiplyMM(mvpMatrix, 0, vpMatrix, 0, modelMatrix, 0)
-        GLES20.glUniformMatrix4fv(uMvpLoc, 1, false, mvpMatrix, 0)
-        GLES20.glUniformMatrix4fv(uModelLoc, 1, false, modelMatrix, 0)
-        drawVbo(vbo, tex, unlit = false, specStrength = 0.30f)
-    }
-
-    /** Створка на петле: поворот вокруг вертикальной оси у внешнего края. */
-    private fun drawGateDoor(vbo: GlVbo, tex: Int, gate: TrailGate, groundY: Float, hingeX: Float, angleDeg: Float) {
-        drawTrailGatePart(vbo, tex, gate, groundY, hingeX, angleDeg)
-    }
-
     /** Разовая отрисовка импортированной модели в точке мира (волк/олень и т.п.). */
     private fun drawModelInstance(modelId: String, x: Float, y: Float, z: Float, yawRad: Float, scale: Float) {
         val vbo = assetPropBatches[modelId] ?: return
@@ -2355,10 +2343,11 @@ class ForestGlRenderer(
             i += 12
         }
         val pivotY = maxY * 0.92f
-        // Компактный шар строго в стыке: чуть больше среза, но не выпирает из силуэта
-        val ballR = (rad * 1.15f).coerceIn(0.035f, 0.10f)
+        // Компактный шар строго в стыке: лишь чуть больше среза и утоплен глубже —
+        // сустав не выпирает из силуэта ноги и не «вылезает» за текстуру тела
+        val ballR = (rad * 1.06f).coerceIn(0.035f, 0.09f)
         val builder = floatsToBuilder(floats)
-        appendJointBall(builder, px, pivotY - ballR * 0.2f, pz, ballR, topX, topY, topZ, topU, topV, ti)
+        appendJointBall(builder, px, pivotY - ballR * 0.45f, pz, ballR, topX, topY, topZ, topU, topV, ti)
         val vbo = GlVbo()
         vbo.uploadStatic(builder)
         return LegPart(vbo, px, pivotY, pz)
@@ -2502,7 +2491,9 @@ class ForestGlRenderer(
         val baseX = camX + fwdX * (0.58f + chopArc * 0.24f) + rightX * (0.34f - chopArc * 0.10f + bobX)
         val baseY = camY - 0.34f + fwdY * 0.52f - chopArc * 0.16f - bobY
         val baseZ = camZ + fwdZ * (0.58f + chopArc * 0.24f) + rightZ * (0.34f - chopArc * 0.10f + bobX)
-        val theta = 0.26f + chopArc * 0.62f
+        // Тот же угол, что у варежки в buildAndDrawDynamicFrameLayer — инструмент
+        // и кисть поворачиваются синхронно и выглядят одним целым
+        val theta = 0.28f + chopArc * 0.85f
         Matrix.setIdentityM(modelMatrix, 0)
         Matrix.translateM(modelMatrix, 0, baseX, baseY, baseZ)
         Matrix.rotateM(modelMatrix, 0, -yawRad * 180f / Math.PI.toFloat(), 0f, 1f, 0f)
@@ -2701,11 +2692,6 @@ class ForestGlRenderer(
     }
 
     companion object {
-        /** Масштаб ворот на тропе: модель 2.55 м → почти 3 м в мире. */
-        const val GATE_SCALE = 1.15f
-        /** Петля створки в координатах модели (из tools/pack_gate_doors.py). */
-        const val GATE_HINGE_X = 1.2483f
-
         /** Окно интерполяции позиции = период тика симуляции (20 Гц). */
         private const val TICK_INTERP_WINDOW_NS = 50_000_000L
 

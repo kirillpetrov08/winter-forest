@@ -248,6 +248,9 @@ data class GameRunState(
     val hotbarSlots: List<HotbarEntry?> = List(6) { null },
     /** §7.12: предметы, выброшенные на землю в текущем забеге. */
     val droppedItems: List<DroppedItem> = emptyList(),
+    /** Физика движения: текущая скорость героя (инерция разгона/торможения), м/с. */
+    val velX: Float = 0f,
+    val velZ: Float = 0f,
     val lastStatusMessage: String = "Осмотрите Базовую поляну и соберите дрова для костра."
 ) {
     val maxHealth: Float

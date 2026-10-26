@@ -20,6 +20,8 @@ import com.ayaks.winterforest.domain.model.WorldObjectKind
 import com.ayaks.winterforest.domain.model.WorkbenchRecipe
 import com.ayaks.winterforest.domain.world.WorldCollision
 import com.ayaks.winterforest.domain.world.WorldPopulator
+import kotlin.math.abs
+import kotlin.math.exp
 import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.floor
@@ -425,7 +427,15 @@ object SurvivalEngine {
                                     speed = entity.kind.cruiseSpeedMps * (if (nowNight) 1.15f else 0.95f)
                                 }
                             } else {
-                                nextHeading += sin(run.elapsedRealSeconds * 0.7f + idx * 1.9f) * 0.65f * deltaSeconds
+                                // Патрулирование угодий: широкий рыскающий обход на охотничьей
+                                // скорости — волк больше не стоит AFK, а обходит территорию.
+                                val t = run.elapsedRealSeconds
+                                nextHeading += (
+                                    sin(t * 0.7f + idx * 1.9f) * 1.15f +
+                                        cos(t * 0.37f + idx) * 0.5f
+                                    ) * deltaSeconds
+                                speed = entity.kind.cruiseSpeedMps *
+                                    (0.5f + 0.15f * sin(t * 0.4f + idx * 2.7f))
                             }
                         } else {
                             // Мирные крысы и северные олени пасутся и стремительно убегают при приближении
@@ -434,8 +444,54 @@ object SurvivalEngine {
                                 speed = entity.kind.cruiseSpeedMps * 1.75f
                                 nextFlee = maxOf(nextFlee, 2.2f)
                             } else {
-                                nextHeading += sin(run.elapsedRealSeconds * 0.55f + idx * 2.3f) * 0.85f * deltaSeconds
-                                speed = entity.kind.cruiseSpeedMps * 0.38f
+                                // Выпас: циклы «пошёл — остановился пощипать мох», повороты
+                                // двух несоизмеримых синусов. Животное живёт своей жизнью.
+                                val t = run.elapsedRealSeconds
+                                val phase = t * 0.55f + idx * 2.3f
+                                val grazeCycle = (t * 0.09f + idx * 0.31f) % 1f
+                                if (grazeCycle > 0.58f && grazeCycle < 0.78f) {
+                                    speed = 0f
+                                    nextHeading += sin(phase * 2.1f) * 0.35f * deltaSeconds
+                                } else {
+                                    nextHeading += (sin(phase) * 0.85f + cos(phase * 0.63f) * 0.45f) * deltaSeconds
+                                    speed = entity.kind.cruiseSpeedMps *
+                                        (0.34f + 0.18f * (0.5f + 0.5f * sin(t * 0.23f + idx * 1.7f)))
+                                }
+                                // Стадность: тянемся к ближайшему сородичу в 16 м (мягкая подрулка)
+                                val mate = list.firstOrNull {
+                                    it.id != entity.id && it.kind == entity.kind && it.isAlive &&
+                                        hypot(it.x - entity.x, it.z - entity.z) < 16f
+                                }
+                                if (mate != null) {
+                                    val toMate = atan2(mate.z - entity.z, mate.x - entity.x)
+                                    var mateDiff = toMate - nextHeading
+                                    while (mateDiff > Math.PI.toFloat()) mateDiff -= 2f * Math.PI.toFloat()
+                                    while (mateDiff < -Math.PI.toFloat()) mateDiff += 2f * Math.PI.toFloat()
+                                    nextHeading += mateDiff * 0.25f * deltaSeconds
+                                    if (hypot(mate.x - entity.x, mate.z - entity.z) > 3.5f) {
+                                        speed = maxOf(speed, entity.kind.cruiseSpeedMps * 0.5f)
+                                    }
+                                }
+                            }
+                        }
+
+                        // Не подходить к домам ближе 10 м (те же поляны, что у ресурсов)
+                        val (homeCx, homeCz) = com.ayaks.winterforest.domain.world.WorldRegions.centerOf(loc)
+                        val homeX = when (loc) {
+                            LocationId.BASE_CLEARING -> homeCx - 6.8f
+                            LocationId.HUNTERS_CABIN -> homeCx + 7.2f
+                            else -> Float.NaN
+                        }
+                        if (!homeX.isNaN()) {
+                            val homeZ = if (loc == LocationId.BASE_CLEARING) homeCz - 5.8f else homeCz + 8.8f
+                            val homeDist = hypot(entity.x - homeX, entity.z - homeZ)
+                            if (homeDist < 11f && homeDist > 0.01f) {
+                                val away = atan2(entity.z - homeZ, entity.x - homeX)
+                                var homeDiff = away - nextHeading
+                                while (homeDiff > Math.PI.toFloat()) homeDiff -= 2f * Math.PI.toFloat()
+                                while (homeDiff < -Math.PI.toFloat()) homeDiff += 2f * Math.PI.toFloat()
+                                nextHeading += homeDiff * minOf(1f, 2.5f * deltaSeconds)
+                                speed = maxOf(speed, entity.kind.cruiseSpeedMps * 0.6f)
                             }
                         }
 
@@ -496,11 +552,18 @@ object SurvivalEngine {
         val sinYaw = sin(yawRad)
         val cosYaw = cos(yawRad)
 
-        val worldDx = (sinYaw * forwardInput + cosYaw * strafeInput) * effectiveSpeed * deltaSeconds
-        val worldDz = (-cosYaw * forwardInput + sinYaw * strafeInput) * effectiveSpeed * deltaSeconds
+        // Физика шага: скорость с инерцией — герой разгоняется и тормозит,
+        // а не телепортируется за вводом джойстика (как в обычных играх).
+        val targetVx = (sinYaw * forwardInput + cosYaw * strafeInput) * effectiveSpeed
+        val targetVz = (-cosYaw * forwardInput + sinYaw * strafeInput) * effectiveSpeed
+        val resp = (1f - exp(-9f * deltaSeconds)).coerceIn(0f, 1f)
+        var velX = run.velX + (targetVx - run.velX) * resp
+        var velZ = run.velZ + (targetVz - run.velZ) * resp
+        if (abs(velX) < 0.02f) velX = 0f
+        if (abs(velZ) < 0.02f) velZ = 0f
 
-        val rawX = run.playerX + worldDx
-        val rawZ = run.playerZ + worldDz
+        val rawX = run.playerX + velX * deltaSeconds
+        val rawZ = run.playerZ + velZ * deltaSeconds
         val bound = GameRunState.WORLD_HALF_BOUND
         val hitBoundary = rawX < -bound || rawX > bound || rawZ < -bound || rawZ > bound
 
@@ -517,6 +580,10 @@ object SurvivalEngine {
         val finalZ = resolved[1]
         val groundY = WorldPopulator.worldHeight(finalX, finalZ)
 
+        if (hitBoundary) {
+            velX = 0f
+            velZ = 0f
+        }
         val msg = if (hitBoundary) {
             "Граница мира: впереди заснеженный хребет."
         } else {
@@ -526,6 +593,8 @@ object SurvivalEngine {
             playerX = finalX,
             playerY = groundY,
             playerZ = finalZ,
+            velX = velX,
+            velZ = velZ,
             // В едином мире район определяется позицией игрока
             currentLocation = com.ayaks.winterforest.domain.world.WorldRegions.regionAt(finalX, finalZ),
             lastStatusMessage = msg
@@ -547,6 +616,32 @@ object SurvivalEngine {
     fun equipTool(run: GameRunState, tool: EquippedTool): GameRunState {
         val msg = "В руках: ${tool.titleRu}."
         return run.copy(equippedTool = tool, lastStatusMessage = msg)
+    }
+
+    /**
+     * Экипировать инструмент ИЗ РЮКЗАКА (тап по записи хотбара или кнопка
+     * «Взять в руки»): инструмент должен лежать в [Inventory.tools].
+     * NONE — убрать инструмент и остаться с пустыми руками.
+     */
+    fun equipToolItem(run: GameRunState, base: BaseProgress, tool: EquippedTool): EngineStepOutcome {
+        if (run.phase == RunPhase.DEAD) {
+            return EngineStepOutcome(run, base, false, "Персонаж мёртв.")
+        }
+        if (tool == EquippedTool.NONE) {
+            val msg = "Инструмент убран в рюкзак: пустые руки."
+            return EngineStepOutcome(
+                run.copy(equippedTool = EquippedTool.NONE, lastStatusMessage = msg), base, true, msg
+            )
+        }
+        if (tool == EquippedTool.TORCH) {
+            return igniteResinTorch(run, base)
+        }
+        if (!run.inventory.hasTool(tool)) {
+            val msg = "В рюкзаке нет «${tool.titleRu}» — сначала соберите его на верстаке."
+            return EngineStepOutcome(run.copy(lastStatusMessage = msg), base, false, msg)
+        }
+        val msg = "В руках: ${tool.titleRu}."
+        return EngineStepOutcome(run.copy(equippedTool = tool, lastStatusMessage = msg), base, true, msg)
     }
 
     fun setSprinting(run: GameRunState, sprinting: Boolean): GameRunState {
@@ -952,6 +1047,19 @@ object SurvivalEngine {
         }
 
         val added = addResult.addedAmount
+        // Смола больше не лежит на земле отдельным ресурсом: она автоматически
+        // выступает на срубленном дереве (ель или дуб) и падает в рюкзак.
+        var inventoryAfter = addResult.inventory
+        var resinNote = ""
+        if (resType == ResourceType.WOOD &&
+            (target.kind == WorldObjectKind.PINE_TREE || target.kind == WorldObjectKind.OAK_TREE)
+        ) {
+            val resinAdd = inventoryAfter.tryAddResource(ResourceType.RESIN, 1)
+            if (!resinAdd.isFullBlocked) {
+                inventoryAfter = resinAdd.inventory
+                resinNote = ", Смола +1"
+            }
+        }
         val updatedNodes = replaceNode(
             run.nodesByLocation,
             run.currentLocation,
@@ -972,10 +1080,10 @@ object SurvivalEngine {
         // §7.11: мягкого штрафа «руками 1 ед.» больше нет — профильные узлы
         // без инструмента просто не добываются (жёсткий гейт выше)
         val toolNote = ""
-        val msg = "Собрано: ${resType.titleRu} +$added (+$xpEarned опыта)$toolNote"
+        val msg = "Собрано: ${resType.titleRu} +$added$resinNote (+$xpEarned опыта)$toolNote"
 
         val updatedRun = run.copy(
-            inventory = addResult.inventory,
+            inventory = inventoryAfter,
             nodesByLocation = updatedNodes,
             totalResourcesGathered = run.totalResourcesGathered + added,
             runWoodGathered = run.runWoodGathered + woodDelta,
@@ -1428,16 +1536,22 @@ object SurvivalEngine {
         return when (recipe) {
             // Первые инструменты забега: герой начинает с пустыми руками (§7.11)
             WorkbenchRecipe.CRAFT_PRIMITIVE_AXE -> {
-                val msg = "Собран Примитивный топор: деревья и валежник теперь поддаются!"
+                val msg = "Собран Примитивный топор — он лёг в рюкзак к остальным предметам. Взять в руки: рюкзак → «Взять в руки»."
                 EngineStepOutcome(
-                    run.copy(inventory = invAfterCost, equippedTool = EquippedTool.AXE, lastStatusMessage = msg),
+                    run.copy(
+                        inventory = invAfterCost.grantTool(EquippedTool.AXE),
+                        lastStatusMessage = msg
+                    ),
                     baseAfterCost, true, msg
                 )
             }
             WorkbenchRecipe.CRAFT_PRIMITIVE_PICKAXE -> {
-                val msg = "Собрана Примитивная кирка: камень, уголь и руда теперь поддаются!"
+                val msg = "Собрана Примитивная кирка — она легла в рюкзак к остальным предметам. Взять в руки: рюкзак → «Взять в руки»."
                 EngineStepOutcome(
-                    run.copy(inventory = invAfterCost, equippedTool = EquippedTool.PICKAXE, lastStatusMessage = msg),
+                    run.copy(
+                        inventory = invAfterCost.grantTool(EquippedTool.PICKAXE),
+                        lastStatusMessage = msg
+                    ),
                     baseAfterCost, true, msg
                 )
             }
@@ -1479,11 +1593,10 @@ object SurvivalEngine {
             }
             WorkbenchRecipe.CRAFT_HUNTING_SPEAR -> {
                 val (nextXp, nextLvl) = applyXpGain(run.xp, run.level, 30)
-                val msg = "Выковано «Копьё следопыта»: урон и добыча на охоте усилены навсегда!"
+                val msg = "Выковано «Копьё следопыта»: копьё легло в рюкзак к остальным предметам, урон и добыча на охоте усилены!"
                 EngineStepOutcome(
                     run.copy(
-                        inventory = invAfterCost,
-                        equippedTool = EquippedTool.SPEAR,
+                        inventory = invAfterCost.grantTool(EquippedTool.SPEAR),
                         xp = nextXp,
                         level = nextLvl,
                         lastStatusMessage = msg
@@ -1540,9 +1653,11 @@ object SurvivalEngine {
             WorkbenchRecipe.CRAFT_IRON_AXE -> {
                 val (nextXp, nextLvl) = applyXpGain(run.xp, run.level, 32)
                 val msg = "Выкован «Железный топор»: +1 дерева за удар навсегда!"
+                val invWithAxe = if (invAfterCost.hasTool(EquippedTool.AXE)) invAfterCost
+                else invAfterCost.grantTool(EquippedTool.AXE)
                 EngineStepOutcome(
                     run.copy(
-                        inventory = invAfterCost,
+                        inventory = invWithAxe,
                         xp = nextXp,
                         level = nextLvl,
                         lastStatusMessage = msg
@@ -1555,9 +1670,11 @@ object SurvivalEngine {
             WorkbenchRecipe.CRAFT_IRON_PICKAXE -> {
                 val (nextXp, nextLvl) = applyXpGain(run.xp, run.level, 32)
                 val msg = "Выкована «Железная кирка»: +1 руды и камня за добычу навсегда!"
+                val invWithPick = if (invAfterCost.hasTool(EquippedTool.PICKAXE)) invAfterCost
+                else invAfterCost.grantTool(EquippedTool.PICKAXE)
                 EngineStepOutcome(
                     run.copy(
-                        inventory = invAfterCost,
+                        inventory = invWithPick,
                         xp = nextXp,
                         level = nextLvl,
                         lastStatusMessage = msg

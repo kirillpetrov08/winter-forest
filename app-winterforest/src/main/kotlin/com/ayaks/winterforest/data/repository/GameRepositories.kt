@@ -96,6 +96,14 @@ class RoomGameRepository(
         settingsDataStore.setGraphicsQuality(quality)
     }
 
+    override suspend fun updateFovDegrees(fov: Int) {
+        settingsDataStore.setFovDegrees(fov)
+    }
+
+    override suspend fun updateDrawDistanceScale(scale: Float) {
+        settingsDataStore.setDrawDistanceScale(scale)
+    }
+
     override suspend fun updateShowFpsCounter(enabled: Boolean) {
         settingsDataStore.setShowFpsCounter(enabled)
     }
@@ -180,6 +188,14 @@ class FileBackedGameRepository(private val rootDir: File) : GameRepository {
 
     override suspend fun updateGraphicsQuality(quality: GraphicsQuality) {
         settingsState.value = settingsState.value.copy(graphicsQuality = quality)
+    }
+
+    override suspend fun updateFovDegrees(fov: Int) {
+        settingsState.value = settingsState.value.copy(fovDegrees = fov.coerceIn(45, 85))
+    }
+
+    override suspend fun updateDrawDistanceScale(scale: Float) {
+        settingsState.value = settingsState.value.copy(drawDistanceScale = scale.coerceIn(0.6f, 1.5f))
     }
 
     override suspend fun updateShowFpsCounter(enabled: Boolean) {

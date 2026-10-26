@@ -81,24 +81,34 @@ class HandProgressionTest {
 
         val axe = SurvivalEngine.craftAtWorkbench(stocked, base0, WorkbenchRecipe.CRAFT_PRIMITIVE_AXE)
         assertTrue(axe.actionSucceeded)
-        assertEquals(EquippedTool.AXE, axe.run.equippedTool)
+        // крафт больше не берёт инструмент в руки автоматически: предмет лёг в рюкзак
+        assertEquals(EquippedTool.NONE, axe.run.equippedTool)
+        assertTrue("топор не лёг в рюкзак предметом", axe.run.inventory.hasTool(EquippedTool.AXE))
+        val tookAxe = SurvivalEngine.equipToolItem(axe.run, axe.base, EquippedTool.AXE)
+        assertTrue(tookAxe.actionSucceeded)
+        assertEquals(EquippedTool.AXE, tookAxe.run.equippedTool)
 
         // с топором большое дерево уже поддаётся
-        val pine = axe.run.currentLocationNodes().first { it.kind == WorldObjectKind.PINE_TREE }
-        val chop = SurvivalEngine.gatherNearest(axe.run.copy(playerX = pine.x, playerZ = pine.z), axe.base)
+        val pine = tookAxe.run.currentLocationNodes().first { it.kind == WorldObjectKind.PINE_TREE }
+        val chop = SurvivalEngine.gatherNearest(tookAxe.run.copy(playerX = pine.x, playerZ = pine.z), tookAxe.base)
         assertTrue(chop.actionSucceeded)
 
         // камень по-прежнему закрыт до кирки
-        val outcrop = axe.run.currentLocationNodes().first { it.kind == WorldObjectKind.STONE_OUTCROP }
-        val bare = SurvivalEngine.gatherNearest(axe.run.copy(playerX = outcrop.x, playerZ = outcrop.z), axe.base)
+        val outcrop = tookAxe.run.currentLocationNodes().first { it.kind == WorldObjectKind.STONE_OUTCROP }
+        val bare = SurvivalEngine.gatherNearest(tookAxe.run.copy(playerX = outcrop.x, playerZ = outcrop.z), tookAxe.base)
         assertFalse(bare.actionSucceeded)
 
         val pick = SurvivalEngine.craftAtWorkbench(chop.run, chop.base, WorkbenchRecipe.CRAFT_PRIMITIVE_PICKAXE)
         assertTrue(pick.actionSucceeded)
-        assertEquals(EquippedTool.PICKAXE, pick.run.equippedTool)
+        // крафт не трогает экипировку: в руках остаётся топор, кирка легла в рюкзак
+        assertEquals(EquippedTool.AXE, pick.run.equippedTool)
+        assertTrue("кирка не легла в рюкзак предметом", pick.run.inventory.hasTool(EquippedTool.PICKAXE))
+        val tookPick = SurvivalEngine.equipToolItem(pick.run, pick.base, EquippedTool.PICKAXE)
+        assertTrue(tookPick.actionSucceeded)
+        assertEquals(EquippedTool.PICKAXE, tookPick.run.equippedTool)
         val dig = SurvivalEngine.gatherNearest(
-            pick.run.copy(playerX = outcrop.x, playerZ = outcrop.z),
-            pick.base,
+            tookPick.run.copy(playerX = outcrop.x, playerZ = outcrop.z),
+            tookPick.base,
             withToolStrikeBonus = true
         )
         assertTrue(dig.actionSucceeded)

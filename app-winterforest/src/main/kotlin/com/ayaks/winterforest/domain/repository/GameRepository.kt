@@ -9,6 +9,10 @@ data class UserSettings(
     val soundVolume: Float = 0.80f,
     val lookSensitivity: Float = 1.0f,
     val graphicsQuality: GraphicsQuality = GraphicsQuality.HIGH,
+    /** Радиус обзора камеры (вертикальный FOV, градусы). */
+    val fovDegrees: Int = 62,
+    /** Дальность прорисовки: множитель кулл-дистанции (0.6–1.5). */
+    val drawDistanceScale: Float = 1.0f,
     val showFpsCounter: Boolean = false,
     val autoSprintEnabled: Boolean = true,
     val gdprUserConsent: Boolean = false,
@@ -40,6 +44,8 @@ interface GameRepository {
     suspend fun updateGdprConsent(granted: Boolean)
 
     suspend fun updateGraphicsQuality(quality: GraphicsQuality) {}
+    suspend fun updateFovDegrees(fov: Int) {}
+    suspend fun updateDrawDistanceScale(scale: Float) {}
     suspend fun updateShowFpsCounter(enabled: Boolean) {}
     suspend fun updateAutoSprint(enabled: Boolean) {}
 }

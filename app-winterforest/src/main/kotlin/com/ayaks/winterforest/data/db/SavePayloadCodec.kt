@@ -1,6 +1,7 @@
 package com.ayaks.winterforest.data.db
 
 import com.ayaks.winterforest.domain.model.BaseProgress
+import com.ayaks.winterforest.domain.model.EquippedTool
 import com.ayaks.winterforest.domain.model.GameRunState
 import java.util.zip.CRC32
 import kotlinx.serialization.Serializable
@@ -112,11 +113,21 @@ object SavePayloadCodec {
             // (поля order нет → тождественная) или быть побитой руками/багом
             // (дубли, выход за границы) — нормализуем, не считая сейв повреждённым.
             val norm = decoded.inventory.normalizedOrder()
-            if (decoded.inventory.order != norm) {
+            var fixed = if (decoded.inventory.order != norm) {
                 decoded.copy(inventory = decoded.inventory.copy(order = norm))
             } else {
                 decoded
             }
+            // Миграция инструментов: в старом сейве инструмент жил только в
+            // equippedTool — выдаём его предметом в рюкзак, чтобы экипировка
+            // из хотбара работала и после обновления.
+            val equipped = fixed.equippedTool
+            if (equipped != EquippedTool.NONE && equipped != EquippedTool.TORCH &&
+                !fixed.inventory.hasTool(equipped)
+            ) {
+                fixed = fixed.copy(inventory = fixed.inventory.grantTool(equipped))
+            }
+            fixed
         } catch (t: Throwable) {
             throw CorruptedSaveException("Ошибка чтения JSON сохранения забега: ${t.message}", t)
         }

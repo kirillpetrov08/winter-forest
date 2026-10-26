@@ -76,11 +76,11 @@ enum class LocationId(
             fogNear = 12f,
             fogFar = 42f
         ),
+        // Смола убрана из весов: она автоматически выпадает при срубе дерева
         resourceWeights = mapOf(
-            ResourceType.WOOD to 1.85f,
-            ResourceType.RESIN to 1.25f,
-            ResourceType.BERRIES to 0.65f,
-            ResourceType.STONE to 0.45f
+            ResourceType.WOOD to 2.6f,
+            ResourceType.BERRIES to 0.75f,
+            ResourceType.STONE to 0.5f
         )
     ),
     FROZEN_LAKE(

@@ -16,12 +16,14 @@ object HudZones {
     /** Уже этой ширины хватает только компактному профилю HUD. */
     const val COMPACT_WIDTH_DP = 760f
 
-    /** Радар рисуем только когда для него есть место справа от меню. */
-    const val RADAR_MIN_WIDTH_DP = 860f
+    /** Миникарта живёт в правом верхнем углу на ЛЮБОЙ ширине (запрос пользователя). */
+    const val RADAR_MIN_WIDTH_DP = 0f
 
-    // --- верхняя строка: статы | таймер | меню(+радар) ---
-    const val STATS_WIDTH_DP = 268f
-    const val COMPACT_STATS_WIDTH_DP = 236f
+    // --- верхняя строка: инфо-чип | таймер | меню+миникарта ---
+    // Показатели жизни переехали вниз (компактная полоска над хотбаром),
+    // сверху остался только чип «район • день • погода» — минимальной ширины.
+    const val STATS_WIDTH_DP = 172f
+    const val COMPACT_STATS_WIDTH_DP = 140f
     const val TIMER_WIDTH_DP = 210f
     const val COMPACT_TIMER_WIDTH_DP = 190f
     const val MENU_WIDTH_DP = 208f
@@ -31,17 +33,17 @@ object HudZones {
     // --- нижняя строка: джойстик | хотбар | действия ---
     const val JOYSTICK_DP = 148
     const val COMPACT_JOYSTICK_DP = 120
-    const val HOTBAR_SLOT_DP = 56
-    const val COMPACT_HOTBAR_SLOT_DP = 46
+    const val HOTBAR_SLOT_DP = 50
+    const val COMPACT_HOTBAR_SLOT_DP = 42
     const val ACTIONS_WIDTH_DP = 150f
     const val COMPACT_ACTIONS_WIDTH_DP = 132f
 
-    /** Горизонтальные отступы окна сверху и снизу (10 dp × 2). */
-    const val SIDE_PADDING_DP = 20f
+    /** Горизонтальные отступы окна сверху и снизу (6 dp × 2 — HUD прижат к краям). */
+    const val SIDE_PADDING_DP = 12f
 
     fun isCompact(widthDp: Float): Boolean = widthDp < COMPACT_WIDTH_DP
 
-    fun radarVisible(widthDp: Float): Boolean = widthDp >= RADAR_MIN_WIDTH_DP
+    fun radarVisible(widthDp: Float): Boolean = widthDp >= RADAR_MIN_WIDTH_DP // всегда true
 
     fun statsWidth(widthDp: Float): Float =
         if (isCompact(widthDp)) COMPACT_STATS_WIDTH_DP else STATS_WIDTH_DP
@@ -50,7 +52,7 @@ object HudZones {
         if (isCompact(widthDp)) COMPACT_TIMER_WIDTH_DP else TIMER_WIDTH_DP
 
     fun menuWidth(widthDp: Float): Float =
-        if (isCompact(widthDp)) COMPACT_MENU_WIDTH_DP else MENU_WIDTH_DP +
+        (if (isCompact(widthDp)) COMPACT_MENU_WIDTH_DP else MENU_WIDTH_DP) +
             if (radarVisible(widthDp)) RADAR_WIDTH_DP else 0f
 
     fun joystickWidth(widthDp: Float): Float =

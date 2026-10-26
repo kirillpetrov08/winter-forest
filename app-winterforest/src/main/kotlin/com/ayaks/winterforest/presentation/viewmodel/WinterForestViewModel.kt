@@ -38,6 +38,9 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
+/** Кулдаун единственной кнопки «Восстановить ресурсы» — 5 минут. */
+const val RESTORE_RESOURCES_COOLDOWN_SEC = 300f
+
 /** Пеший переход между соседними локациями (идём, а не телепортируемся). */
 data class TravelJourney(
     val destination: com.ayaks.winterforest.domain.model.LocationId,
@@ -289,11 +292,8 @@ class WinterForestViewModel(
         }
     }
 
-    fun onEquipTool(tool: EquippedTool) {
-        _uiState.update { st ->
-            val run = st.activeRun ?: return@update st
-            st.copy(activeRun = SurvivalEngine.equipTool(run, tool))
-        }
+    fun onEquipTool(tool: EquippedTool) = applyEngineAction(cooldownId = "equip", cooldownSec = 0.25f) { run, base ->
+        SurvivalEngine.equipToolItem(run, base, tool)
     }
 
     fun onPlaceFieldCampfire() = applyEngineAction(cooldownId = "place_campfire", cooldownSec = 3.0f) { run, base ->
@@ -319,8 +319,12 @@ class WinterForestViewModel(
         persistCheckpointAsync()
     }
 
-    /** Кнопка «Восстановить ресурсы»: сбрасывает перезарядку всех узлов текущей локации. */
+    /**
+     * ЕДИНСТВЕННАЯ кнопка «Восстановить ресурсы»: сбрасывает перезарядку всех
+     * узлов текущей локации и уходит на 5-минутный кулдаун.
+     */
     fun onRestoreResources() {
+        if ((_uiState.value.cooldowns["restore"] ?: 0f) > 0f) return
         _uiState.update { st ->
             val run = st.activeRun ?: return@update st
             val updatedNodes = run.nodesByLocation.mapValues { (_, nodes) ->
@@ -330,9 +334,24 @@ class WinterForestViewModel(
                 activeRun = run.copy(
                     nodesByLocation = updatedNodes,
                     lastStatusMessage = "Ресурсы на карте восстановлены."
-                )
+                ),
+                cooldowns = st.cooldowns + ("restore" to RESTORE_RESOURCES_COOLDOWN_SEC)
             )
         }
+    }
+
+    /** Настройка «Радиус обзора» (вертикальный FOV камеры, градусы). */
+    fun onFovDegreesChanged(fov: Int) {
+        val clamped = fov.coerceIn(45, 85)
+        _uiState.update { it.copy(settings = it.settings.copy(fovDegrees = clamped)) }
+        vmScope.launch { repository.updateFovDegrees(clamped) }
+    }
+
+    /** Настройка «Дальность прорисовки» (множитель кулл-дистанции). */
+    fun onDrawDistanceScaleChanged(scale: Float) {
+        val clamped = scale.coerceIn(0.6f, 1.5f)
+        _uiState.update { it.copy(settings = it.settings.copy(drawDistanceScale = clamped)) }
+        vmScope.launch { repository.updateDrawDistanceScale(clamped) }
     }
 
     fun onFpsMeasured(fps: Int) {
