@@ -253,6 +253,7 @@ class ForestGlRenderer(
     // Уровень 2: Интерактивные ресурсные узлы (перестраиваются ТОЛЬКО при сборе/респавне узла!)
     private var cachedNodeStateHash: Int = Int.MIN_VALUE
     private val nodeBatches = EnumMap<ProceduralTextureId, GlVbo>(ProceduralTextureId::class.java)
+    private val dropBatches = HashMap<ProceduralTextureId, GlVbo>()
 
     // Уровень 2.5: Импортированные 3D-модели (Poly Haven: камни, кострище, топор, ветви, растение, деревья)
     private val assetMeshCache = HashMap<String, FloatArray>()
@@ -2308,7 +2309,6 @@ class ForestGlRenderer(
     private val dropBuilders = EnumMap<ProceduralTextureId, MeshBuilder>(ProceduralTextureId::class.java).also { m ->
         for (mat in ProceduralTextureId.entries) m[mat] = MeshBuilder(2048)
     }
-    private val dropBatches = HashMap<ProceduralTextureId, GlVbo>()
     private var cachedDropSig = Int.MIN_VALUE
     private var nodeCacheLoc: com.ayaks.winterforest.domain.model.LocationId? = null
     private var nodeCacheQuality: GraphicsQuality? = null
