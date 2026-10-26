@@ -31,14 +31,17 @@ class HudZonesTest {
     }
 
     @Test
-    fun `compact profile engages below 760 dp and radar needs 860 dp`() {
+    fun `compact profile engages below 760 dp and minimap is always visible`() {
         assertTrue(HudZones.isCompact(640f))
         assertTrue(HudZones.isCompact(759f))
         assertFalse(HudZones.isCompact(760f))
-        assertFalse(HudZones.radarVisible(844f))
-        assertTrue(HudZones.radarVisible(860f))
-        // радар добавляет ширину меню только там, где он реально виден
-        assertTrue(HudZones.menuWidth(844f) < HudZones.menuWidth(860f))
+        // миникарта в правом верхнем углу на любой ширине
+        for (w in widths) {
+            assertTrue("миникарта пропала на ${w.toInt()} dp", HudZones.radarVisible(w))
+        }
+        // ширина меню включает миникарту на всех размерах
+        assertTrue(HudZones.menuWidth(640f) >= HudZones.COMPACT_MENU_WIDTH_DP + HudZones.RADAR_WIDTH_DP)
+        assertTrue(HudZones.menuWidth(1280f) >= HudZones.MENU_WIDTH_DP + HudZones.RADAR_WIDTH_DP)
     }
 
     @Test

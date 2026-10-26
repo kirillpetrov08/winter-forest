@@ -1,6 +1,7 @@
 package com.ayaks.winterforest.presentation.ui.screens
 
 import android.app.Activity
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -53,6 +54,8 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.drawscope.Stroke
+import com.ayaks.winterforest.domain.world.WorldRegions
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
@@ -66,6 +69,7 @@ import com.ayaks.winterforest.presentation.ui.components.toolIcon
 import com.ayaks.winterforest.presentation.viewmodel.RESTORE_RESOURCES_COOLDOWN_SEC
 import com.ayaks.winterforest.domain.model.BaseProgress
 import com.ayaks.winterforest.domain.model.EquippedTool
+import com.ayaks.winterforest.domain.model.GameRunState
 import com.ayaks.winterforest.domain.model.HotbarEntry
 import com.ayaks.winterforest.domain.model.BaseUpgradeType
 import com.ayaks.winterforest.domain.model.GraphicsQuality
@@ -351,6 +355,9 @@ fun GameScreen(
         val actionsWidth =
             if (compact) HudZones.COMPACT_ACTIONS_WIDTH_DP.dp else HudZones.ACTIONS_WIDTH_DP.dp
         val widthDp = maxWidth.value
+        var showWorldMap by remember { mutableStateOf(false) }
+        val hasOldMap = run.inventory.hasSpecial(SpecialLootId.OLD_MAP) ||
+            SpecialLootId.OLD_MAP in state.baseProgress.persistentSpecialLoot
 
         // 1. Живая 3D-сцена уже отрисовывается корневым PersistentForestScene —
         // здесь только прозрачный слой свайп-обзора камеры поверх неё.
@@ -380,55 +387,36 @@ fun GameScreen(
                 .fillMaxWidth()
                 .align(Alignment.TopCenter)
                 .displayCutoutPadding()
-                .padding(horizontal = 10.dp)
-                .padding(top = 8.dp),
+                .padding(horizontal = 6.dp)
+                .padding(top = 4.dp),
             verticalAlignment = Alignment.Top
         ) {
-            // 3a. Панель показателей и текущей цели дня (не закрывает обзор)
+            // 3a. Минимальный инфо-чип у края: показатели жизни переехали вниз,
+            // тонкой полосой вплотную над хотбаром (запрос пользователя).
             Column(
                 modifier = Modifier
                     .width(statsWidth)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(Color(0xBA091520))
-                    .border(1.dp, Color(0x327CC6FE), RoundedCornerShape(12.dp))
-                    .padding(horizontal = 10.dp, vertical = 7.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(Color(0xA8091520))
+                    .border(1.dp, Color(0x327CC6FE), RoundedCornerShape(10.dp))
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                verticalArrangement = Arrangement.spacedBy(1.dp)
             ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = run.currentLocation.titleRu,
-                        color = SnowCrispText,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = if (compact) 12.sp else 13.sp
-                    )
-                    val phaseLabel = if (run.isNight) "Полярная ночь" else "День"
-                    val weatherLabel = if (run.isSnowing) "Метель" else "Мороз"
-                    Text(
-                        text = "Д.${run.dayNumberDisplay} • $phaseLabel • $weatherLabel",
-                        color = IceCyanPrimary,
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                }
-
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    SurvivalStatBar("Здоровье", run.health, run.maxHealth, HealthBarColor, Modifier.weight(1f))
-                    SurvivalStatBar("Сытость", run.hunger, 100f, HungerBarColor, Modifier.weight(1f))
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    SurvivalStatBar("Тепло", run.warmth, 100f, WarmthBarColor, Modifier.weight(1f))
-                    SurvivalStatBar("Силы", run.stamina, 100f, StaminaBarColor, Modifier.weight(1f))
-                }
-                SurvivalStatBar(
-                    "Опыт (Ур. ${run.level})",
-                    run.xp.toFloat(),
-                    run.xpForNextLevel.toFloat(),
-                    XpBarColor,
-                    Modifier.fillMaxWidth()
+                Text(
+                    text = run.currentLocation.titleRu,
+                    color = SnowCrispText,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = if (compact) 11.sp else 12.sp,
+                    maxLines = 1
+                )
+                val phaseLabel = if (run.isNight) "Ночь" else "День"
+                val weatherLabel = if (run.isSnowing) "Метель" else "Мороз"
+                Text(
+                    text = "Д.${run.dayNumberDisplay} • $phaseLabel • $weatherLabel • Ур.${run.level}",
+                    color = IceCyanPrimary,
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1
                 )
             }
 
@@ -521,9 +509,12 @@ fun GameScreen(
                     }
                 }
 
-                if (HudZones.radarVisible(widthDp)) {
-                    MiniRadarHud(run = run)
-                }
+                // Миникарта в правом верхнем углу на любой ширине; тап по ней
+                // открывает полную карту мира, если найдена реликвия «Старая карта».
+                MiniRadarHud(
+                    run = run,
+                    onMapClick = { if (hasOldMap) showWorldMap = true }
+                )
             }
         }
 
@@ -548,8 +539,8 @@ fun GameScreen(
                 .fillMaxWidth()
                 .align(Alignment.BottomCenter)
                 .displayCutoutPadding()
-                .padding(horizontal = 10.dp)
-                .padding(bottom = 10.dp),
+                .padding(horizontal = 6.dp)
+                .padding(bottom = 4.dp),
             verticalAlignment = Alignment.Bottom
         ) {
             VirtualJoystick(
@@ -559,11 +550,19 @@ fun GameScreen(
 
             Spacer(Modifier.weight(1f))
 
-            QuickEquipmentHotbar(
-                run = run,
-                slotSizeDp = slotSize,
-                onUseSlot = { viewModel.onUseHotbar(it) }
-            )
+            // Показатели жизни минимального размера — вплотную над хотбаром,
+            // сам хотбар ужат (слоты 50/42 dp).
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(3.dp)
+            ) {
+                VitalsMiniStrip(run = run)
+                QuickEquipmentHotbar(
+                    run = run,
+                    slotSizeDp = slotSize,
+                    onUseSlot = { viewModel.onUseHotbar(it) }
+                )
+            }
 
             Spacer(Modifier.weight(1f))
 
@@ -625,6 +624,145 @@ fun GameScreen(
                     modifier = Modifier.width(actionsWidth).testTag("btn_restore_resources")
                 )
             }
+        }
+
+        // Полная карта мира — по тапу на миникарту при найденной «Старой карте»
+        if (showWorldMap) {
+            WorldMapOverlay(run = run, onClose = { showWorldMap = false })
+        }
+    }
+}
+
+/**
+ * Полная карта мира «Старая карта»: пять районов единого мира, тропы между
+ * ними, отметка игрока. Открывается тапом по миникарте в правом верхнем углу.
+ */
+@Composable
+private fun WorldMapOverlay(
+    run: GameRunState,
+    onClose: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xEE050C13))
+            .clickable(onClick = onClose)
+    ) {
+        BoxWithConstraints(modifier = Modifier.fillMaxSize().padding(28.dp)) {
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                val half = GameRunState.WORLD_HALF_BOUND
+                fun wx(x: Float) = (x + half) / (2f * half) * size.width
+                fun wz(z: Float) = (z + half) / (2f * half) * size.height
+
+                // Тропы от базовой поляны к соседним районам
+                val baseR = WorldRegions.REGIONS.first { it.id == LocationId.BASE_CLEARING }
+                for (r in WorldRegions.REGIONS) {
+                    if (r.id == LocationId.BASE_CLEARING) continue
+                    drawLine(
+                        color = Color(0x667CC6FE),
+                        start = Offset(wx(baseR.cx), wz(baseR.cz)),
+                        end = Offset(wx(r.cx), wz(r.cz)),
+                        strokeWidth = 3f
+                    )
+                }
+                // Районы: посещённые подсвечены, остальные — тусклые
+                for (r in WorldRegions.REGIONS) {
+                    val visited = r.id in run.visitedLocations
+                    val c = Offset(wx(r.cx), wz(r.cz))
+                    drawCircle(
+                        color = if (visited) Color(0x387CC6FE) else Color(0x18FFFFFF),
+                        radius = size.minDimension * 0.10f,
+                        center = c
+                    )
+                    drawCircle(
+                        color = if (visited) IceCyanPrimary else Color(0x55FFFFFF),
+                        radius = size.minDimension * 0.10f,
+                        center = c,
+                        style = Stroke(width = 3f)
+                    )
+                }
+                // Игрок
+                val pc = Offset(wx(run.playerX), wz(run.playerZ))
+                drawCircle(color = HearthAmberAccent, radius = 10f, center = pc)
+                drawCircle(color = Color.White, radius = 4f, center = pc)
+            }
+            for (r in WorldRegions.REGIONS) {
+                val fx = (r.cx + GameRunState.WORLD_HALF_BOUND) / (2f * GameRunState.WORLD_HALF_BOUND)
+                val fz = (r.cz + GameRunState.WORLD_HALF_BOUND) / (2f * GameRunState.WORLD_HALF_BOUND)
+                val visited = r.id in run.visitedLocations
+                Text(
+                    text = if (visited) r.id.titleRu else "• • •",
+                    color = if (visited) SnowCrispText else MistMutedText,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .offset(
+                            x = (fx * maxWidth.value).dp - 46.dp,
+                            y = (fz * maxHeight.value).dp + 16.dp
+                        )
+                )
+            }
+        }
+        Text(
+            text = "Карта мира • «Старая карта»",
+            color = IceCyanPrimary,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .padding(14.dp)
+        )
+        Text(
+            text = "✕",
+            color = SnowCrispText,
+            fontSize = 20.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(12.dp)
+        )
+    }
+}
+
+/** Минимальные показатели жизни: четыре тонких полоски вплотную над хотбаром. */
+@Composable
+private fun VitalsMiniStrip(run: GameRunState) {
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(7.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .clip(RoundedCornerShape(9.dp))
+            .background(Color(0xA8091520))
+            .border(1.dp, Color(0x2A7CC6FE), RoundedCornerShape(9.dp))
+            .padding(horizontal = 9.dp, vertical = 4.dp)
+    ) {
+        MiniStatBar("❤", run.health, run.maxHealth, HealthBarColor)
+        MiniStatBar("🍖", run.hunger, 100f, HungerBarColor)
+        MiniStatBar("🔥", run.warmth, 100f, WarmthBarColor)
+        MiniStatBar("⚡", run.stamina, 100f, StaminaBarColor)
+    }
+}
+
+@Composable
+private fun MiniStatBar(icon: String, value: Float, max: Float, color: Color) {
+    val frac = (value / max.coerceAtLeast(1f)).coerceIn(0f, 1f)
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(icon, fontSize = 9.sp)
+        Box(
+            modifier = Modifier
+                .width(42.dp)
+                .height(4.dp)
+                .clip(RoundedCornerShape(2.dp))
+                .background(Color(0x36FFFFFF))
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(frac)
+                    .fillMaxHeight()
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(color)
+            )
         }
     }
 }

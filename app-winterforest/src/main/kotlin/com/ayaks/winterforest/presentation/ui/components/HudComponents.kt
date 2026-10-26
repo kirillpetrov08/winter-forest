@@ -191,7 +191,8 @@ fun VirtualJoystick(
 @Composable
 fun MiniRadarHud(
     run: GameRunState,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onMapClick: (() -> Unit)? = null
 ) {
     val yawRad = Math.toRadians(run.yawDeg.toDouble()).toFloat()
     val cardinal = when (((run.yawDeg % 360f + 360f) % 360f).roundToInt()) {
@@ -207,6 +208,7 @@ fun MiniRadarHud(
             .clip(RoundedCornerShape(14.dp))
             .background(Color(0xBA091520))
             .border(1.dp, Color(0x387CC6FE), RoundedCornerShape(14.dp))
+            .then(if (onMapClick != null) Modifier.clickable(onClick = onMapClick) else Modifier)
             .padding(6.dp)
     ) {
         Box(contentAlignment = Alignment.TopCenter, modifier = Modifier.size(76.dp)) {
