@@ -110,7 +110,10 @@ class ToolItemsTest {
     @Test
     fun `legacy save with equipped tool migrates it into inventory`() {
         val run = stockedRun().copy(equippedTool = EquippedTool.PICKAXE)
-        val body = Json.encodeToString(GameRunState.serializer(), run)
+        // encodeDefaults = true: поле tools (пустое по умолчанию) должно попасть
+        // в JSON, чтобы его вырезание честно имитировало старый сейв.
+        val body = Json { encodeDefaults = true }
+            .encodeToString(GameRunState.serializer(), run)
         val legacy = body.replace(Regex("\"tools\":\\{[^}]*\\},?"), "")
         assertTrue("поле tools не вырезалось — тест не проверяет старый сейв", legacy != body)
         val crc = SavePayloadCodec.computeCrc32(legacy)
