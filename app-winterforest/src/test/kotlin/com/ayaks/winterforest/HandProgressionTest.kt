@@ -100,7 +100,8 @@ class HandProgressionTest {
 
         val pick = SurvivalEngine.craftAtWorkbench(chop.run, chop.base, WorkbenchRecipe.CRAFT_PRIMITIVE_PICKAXE)
         assertTrue(pick.actionSucceeded)
-        assertEquals(EquippedTool.NONE, pick.run.equippedTool)
+        // крафт не трогает экипировку: в руках остаётся топор, кирка легла в рюкзак
+        assertEquals(EquippedTool.AXE, pick.run.equippedTool)
         assertTrue("кирка не легла в рюкзак предметом", pick.run.inventory.hasTool(EquippedTool.PICKAXE))
         val tookPick = SurvivalEngine.equipToolItem(pick.run, pick.base, EquippedTool.PICKAXE)
         assertTrue(tookPick.actionSucceeded)
