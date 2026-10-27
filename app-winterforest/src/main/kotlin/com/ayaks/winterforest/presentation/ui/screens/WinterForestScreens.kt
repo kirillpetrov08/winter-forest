@@ -647,7 +647,7 @@ fun GameScreen(
                 // действий под большим пальцем; кулдаун — 5 минут (видно прогресс).
                 com.ayaks.winterforest.presentation.ui.components.CooldownButton(
                     label = if (compact) "Восстановить" else "Восстановить ресурсы",
-                    cooldownRemainingSec = state.cooldowns["restore"] ?: 0f,
+                    cooldownRemainingSec = state.activeRun?.restoreCooldownRemainingSec ?: 0f,
                     cooldownTotalSec = RESTORE_RESOURCES_COOLDOWN_SEC,
                     onClick = { viewModel.onRestoreResources() },
                     modifier = Modifier.width(actionsWidth).testTag("btn_restore_resources")

@@ -251,6 +251,9 @@ data class GameRunState(
     /** Физика движения: текущая скорость героя (инерция разгона/торможения), м/с. */
     val velX: Float = 0f,
     val velZ: Float = 0f,
+    /** Кулдаун единственной кнопки восстановления ресурсов (5 мин); живёт в сейве,
+     *  поэтому перезапуск приложения его НЕ сбрасывает. */
+    val restoreCooldownRemainingSec: Float = 0f,
     val lastStatusMessage: String = "Осмотрите Базовую поляну и соберите дрова для костра."
 ) {
     val maxHealth: Float

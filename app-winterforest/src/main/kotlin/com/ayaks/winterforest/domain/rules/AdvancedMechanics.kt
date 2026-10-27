@@ -444,6 +444,38 @@ object AdvancedMechanics {
      * Использование записи хотбара: инструмент — экипировать,
      * еда/расходник — съесть/применить. Пустая или опустевшая запись очищается.
      */
+    /**
+     * Убирает записи хотбара, предмет которых обнулился ЛЮБЫМ путём расхода
+     * (печь, костёр, факел, крафт): раньше слот висел с «×0» до нажатия.
+     */
+    fun sanitizeHotbarEntries(run: GameRunState): GameRunState {
+        var changed = false
+        val next = ArrayList<com.ayaks.winterforest.domain.model.HotbarEntry?>(6)
+        for (i in 0 until 6) {
+            val e = run.hotbarAt(i)
+            if (e == null) {
+                next.add(null)
+                continue
+            }
+            val rt = e.resourceType
+            val sl = e.specialLootId
+            val empty = (rt != null && run.inventory.countOf(rt) <= 0) ||
+                (sl != null && sl.isConsumable && run.inventory.specialCount(sl) <= 0)
+            if (empty) {
+                changed = true
+                next.add(null)
+            } else {
+                next.add(e)
+            }
+        }
+        if (!changed) return run
+        var out = run
+        for (i in 0 until 6) {
+            out = out.withHotbarSlot(i, next[i])
+        }
+        return out
+    }
+
     fun consumeHotbarEntry(run: GameRunState, base: BaseProgress, index: Int): EngineStepOutcome {
         val entry = run.hotbarAt(index)
             ?: return EngineStepOutcome(run, base, false, "Слот хотбара пуст.")

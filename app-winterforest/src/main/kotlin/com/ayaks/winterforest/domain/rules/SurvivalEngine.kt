@@ -96,6 +96,16 @@ object SurvivalEngine {
             return EngineStepOutcome(run, base)
         }
 
+        // Кулдаун восстановления ресурсов тикает в движке и хранится в сейве
+        val run = if (run.restoreCooldownRemainingSec > 0f) {
+            run.copy(
+                restoreCooldownRemainingSec =
+                (run.restoreCooldownRemainingSec - deltaSeconds).coerceAtLeast(0f)
+            )
+        } else {
+            run
+        }
+
         val prevElapsed = run.elapsedRealSeconds
         val nextElapsed = prevElapsed + deltaSeconds
         val wasNight = (prevElapsed % GameRunState.FULL_CYCLE_SECONDS) >= GameRunState.DAY_DURATION_SECONDS
@@ -1051,6 +1061,7 @@ object SurvivalEngine {
         // выступает на срубленном дереве (ель или дуб) и падает в рюкзак.
         var inventoryAfter = addResult.inventory
         var resinNote = ""
+        var resinDrop: com.ayaks.winterforest.domain.model.DroppedItem? = null
         if (resType == ResourceType.WOOD &&
             (target.kind == WorldObjectKind.PINE_TREE || target.kind == WorldObjectKind.OAK_TREE)
         ) {
@@ -1058,6 +1069,19 @@ object SurvivalEngine {
             if (!resinAdd.isFullBlocked) {
                 inventoryAfter = resinAdd.inventory
                 resinNote = ", Смола +1"
+            } else {
+                // Рюкзак полон — смола НЕ исчезает: падает на землю у ног игрока
+                val rYaw = Math.toRadians(run.yawDeg.toDouble()).toFloat()
+                resinDrop = com.ayaks.winterforest.domain.model.DroppedItem(
+                    id = "drop_${run.elapsedRealSeconds.toInt()}_${run.droppedItems.size}",
+                    resourceType = ResourceType.RESIN,
+                    specialLootId = null,
+                    count = 1,
+                    x = run.playerX + kotlin.math.sin(rYaw) * 1.25f,
+                    z = run.playerZ - kotlin.math.cos(rYaw) * 1.25f,
+                    yawRad = rYaw
+                )
+                resinNote = ", смола упала на землю (рюкзак был полон)"
             }
         }
         val updatedNodes = replaceNode(
@@ -1085,6 +1109,7 @@ object SurvivalEngine {
         val updatedRun = run.copy(
             inventory = inventoryAfter,
             nodesByLocation = updatedNodes,
+            droppedItems = run.droppedItems + listOfNotNull(resinDrop),
             totalResourcesGathered = run.totalResourcesGathered + added,
             runWoodGathered = run.runWoodGathered + woodDelta,
             xp = nextXp,
