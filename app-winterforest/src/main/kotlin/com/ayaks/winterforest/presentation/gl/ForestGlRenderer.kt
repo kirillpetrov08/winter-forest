@@ -820,10 +820,11 @@ class ForestGlRenderer(
         }
         // Слой дропа отдельно: подбор предмета пересобирает только лёгкий слой
         // дропа, не трогая тяжёлый слой ресурсных узлов
-        val dropHighlight = run.nearestDroppedItem()?.id
-        val dropSig = computeDropSignature(run.playerX, run.playerZ, run.droppedItems, dropHighlight)
+        // Подсветка переехала в динамический слой: пересборка только при
+        // реальном изменении набора дропа или пересечении клетки игрока
+        val dropSig = computeDropSignature(run.playerX, run.playerZ, run.droppedItems)
         if (dropSig != cachedDropSig || cachedNodeDrawScale != drawScale()) {
-            rebuildDroppedItemsVbo(run.droppedItems, dropHighlight, run.playerX, run.playerZ, quality)
+            rebuildDroppedItemsVbo(run.droppedItems, run.playerX, run.playerZ, quality)
             cachedDropSig = dropSig
         }
     }
@@ -853,14 +854,13 @@ class ForestGlRenderer(
     private fun computeDropSignature(
         px: Float,
         pz: Float,
-        dropped: List<com.ayaks.winterforest.domain.model.DroppedItem>,
-        highlightId: String?
+        dropped: List<com.ayaks.winterforest.domain.model.DroppedItem>
     ): Int {
         // Квантованная клетка игрока: cull-радиус слоя зависит от позиции,
         // слой дропа обязан перестраиваться при пересечении клетки, а не
         // только при подборе/выбросе предмета (иначе дроп «появляется из ниоткуда»)
         var h = (px / 32f).toInt() * 73856093 xor (pz / 32f).toInt() * 19349663
-        h = h * 31 + dropped.size * 31 + (highlightId?.hashCode() ?: 0)
+        h = h * 31 + dropped.size * 31
         for (i in dropped.indices) {
             h = h * 31 + dropped[i].id.hashCode()
         }
@@ -1310,7 +1310,6 @@ class ForestGlRenderer(
      */
     private fun rebuildDroppedItemsVbo(
         droppedItems: List<com.ayaks.winterforest.domain.model.DroppedItem>,
-        highlightDropId: String?,
         playerX: Float,
         playerZ: Float,
         quality: GraphicsQuality
@@ -1331,16 +1330,6 @@ class ForestGlRenderer(
             if (dx * dx + dz * dz > cullSq) continue
             val iy = MeshBuilder.sampleWorldHeight(item.x, item.z, terrainSteps)
             addDroppedItemProp(bark, foliage, stone, cloth, metal, fire, ice, item, iy)
-            if (item.id == highlightDropId) {
-                // янтарное кольцо-подсветка предмета под прицелом
-                for (r in 0 until 8) {
-                    val a = (r / 8f) * Math.PI.toFloat() * 2f
-                    fire.addSculptedBoulder(
-                        item.x + cos(a) * 0.34f, iy + 0.03f, item.z + sin(a) * 0.34f,
-                        0.035f, 0.02f, 0.035f, 700 + r, 1f, 0.72f, 0.22f, false
-                    )
-                }
-            }
         }
         for ((mat, builder) in dropBuilders) {
             dropBatches[mat]?.uploadStatic(builder)
@@ -1554,6 +1543,21 @@ class ForestGlRenderer(
                     gx - fwdXh * 0.055f, gy - 0.055f, gz - fwdZh * 0.055f,
                     0.175f, 0.15f, 0.155f,
                     -yawRad, -thetaH, 0f, 0.42f, 0.34f, 0.28f
+                )
+            }
+        }
+
+        // 5.9 Подсветка ближайшего дропа: ЯНТАРНОЕ ПУЛЬСИРУЮЩЕЕ кольцо в
+        // динамическом слое (раньше — 8 запечённых статичных камешков в слое
+        // дропа: не пульсировало и пересобирало весь слой при смене прицела)
+        run.nearestDroppedItem()?.let { hl ->
+            val hlY = MeshBuilder.sampleWorldHeight(hl.x, hl.z, worldTerrainSteps(quality))
+            val pulse = 0.34f + 0.06f * sin(animTimeSec * 4.2f)
+            for (r in 0 until 8) {
+                val a = (r / 8f) * Math.PI.toFloat() * 2f + animTimeSec * 0.8f
+                fire.addSculptedBoulder(
+                    hl.x + cos(a) * pulse, hlY + 0.03f, hl.z + sin(a) * pulse,
+                    0.035f, 0.02f, 0.035f, 700 + r, 1f, 0.72f, 0.22f, false
                 )
             }
         }

@@ -385,7 +385,10 @@ object SurvivalEngine {
                     }
                 }
             } else {
-                list.mapIndexed { idx, entity ->
+                list.map { entity ->
+                    // Фаза анимации жизни — из хеша id, а не из индекса списка:
+                    // раньше олень №3 во всех пяти районах двигался синхронно
+                    val idPhase = (entity.id.hashCode() and 0x7FFF) / 32767f * 6.2832f
                     if (!entity.isAlive) {
                         val nextResp = if (enteredNight) 0f else (entity.respawnRemainingSec - deltaSeconds).coerceAtLeast(0f)
                         if (nextResp <= 0f) {
@@ -441,11 +444,11 @@ object SurvivalEngine {
                                 // скорости — волк больше не стоит AFK, а обходит территорию.
                                 val t = run.elapsedRealSeconds
                                 nextHeading += (
-                                    sin(t * 0.7f + idx * 1.9f) * 1.15f +
-                                        cos(t * 0.37f + idx) * 0.5f
+                                    sin(t * 0.7f + idPhase * 1.9f) * 1.15f +
+                                        cos(t * 0.37f + idPhase) * 0.5f
                                     ) * deltaSeconds
                                 speed = entity.kind.cruiseSpeedMps *
-                                    (0.5f + 0.15f * sin(t * 0.4f + idx * 2.7f))
+                                    (0.5f + 0.15f * sin(t * 0.4f + idPhase * 2.7f))
                             }
                         } else {
                             // Мирные крысы и северные олени пасутся и стремительно убегают при приближении
@@ -457,15 +460,15 @@ object SurvivalEngine {
                                 // Выпас: циклы «пошёл — остановился пощипать мох», повороты
                                 // двух несоизмеримых синусов. Животное живёт своей жизнью.
                                 val t = run.elapsedRealSeconds
-                                val phase = t * 0.55f + idx * 2.3f
-                                val grazeCycle = (t * 0.09f + idx * 0.31f) % 1f
+                                val phase = t * 0.55f + idPhase * 2.3f
+                                val grazeCycle = (t * 0.09f + idPhase * 0.31f) % 1f
                                 if (grazeCycle > 0.58f && grazeCycle < 0.78f) {
                                     speed = 0f
                                     nextHeading += sin(phase * 2.1f) * 0.35f * deltaSeconds
                                 } else {
                                     nextHeading += (sin(phase) * 0.85f + cos(phase * 0.63f) * 0.45f) * deltaSeconds
                                     speed = entity.kind.cruiseSpeedMps *
-                                        (0.34f + 0.18f * (0.5f + 0.5f * sin(t * 0.23f + idx * 1.7f)))
+                                        (0.34f + 0.18f * (0.5f + 0.5f * sin(t * 0.23f + idPhase * 1.7f)))
                                 }
                                 // Стадность: тянемся к ближайшему сородичу в 16 м (мягкая подрулка)
                                 val mate = list.firstOrNull {
@@ -905,7 +908,14 @@ object SurvivalEngine {
 
         val hitY = WorldPopulator.terrainHeight(run.currentLocation, target.x, target.z) + 0.85f
 
-        if (target.specialLootId != null) {
+        // Ящики (SUPPLY/MILITARY) идут своей веткой НИЖЕ: у них specialLootId —
+        // гарантированный предмет ящика, а не «уникальная находка». Раньше эта
+        // ветка перехватывала их первой, и логика ящиков (основной лут + редкий
+        // дроп) была мёртвым кодом — компилятор честно писал «always false».
+        if (target.specialLootId != null &&
+            target.kind != WorldObjectKind.SUPPLY_CRATE &&
+            target.kind != WorldObjectKind.MILITARY_CRATE
+        ) {
             val special = target.specialLootId
             val updatedInventory = run.inventory.grantSpecialLoot(special, 1)
             val updatedPersistent = if (special.persistsAcrossRuns) {

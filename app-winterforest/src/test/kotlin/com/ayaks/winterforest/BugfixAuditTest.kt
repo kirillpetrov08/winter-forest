@@ -9,11 +9,11 @@ import com.ayaks.winterforest.domain.model.ResourceType
 import com.ayaks.winterforest.domain.model.WorldObjectKind
 import com.ayaks.winterforest.domain.rules.AdvancedMechanics
 import com.ayaks.winterforest.domain.rules.SurvivalEngine
-import kotlin.test.Test
-import kotlin.test.assertEquals
-import kotlin.test.assertNotNull
-import kotlin.test.assertNull
-import kotlin.test.assertTrue
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Test
 
 /**
  * Регрессионные тесты аудита багов: персистентный кулдаун восстановления,
@@ -36,12 +36,20 @@ class BugfixAuditTest {
     @Test
     fun `full backpack drops resin on ground instead of losing it`() {
         var inv = Inventory()
-        // 19 слотов под завязку, один оставляем дереву — смоле места не хватит
-        val fillers = ResourceType.entries.filter { it != ResourceType.RESIN }.take(19)
-        for (t in fillers) {
-            for (k in 0 until 40) inv = inv.tryAddResource(t, 10).inventory
+        // Детерминированная забивка: все 20 слотов заняты, в дереве запас 6
+        // (максимальный выход сбора) — дереву место хватит, смоле уже нет
+        for (k in 0 until 4) inv = inv.tryAddResource(ResourceType.WOOD, 1).inventory
+        val fillers = ArrayDeque(ResourceType.entries.filter {
+            it != ResourceType.RESIN && it != ResourceType.WOOD
+        })
+        while (inv.occupiedSlots < Inventory.MAX_SLOTS) {
+            val t = fillers.removeFirst()
+            fillers.addLast(t)
+            val r = inv.tryAddResource(t, 10)
+            if (r.isFullBlocked) break
+            inv = r.inventory
         }
-        assertTrue(inv.occupiedSlots >= 19, "рюкзак должен быть почти полон")
+        assertEquals(Inventory.MAX_SLOTS, inv.occupiedSlots)
 
         val run = SurvivalEngine.createNewRun(BaseProgress()).copy(inventory = inv)
         val pine = run.currentLocationNodes().first { it.kind == WorldObjectKind.PINE_TREE }
@@ -51,10 +59,10 @@ class BugfixAuditTest {
             equippedTool = EquippedTool.AXE
         )
         val out = SurvivalEngine.gatherNearest(armed, BaseProgress())
-        assertTrue(out.actionSucceeded, out.message)
+        assertTrue(out.message, out.actionSucceeded)
         val drop = out.run.droppedItems.firstOrNull { it.resourceType == ResourceType.RESIN }
-        assertNotNull(drop, "смола обязана упасть на землю, а не исчезнуть")
-        assertTrue(out.message.contains("землю"), out.message)
+        assertNotNull("смола обязана упасть на землю, а не исчезнуть", drop)
+        assertTrue(out.message, out.message.contains("землю"))
     }
 
     @Test
@@ -72,6 +80,6 @@ class BugfixAuditTest {
         val spent = SurvivalEngine.useResource(run, BaseProgress(), ResourceType.WOOD)
         assertEquals(0, spent.run.inventory.countOf(ResourceType.WOOD))
         val clean = AdvancedMechanics.sanitizeHotbarEntries(spent.run)
-        assertNull(clean.hotbarAt(0), "слот с нулевым остатком убирается автоматически")
+        assertNull("слот с нулевым остатком убирается автоматически", clean.hotbarAt(0))
     }
 }

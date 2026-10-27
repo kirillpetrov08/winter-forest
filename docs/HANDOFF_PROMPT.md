@@ -103,7 +103,7 @@ gh run view <run_id> --json conclusion,status,jobs
 | `icons/` | 3.6 МБ | 33 иконки предметов/ресурсов |
 | `glyphs/` | 112 КБ | 24 глифа HUD |
 
-Список моделей: `barrel bush_dry bush_green bush_thicket cabin_bark cabin_burned cabin_shingle cabin_stone cabin_wood cache_crate cache_crate_open cloth_bush crate deer_body dry_branches_a dry_branches_b fire_pit gate lantern oak_a oak_b oak_c pickaxe rat_body rock_09 rock_moss_a rock_moss_b spear tree_bark winter_tree wolf_body wooden_axe woodstack workbench`.
+Список моделей: `barrel bush_dry bush_green bush_thicket cabin_bark cabin_burned cabin_shingle cabin_stone cabin_wood cache_crate cache_crate_open cloth_bush crate deer_body dry_branches_a dry_branches_b fire_pit lantern oak_a oak_b oak_c pickaxe rat_body rock_09 rock_moss_a rock_moss_b spear tree_bark wolf_body wooden_axe woodstack workbench`.
 
 ### 4.3 Пайплайн ассетов `tools/` (все скрипты рабочие, менять осторожно)
 
@@ -288,7 +288,7 @@ app-winterforest/src/main/kotlin/com/ayaks/winterforest/
 **Просит:** «убери случайную генерацию одиночных решёток и ворот и опять полностью выстрой у себя в голове план местности и убери резкие смены высоты и быструю смену погоды и времени дня, сделай смену дня и ночи плавной, так же настрой гамму».
 
 **Сейчас:**
-- Ворота: 4 `TrailGate` по фиксированным координатам (±48 по осям, `ForestGlRenderer.kt:252-258`) + 2 одиночных пропа `gate` (`AssetProps.kt:83` у зимовья, `:138` у шахты) — стоят **сами по себе, без забора**, выглядят как случайные.
+- Ворота: **ВЫПОЛНЕНО** (PR #17) — `TrailGate` и одиночные `gate`-пропы удалены из игры вместе с упакованными ассетами; `models/gate.blend` и `models/winter_tree.blend` остались только как исходники пользователя.
 - Рельеф: `WorldPopulator.terrainHeight` суммирует высокочастотные синусы (`microDrift`: `sin(x*1.15)`, `cos(x*1.8)`, `sin(x*0.38)`…) → «шишки», резкие перепады; `plateauBlend` выравнивает только зимовье.
 - Погода: `AdvancedMechanics.weatherFor` — детерминированный выбор раз в **150 с** (CLEAR/THAW/BLIZZARD) без плавного перехода; `run.isSnowing` — булев флаг, включающий/выключающий метель мгновенно.
 - Сутки: `GameRunState.DAY_DURATION_SECONDS = 360`, `NIGHT_DURATION_SECONDS = 240` (10 минут на цикл). `computeDaylightFactor` (`ForestGlRenderer.kt:2490`) — кусочно-линейный с изломом в 4 точках (0.08 / 0.52 / 0.62 / 0.92) → «щелчок» освещения.
