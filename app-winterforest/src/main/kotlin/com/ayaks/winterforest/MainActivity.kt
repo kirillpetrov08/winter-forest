@@ -207,6 +207,16 @@ private fun PersistentForestScene(
         state.destination == AppDestination.LOADOUT_SELECT ||
         state.destination == AppDestination.SETTINGS ||
         state.destination == AppDestination.ABOUT
+    // Один построитель снапшота для factory и update: раньше два одинаковых
+    // блока жили порознь и рисковали разъехаться при правке полей
+    fun buildSnapshot() = RenderSceneSnapshot(
+        run = state.activeRun ?: GameRunState(),
+        base = state.baseProgress,
+        quality = state.settings.graphicsQuality,
+        fovDegrees = state.settings.fovDegrees.toFloat(),
+        drawDistanceScale = state.settings.drawDistanceScale,
+        menuOrbitMode = orbitMode
+    )
     AndroidView(
         factory = { ctx ->
             ForestGlSurfaceView(
@@ -214,25 +224,11 @@ private fun PersistentForestScene(
                 onFpsSample = viewModel::onFpsMeasured,
                 onFirstFrameReady = onFirstFrameReady
             ).apply {
-                forestRenderer.snapshot = RenderSceneSnapshot(
-                    run = state.activeRun ?: GameRunState(),
-                    base = state.baseProgress,
-                    quality = state.settings.graphicsQuality,
-                    fovDegrees = state.settings.fovDegrees.toFloat(),
-                    drawDistanceScale = state.settings.drawDistanceScale,
-                    menuOrbitMode = orbitMode
-                )
+                forestRenderer.snapshot = buildSnapshot()
             }
         },
         update = { glView ->
-            glView.forestRenderer.snapshot = RenderSceneSnapshot(
-                run = state.activeRun ?: GameRunState(),
-                base = state.baseProgress,
-                quality = state.settings.graphicsQuality,
-                fovDegrees = state.settings.fovDegrees.toFloat(),
-                drawDistanceScale = state.settings.drawDistanceScale,
-                menuOrbitMode = orbitMode
-            )
+            glView.forestRenderer.snapshot = buildSnapshot()
         },
         modifier = Modifier.fillMaxSize()
     )

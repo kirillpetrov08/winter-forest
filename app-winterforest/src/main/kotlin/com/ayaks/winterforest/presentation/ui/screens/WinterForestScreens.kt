@@ -1314,6 +1314,10 @@ private fun InventoryStorageTab(
             )
             g != null && targetHot != null -> viewModel.onDropInventoryOnHotbar(g, targetHot)
             g != null && targetGrid != null -> viewModel.onSwapInventoryCells(g, targetGrid)
+            // ресурс на ряд инструментов раньше молча игнорировался — объясняем
+            g != null && targetTools != null -> viewModel.onUiNote(
+                "Ресурсы лежат в сетке рюкзака; ряд инструментов — только для топоров, кирок и ножей."
+            )
             // запись хотбара убирается обратно в рюкзак (на сетку или на ряд инструментов)
             h != null && targetGrid != null -> viewModel.onDropHotbarToInventory(h)
             h != null && targetTools != null -> viewModel.onDropHotbarToInventory(h)
@@ -1655,7 +1659,7 @@ private fun InventoryStorageTab(
                             when {
                                 entry.resourceType != null ->
                                     com.ayaks.winterforest.presentation.ui.components.ResourceTypeGlyph(
-                                        type = entry.resourceType!!,
+                                        type = entry.resourceType,
                                         modifier = Modifier.size(30.dp).align(Alignment.Center)
                                     )
                                 entry.specialLootId != null ->
@@ -1668,7 +1672,7 @@ private fun InventoryStorageTab(
                                             )
                                         }
                                 entry.tool != null -> Text(
-                                    text = toolIcon(entry.tool!!),
+                                    text = toolIcon(entry.tool),
                                     fontSize = 22.sp,
                                     modifier = Modifier.align(Alignment.Center)
                                 )

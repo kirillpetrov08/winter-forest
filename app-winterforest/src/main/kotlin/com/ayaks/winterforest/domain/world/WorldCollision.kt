@@ -107,9 +107,19 @@ object WorldCollision {
             LocationId.BASE_CLEARING -> {
                 addCabin(rects, BASE_SHELTER)
                 circles.add(Circle(4.8f, -4.5f, 1.32f)) // верстак
-                circles.add(Circle(-7.65f, -5.25f, 0.72f)) // поленницы
-                circles.add(Circle(-7.25f, -5.75f, 0.72f))
+                // поленница вынесена из сруба во двор (PR#17): старые круги
+                // (-7.65,-5.25)/(-7.25,-5.75) остались фантомными стенами в интерьере
+                circles.add(Circle(-4.05f, -8.6f, 0.85f)) // поленница у крыльца
+                circles.add(Circle(6.35f, -2.55f, 0.5f)) // ящик у верстака
                 circles.add(Circle(-5.85f, -6.7f, 0.48f)) // бочка
+                // Мебель ВНУТРИ сруба (позиции совпадают с buildInteriorProps
+                // рендерера): раньше игрок и звери проходили сквозь кровать и печь.
+                // Проём двери (x -8.23...-7.07) оставлен проходимым: сундук сужает
+                // его до 0.92 м, а восточнее кровати коридор 1.7 м.
+                rects.add(Rect(-8.73f, -7.77f, -7.48f, -5.62f)) // кровать
+                rects.add(Rect(-8.61f, -7.99f, -5.40f, -4.96f)) // сундук
+                rects.add(Rect(-6.06f, -5.00f, -5.75f, -4.79f)) // печь
+                circles.add(Circle(-5.18f, -4.38f, 0.30f)) // бочка в углу
                 circles.add(Circle(4.2f, -3.6f, 0.62f)) // тайник-ящик
                 circles.add(Circle(-12.6f, 10.6f, 0.55f)) // сухие деревья
                 circles.add(Circle(13.2f, -8.4f, 0.55f))
@@ -125,7 +135,11 @@ object WorldCollision {
                 circles.add(Circle(6.05f, 10.25f, 0.45f)) // кирка у стены
                 circles.add(Circle(8.45f, 5.45f, 0.5f)) // ящик
                 circles.add(Circle(9.0f, 9.5f, 0.62f)) // тайник
-                circles.add(Circle(14.6f, 5.9f, 0.6f)) // зимнее дерево (тории)
+                // зимнее дерево (тории) удалено из ассетов — фантомный круг убран
+                circles.add(Circle(5.35f, 8.25f, 0.45f)) // бочка у зимовья
+                circles.add(Circle(4.5f, 6.3f, 0.5f)) // кострище
+                circles.add(Circle(9.7f, 7.25f, 0.72f)) // поленницы
+                circles.add(Circle(10.05f, 7.75f, 0.72f))
                 // деревья и кусты пака Trees & Bushes — непроходимые
                 circles.add(Circle(1.2f, 12.8f, 0.70f))
                 circles.add(Circle(12.3f, 2.4f, 0.60f))
@@ -134,6 +148,8 @@ object WorldCollision {
             }
             LocationId.DENSE_SPRUCE -> {
                 circles.add(Circle(-12.9f, 8.1f, 0.6f))
+                circles.add(Circle(6.45f, -9.15f, 0.85f)) // поленница
+                circles.add(Circle(-13.55f, -2.25f, 0.45f)) // бочка
                 circles.add(Circle(11.7f, -14.3f, 0.6f))
                 circles.add(Circle(-9.5f, -11.0f, 0.62f))
                 circles.add(Circle(-8.15f, -9.65f, 0.5f))
@@ -145,7 +161,10 @@ object WorldCollision {
             }
             LocationId.FROZEN_LAKE -> {
                 circles.add(Circle(10.5f, -8.5f, 0.62f))
-                circles.add(Circle(-7.65f, -5.25f, 0.72f))
+                // круг (-7.65,-5.25) остался от старой раскладки — в озёрном
+                // районе там пусто; настоящая поленница на (-18.35, 9.45)
+                circles.add(Circle(-18.35f, 9.45f, 0.85f)) // поленница
+                circles.add(Circle(-20.55f, -7.15f, 0.45f)) // бочка
                 // дерево и кусты пака Trees & Bushes — непроходимые
                 circles.add(Circle(-16.5f, -2.2f, 0.65f))
                 circles.add(Circle(-13.8f, 5.5f, 0.62f))
@@ -161,6 +180,8 @@ object WorldCollision {
                 }
                 circles.add(Circle(-8.0f, 10.0f, 0.62f))
                 circles.add(Circle(-9.45f, 12.05f, 0.5f))
+                circles.add(Circle(-3.15f, 8.75f, 0.85f)) // поленница
+                circles.add(Circle(-4.45f, 12.55f, 0.45f)) // бочка
                 // сухой куст пака Trees & Bushes — непроходимый
                 circles.add(Circle(-2.4f, -8.2f, 0.62f))
             }

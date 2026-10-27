@@ -821,7 +821,7 @@ class ForestGlRenderer(
         // Слой дропа отдельно: подбор предмета пересобирает только лёгкий слой
         // дропа, не трогая тяжёлый слой ресурсных узлов
         val dropHighlight = run.nearestDroppedItem()?.id
-        val dropSig = computeDropSignature(run.droppedItems, dropHighlight)
+        val dropSig = computeDropSignature(run.playerX, run.playerZ, run.droppedItems, dropHighlight)
         if (dropSig != cachedDropSig || cachedNodeDrawScale != drawScale()) {
             rebuildDroppedItemsVbo(run.droppedItems, dropHighlight, run.playerX, run.playerZ, quality)
             cachedDropSig = dropSig
@@ -851,10 +851,16 @@ class ForestGlRenderer(
 
     /** Сигнатура слоя выброшенных предметов: подбор дропа перестраивает только его. */
     private fun computeDropSignature(
+        px: Float,
+        pz: Float,
         dropped: List<com.ayaks.winterforest.domain.model.DroppedItem>,
         highlightId: String?
     ): Int {
-        var h = dropped.size * 31 + (highlightId?.hashCode() ?: 0)
+        // Квантованная клетка игрока: cull-радиус слоя зависит от позиции,
+        // слой дропа обязан перестраиваться при пересечении клетки, а не
+        // только при подборе/выбросе предмета (иначе дроп «появляется из ниоткуда»)
+        var h = (px / 32f).toInt() * 73856093 xor (pz / 32f).toInt() * 19349663
+        h = h * 31 + dropped.size * 31 + (highlightId?.hashCode() ?: 0)
         for (i in dropped.indices) {
             h = h * 31 + dropped[i].id.hashCode()
         }
@@ -1172,14 +1178,15 @@ class ForestGlRenderer(
         // [x, y, z, yaw, scale, tintR, tintG, tintB] — камни-ресурсы моделями автора
         val nodeRockSpots = HashMap<String, MutableList<FloatArray>>()
         val terrainSteps = worldTerrainSteps(quality)
-        val cullSq = (118f * drawScale()).let { it * it }
-        if (nodeCacheQuality != quality || nodeCacheLoc != loc) {
+        val cullSq = (118f * drawScale() + 32f).let { it * it }
+        if (nodeCacheQuality != quality) {
             // Запечённые меши узлов держат direct FloatBuffer (native-память):
-            // не даём кэшу расти бесконечно по мере обхода мира — сброс при
-            // смене района или качества (вылеты-OOM на высокой графике)
+            // рост ограничен LRU-вытеснением (верх 140 записей). При смене
+            // района кэш больше НЕ вычищается целиком — раньше сразу после
+            // перехода в один кадр перепекалось ~40 узлов (заметный рывок);
+            // горячая геометрия текущего района переживает переход
             nodeGeometryCache.clear()
             nodeCacheQuality = quality
-            nodeCacheLoc = loc
         }
         val bark = builders[ProceduralTextureId.WOOD_BARK]!!
         val foliage = builders[ProceduralTextureId.PINE_FOLIAGE]!!
@@ -1317,7 +1324,7 @@ class ForestGlRenderer(
         val fire = dropBuilders[ProceduralTextureId.FIRE_EMBER]!!
         val ice = dropBuilders[ProceduralTextureId.ICE]!!
         val terrainSteps = worldTerrainSteps(quality)
-        val cullSq = (118f * drawScale()).let { it * it }
+        val cullSq = (118f * drawScale() + 32f).let { it * it }
         for (item in droppedItems) {
             val dx = item.x - playerX
             val dz = item.z - playerZ
@@ -2298,8 +2305,15 @@ class ForestGlRenderer(
 
     private val beastPool = ArrayList<BeastDraw>(8)
 
-    /** §7.17: запечённая геометрия узлов по id (переживает пересборки VBO). */
-    private val nodeGeometryCache = HashMap<String, NodeGeometry>()
+    /** §7.17: запечённая геометрия узлов по id (переживает пересборки VBO).
+     *  LRU c верхом 140 записей: native-память ограничена, но смена района
+     *  не выбрасывает горячие меши (перепечка только реально забытых узлов). */
+    private val nodeGeometryCache: MutableMap<String, NodeGeometry> =
+        object : LinkedHashMap<String, NodeGeometry>(64, 0.75f, true) {
+            override fun removeEldestEntry(
+                eldest: MutableMap.MutableEntry<String, NodeGeometry>?
+            ): Boolean = size > 140
+        }
 
     // Постоянные билдеры слоёв: пересборка больше не аллоцирует 9 свежих
     // MeshBuilder на каждый сбор ресурса (меньше скачков GC = меньше микрофризов)
@@ -2310,7 +2324,6 @@ class ForestGlRenderer(
         for (mat in ProceduralTextureId.entries) m[mat] = MeshBuilder(2048)
     }
     private var cachedDropSig = Int.MIN_VALUE
-    private var nodeCacheLoc: com.ayaks.winterforest.domain.model.LocationId? = null
     private var nodeCacheQuality: GraphicsQuality? = null
 
     private class NodeGeometry(

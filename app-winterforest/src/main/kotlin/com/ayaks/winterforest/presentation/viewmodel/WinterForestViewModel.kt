@@ -319,6 +319,14 @@ class WinterForestViewModel(
         persistCheckpointAsync()
     }
 
+    /** UI-подсказка без движка: пишет сообщение в строку статуса. */
+    fun onUiNote(message: String) {
+        _uiState.update { st ->
+            val run = st.activeRun ?: return@update st
+            st.copy(activeRun = run.copy(lastStatusMessage = message))
+        }
+    }
+
     /**
      * ЕДИНСТВЕННАЯ кнопка «Восстановить ресурсы»: сбрасывает перезарядку всех
      * узлов текущей локации и уходит на 5-минутный кулдаун.
@@ -847,9 +855,17 @@ class WinterForestViewModel(
     private fun startGameLoopIfNeeded() {
         if (gameLoopJob?.isActive == true) return
         gameLoopJob = vmScope.launch {
+            // dt по реальным часам: под нагрузкой кадры тикера запаздывают,
+            // и фиксированные 50 мс растягивали игровое время относительно
+            // настоящего (рассинхрон кулдаунов и суток); клампим [5..250] мс,
+            // чтобы фоновая пауза не «прокручивала» мир гигантским шагом
+            var lastTickNs = android.os.SystemClock.elapsedRealtimeNanos()
             while (isActive) {
                 delay(TICK_INTERVAL_MS)
-                stepSimulation(TICK_INTERVAL_MS / 1000f)
+                val nowNs = android.os.SystemClock.elapsedRealtimeNanos()
+                val dtSec = ((nowNs - lastTickNs) / 1_000_000_000f).coerceIn(0.005f, 0.25f)
+                lastTickNs = nowNs
+                stepSimulation(dtSec)
             }
         }
     }
