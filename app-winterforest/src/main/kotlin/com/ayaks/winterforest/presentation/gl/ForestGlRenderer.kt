@@ -253,6 +253,7 @@ class ForestGlRenderer(
     // Уровень 2: Интерактивные ресурсные узлы (перестраиваются ТОЛЬКО при сборе/респавне узла!)
     private var cachedNodeStateHash: Int = Int.MIN_VALUE
     private val nodeBatches = EnumMap<ProceduralTextureId, GlVbo>(ProceduralTextureId::class.java)
+    private val dropBatches = HashMap<ProceduralTextureId, GlVbo>()
 
     // Уровень 2.5: Импортированные 3D-модели (Poly Haven: камни, кострище, топор, ветви, растение, деревья)
     private val assetMeshCache = HashMap<String, FloatArray>()
@@ -264,7 +265,7 @@ class ForestGlRenderer(
 
     // VBO каждой уздовой модели пересоздаётся ТОЛЬКО при изменении её набора
     // пятен (сигнатура): сбор ресурса перепекает 1 модель вместо десятка.
-    private val rockBatchCache = HashMap<String, Pair<Int, GlVbo>>()
+    private val rockBatchCache = HashMap<String, Pair<Int, List<GlVbo>>>()
     private val assetTextures = HashMap<String, Int>()
     private val assetPropBatches = HashMap<String, GlVbo>()
     private var assetPropsBuiltQuality: GraphicsQuality? = null
@@ -272,7 +273,7 @@ class ForestGlRenderer(
 
     // Камни-ресурсы (камень/руда/уголь) рисуются МОДЕЛЯМИ автора (rock_09 / rock_moss_*),
     // а не процедурными «булыжниками»: батчи перестраиваются вместе с узлами локации.
-    private val rockNodeBatches = HashMap<String, GlVbo>()
+    private val rockNodeBatches = HashMap<String, List<GlVbo>>()
 
     // Модели инструментов в РУКАХ игрока (первое лицо): топор/кирка/копьё
     private val toolHandVbos = HashMap<String, GlVbo>()
@@ -311,6 +312,7 @@ class ForestGlRenderer(
         for (tex in ProceduralTextureId.entries) {
             staticBatches[tex] = GlVbo()
             nodeBatches[tex] = GlVbo()
+            dropBatches[tex] = GlVbo()
             dynBuilders[tex] = MeshBuilder(12288)
             dynVbos[tex] = GlVbo()
         }
@@ -338,6 +340,8 @@ class ForestGlRenderer(
         lakeIceVbo.release()
         staticBatches.values.forEach { it.release() }
         nodeBatches.values.forEach { it.release() }
+        dropBatches.values.forEach { it.release() }
+        dropBatches.clear()
         dynVbos.values.forEach { it.release() }
         assetPropBatches.values.forEach { it.release() }
         assetPropBatches.clear()
@@ -346,7 +350,7 @@ class ForestGlRenderer(
             ep.legs.forEach { it.vbo.release() }
         }
         entityParts.clear()
-        rockNodeBatches.values.forEach { it.release() }
+        rockNodeBatches.values.forEach { list -> list.forEach { it.release() } }
         rockNodeBatches.clear()
         // VBO уже отпущены выше через rockNodeBatches — кэш сигнатур очищаем,
         // чтобы после воссоздания поверхности не переиспользовать мёртвые буферы
@@ -560,6 +564,7 @@ class ForestGlRenderer(
             val spec = materialSpecular(mat)
             staticBatches[mat]?.let { drawVbo(it, textures[mat] ?: 0, unlit = false, specStrength = spec) }
             nodeBatches[mat]?.let { drawVbo(it, textures[mat] ?: 0, unlit = false, specStrength = spec) }
+            dropBatches[mat]?.let { drawVbo(it, textures[mat] ?: 0, unlit = false, specStrength = spec) }
         }
         staticBatches[ProceduralTextureId.FIRE_EMBER]?.let {
             drawVbo(it, textures[ProceduralTextureId.FIRE_EMBER] ?: 0, unlit = true, specStrength = 0f)
@@ -567,13 +572,17 @@ class ForestGlRenderer(
         nodeBatches[ProceduralTextureId.FIRE_EMBER]?.let {
             drawVbo(it, textures[ProceduralTextureId.FIRE_EMBER] ?: 0, unlit = true, specStrength = 0f)
         }
+        dropBatches[ProceduralTextureId.FIRE_EMBER]?.let {
+            drawVbo(it, textures[ProceduralTextureId.FIRE_EMBER] ?: 0, unlit = true, specStrength = 0f)
+        }
         // 6b. Импортированные 3D-модели Poly Haven (камни, кострище, топор, ветви, растение, деревья)
         for ((modelId, vbo) in assetPropBatches) {
             drawVbo(vbo, assetTextures[modelId] ?: 0, unlit = false, specStrength = 0.18f)
         }
         // 6c. Камни-ресурсы (камень/руда/уголь) моделями автора
-        for ((modelId, vbo) in rockNodeBatches) {
-            drawVbo(vbo, assetTextures[modelId] ?: 0, unlit = false, specStrength = 0.18f)
+        for ((modelId, vbos) in rockNodeBatches) {
+            val rockTex = assetTextures[modelId] ?: 0
+            for (vbo in vbos) drawVbo(vbo, rockTex, unlit = false, specStrength = 0.18f)
         }
 
         // 7. Динамический слой (животные, 3D-оружие в руках, пламя, искры удара, метель) через reusable VBO
@@ -798,21 +807,24 @@ class ForestGlRenderer(
             staticBuiltQuality = quality
             staticBuiltBaseSig = baseSig
             cachedNodeStateHash = Int.MIN_VALUE
+            cachedDropSig = Int.MIN_VALUE
         }
 
         // 3. Интерактивные ресурсные узлы (перезаливаются при изменении доступности ИЛИ смене района)
         val nodes = run.currentLocationNodes()
-        val nodeSig = computeNodeAvailabilitySignature(
-            run.playerX, run.playerZ, nodes, run.droppedItems
-        )
+        val nodeSig = computeNodeAvailabilitySignature(run.playerX, run.playerZ, nodes)
         if (nodeSig != cachedNodeStateHash || cachedNodeDrawScale != drawScale()) {
-            rebuildInteractiveNodesVbo(
-                nodes, run.playerX, run.playerZ, quality,
-                droppedItems = run.droppedItems,
-                highlightDropId = run.nearestDroppedItem()?.id
-            )
+            rebuildInteractiveNodesVbo(nodes, run.playerX, run.playerZ, quality, run.currentLocation)
             cachedNodeStateHash = nodeSig
             cachedNodeDrawScale = drawScale()
+        }
+        // Слой дропа отдельно: подбор предмета пересобирает только лёгкий слой
+        // дропа, не трогая тяжёлый слой ресурсных узлов
+        val dropHighlight = run.nearestDroppedItem()?.id
+        val dropSig = computeDropSignature(run.droppedItems, dropHighlight)
+        if (dropSig != cachedDropSig || cachedNodeDrawScale != drawScale()) {
+            rebuildDroppedItemsVbo(run.droppedItems, dropHighlight, run.playerX, run.playerZ, quality)
+            cachedDropSig = dropSig
         }
     }
 
@@ -826,8 +838,7 @@ class ForestGlRenderer(
     private fun computeNodeAvailabilitySignature(
         px: Float,
         pz: Float,
-        nodes: List<ResourceNode>,
-        dropped: List<com.ayaks.winterforest.domain.model.DroppedItem> = emptyList()
+        nodes: List<ResourceNode>
     ): Int {
         // Смена района игрока = новая выборка дальних узлов
         var h = (px / 32f).toInt() * 73856093 xor (pz / 32f).toInt() * 19349663
@@ -835,8 +846,15 @@ class ForestGlRenderer(
         for (i in nodes.indices) {
             h = h * 31 + (if (nodes[i].isAvailable) 1 else 0)
         }
-        // §7.12: выброшенные предметы тоже пекутся в VBO узлов
-        h = h * 31 + dropped.size
+        return h
+    }
+
+    /** Сигнатура слоя выброшенных предметов: подбор дропа перестраивает только его. */
+    private fun computeDropSignature(
+        dropped: List<com.ayaks.winterforest.domain.model.DroppedItem>,
+        highlightId: String?
+    ): Int {
+        var h = dropped.size * 31 + (highlightId?.hashCode() ?: 0)
         for (i in dropped.indices) {
             h = h * 31 + dropped[i].id.hashCode()
         }
@@ -1145,20 +1163,23 @@ class ForestGlRenderer(
         playerX: Float,
         playerZ: Float,
         quality: GraphicsQuality,
-        droppedItems: List<com.ayaks.winterforest.domain.model.DroppedItem> = emptyList(),
-        highlightDropId: String? = null
+        loc: com.ayaks.winterforest.domain.model.LocationId
     ) {
-        val builders = EnumMap<ProceduralTextureId, MeshBuilder>(ProceduralTextureId::class.java)
         for (mat in ProceduralTextureId.entries) {
-            builders[mat] = MeshBuilder(12288)
+            nodeLayerBuilders[mat]!!.clear()
         }
+        val builders = nodeLayerBuilders
         // [x, y, z, yaw, scale, tintR, tintG, tintB] — камни-ресурсы моделями автора
         val nodeRockSpots = HashMap<String, MutableList<FloatArray>>()
         val terrainSteps = worldTerrainSteps(quality)
         val cullSq = (118f * drawScale()).let { it * it }
-        if (nodeCacheQuality != quality) {
+        if (nodeCacheQuality != quality || nodeCacheLoc != loc) {
+            // Запечённые меши узлов держат direct FloatBuffer (native-память):
+            // не даём кэшу расти бесконечно по мере обхода мира — сброс при
+            // смене района или качества (вылеты-OOM на высокой графике)
             nodeGeometryCache.clear()
             nodeCacheQuality = quality
+            nodeCacheLoc = loc
         }
         val bark = builders[ProceduralTextureId.WOOD_BARK]!!
         val foliage = builders[ProceduralTextureId.PINE_FOLIAGE]!!
@@ -1221,7 +1242,82 @@ class ForestGlRenderer(
 
         }
 
-        // §7.12: выброшенные предметы лежат процедурными модельками на снегу
+        for ((mat, builder) in builders) {
+            nodeBatches[mat]?.uploadStatic(builder)
+        }
+
+        // Камни-ресурсы моделями автора: батч модели пересобирается только если
+        // её набор пятен реально изменился (сигнатура включает качество рельефа —
+        // от него зависит высота посадки). Остальные VBO переиспользуются как есть.
+        val nextRockBatches = HashMap<String, List<GlVbo>>()
+        for ((modelId, spots) in nodeRockSpots) {
+            var sig = quality.hashCode() * 31 + modelId.hashCode()
+            for (sp in spots) sig = sig * 31 + sp.contentHashCode()
+            val cached = rockBatchCache[modelId]
+            if (cached != null && cached.first == sig) {
+                nextRockBatches[modelId] = cached.second
+                continue
+            }
+            cached?.second?.forEach { it.release() }
+            val floats = nodeModelFloats.getOrPut(modelId) {
+                val ctx = appContext
+                if (ctx != null) readAssetFloats(ctx, "models/$modelId/mesh.obj") else FloatArray(0)
+            }
+            if (floats.isEmpty()) continue
+            // Чанки по 8 пятен: пиковая аллокация билдера ограничена, а не
+            // spots×floats (у дубов это были десятки МБ за одну пересборку)
+            val vbos = ArrayList<GlVbo>()
+            var ci = 0
+            while (ci < spots.size) {
+                val chunkEnd = minOf(ci + 8, spots.size)
+                val builder = MeshBuilder((chunkEnd - ci) * floats.size + 64)
+                for (k in ci until chunkEnd) {
+                    val s = spots[k]
+                    appendTransformedMesh(
+                        builder, floats,
+                        x = s[0], y = s[1], z = s[2],
+                        yawRad = s[3], pitchRad = 0f, scale = s[4],
+                        tintR = s[5], tintG = s[6], tintB = s[7]
+                    )
+                }
+                val vbo = GlVbo()
+                vbo.uploadStatic(builder)
+                vbos.add(vbo)
+                ci = chunkEnd
+            }
+            nextRockBatches[modelId] = vbos
+            rockBatchCache[modelId] = sig to vbos
+        }
+        // Модели, исчезнувшие из кадра (смена района), отпускают GL-память
+        for ((modelId, cached) in rockBatchCache) {
+            if (!nextRockBatches.containsKey(modelId)) cached.second.forEach { it.release() }
+        }
+        rockBatchCache.keys.retainAll(nextRockBatches.keys)
+        rockNodeBatches.clear()
+        rockNodeBatches.putAll(nextRockBatches)
+    }
+
+    /**
+     * §7.12: выброшенные предметы — отдельный лёгкий слой VBO. Подбор предмета
+     * пересобирает только его (десятки вершин), а не весь слой ресурсных узлов.
+     */
+    private fun rebuildDroppedItemsVbo(
+        droppedItems: List<com.ayaks.winterforest.domain.model.DroppedItem>,
+        highlightDropId: String?,
+        playerX: Float,
+        playerZ: Float,
+        quality: GraphicsQuality
+    ) {
+        for (mat in ProceduralTextureId.entries) dropBuilders[mat]!!.clear()
+        val bark = dropBuilders[ProceduralTextureId.WOOD_BARK]!!
+        val foliage = dropBuilders[ProceduralTextureId.PINE_FOLIAGE]!!
+        val stone = dropBuilders[ProceduralTextureId.STONE]!!
+        val cloth = dropBuilders[ProceduralTextureId.CLOTH]!!
+        val metal = dropBuilders[ProceduralTextureId.METAL_STEEL]!!
+        val fire = dropBuilders[ProceduralTextureId.FIRE_EMBER]!!
+        val ice = dropBuilders[ProceduralTextureId.ICE]!!
+        val terrainSteps = worldTerrainSteps(quality)
+        val cullSq = (118f * drawScale()).let { it * it }
         for (item in droppedItems) {
             val dx = item.x - playerX
             val dz = item.z - playerZ
@@ -1239,50 +1335,9 @@ class ForestGlRenderer(
                 }
             }
         }
-
-        for ((mat, builder) in builders) {
-            nodeBatches[mat]?.uploadStatic(builder)
+        for ((mat, builder) in dropBuilders) {
+            dropBatches[mat]?.uploadStatic(builder)
         }
-
-        // Камни-ресурсы моделями автора: батч модели пересобирается только если
-        // её набор пятен реально изменился (сигнатура включает качество рельефа —
-        // от него зависит высота посадки). Остальные VBO переиспользуются как есть.
-        val nextRockBatches = HashMap<String, GlVbo>()
-        for ((modelId, spots) in nodeRockSpots) {
-            var sig = quality.hashCode() * 31 + modelId.hashCode()
-            for (sp in spots) sig = sig * 31 + sp.contentHashCode()
-            val cached = rockBatchCache[modelId]
-            if (cached != null && cached.first == sig) {
-                nextRockBatches[modelId] = cached.second
-                continue
-            }
-            cached?.second?.release()
-            val floats = nodeModelFloats.getOrPut(modelId) {
-                val ctx = appContext
-                if (ctx != null) readAssetFloats(ctx, "models/$modelId/mesh.obj") else FloatArray(0)
-            }
-            if (floats.isEmpty()) continue
-            val builder = MeshBuilder(spots.size * floats.size + 64)
-            for (s in spots) {
-                appendTransformedMesh(
-                    builder, floats,
-                    x = s[0], y = s[1], z = s[2],
-                    yawRad = s[3], pitchRad = 0f, scale = s[4],
-                    tintR = s[5], tintG = s[6], tintB = s[7]
-                )
-            }
-            val vbo = GlVbo()
-            vbo.uploadStatic(builder)
-            nextRockBatches[modelId] = vbo
-            rockBatchCache[modelId] = sig to vbo
-        }
-        // Модели, исчезнувшие из кадра (смена района), отпускают GL-память
-        for ((modelId, cached) in rockBatchCache) {
-            if (!nextRockBatches.containsKey(modelId)) cached.second.release()
-        }
-        rockBatchCache.keys.retainAll(nextRockBatches.keys)
-        rockNodeBatches.clear()
-        rockNodeBatches.putAll(nextRockBatches)
     }
 
     private fun buildAndDrawDynamicFrameLayer(
@@ -2245,6 +2300,17 @@ class ForestGlRenderer(
 
     /** §7.17: запечённая геометрия узлов по id (переживает пересборки VBO). */
     private val nodeGeometryCache = HashMap<String, NodeGeometry>()
+
+    // Постоянные билдеры слоёв: пересборка больше не аллоцирует 9 свежих
+    // MeshBuilder на каждый сбор ресурса (меньше скачков GC = меньше микрофризов)
+    private val nodeLayerBuilders = EnumMap<ProceduralTextureId, MeshBuilder>(ProceduralTextureId::class.java).also { m ->
+        for (mat in ProceduralTextureId.entries) m[mat] = MeshBuilder(12288)
+    }
+    private val dropBuilders = EnumMap<ProceduralTextureId, MeshBuilder>(ProceduralTextureId::class.java).also { m ->
+        for (mat in ProceduralTextureId.entries) m[mat] = MeshBuilder(2048)
+    }
+    private var cachedDropSig = Int.MIN_VALUE
+    private var nodeCacheLoc: com.ayaks.winterforest.domain.model.LocationId? = null
     private var nodeCacheQuality: GraphicsQuality? = null
 
     private class NodeGeometry(

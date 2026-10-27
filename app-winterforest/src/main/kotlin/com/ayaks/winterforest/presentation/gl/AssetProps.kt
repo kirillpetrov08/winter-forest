@@ -60,9 +60,9 @@ object AssetProps {
             Placement("cache_crate", 4.2f, -3.6f, 0.5f, 1.0f),
             Placement("barrel", -5.85f, -6.7f, 0.6f, 1.0f),
             Placement("lantern", 1.2f, 1.1f, 0.3f, 1.0f),
-            Placement("woodstack", -7.65f, -5.25f, 0.25f, 1.0f),
-            Placement("woodstack", -7.25f, -5.75f, 1.15f, 1.0f),
-            Placement("woodstack", -7.5f, -4.7f, 2.05f, 1.0f),
+            // Поленница стояла ВНУТРИ сруба (модель брёвен в интерьере) — вынесена
+            // во двор, к крыльцу
+            Placement("woodstack", -4.05f, -8.6f, 0.4f, 1.0f),
             // заборов и декоративных деревьев нет: каждое видимое дерево — узел добычи
         )
         LocationId.HUNTERS_CABIN -> listOf(
