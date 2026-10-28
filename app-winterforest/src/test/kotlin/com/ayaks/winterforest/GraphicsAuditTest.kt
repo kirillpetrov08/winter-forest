@@ -66,29 +66,32 @@ class GraphicsAuditTest {
             // перепад среди всех соседних пар той же оси внутри текстуры.
             // (У льда трещины Вороного дают разброс пара на пару — поэтому
             // сравниваем с максимумом, а не со средним.)
-            var maxPairX = 0.0
-            var maxPairY = 0.0
-            for (y in 0 until size) {
-                var pair = 0.0
-                for (x in 0 until size - 1) {
-                    pair += channelDiff(px[y * size + x], px[y * size + x + 1])
-                }
-                maxPairX = maxOf(maxPairX, pair / (size - 1))
-            }
+            // seamV (стык колонок 0|size−1) после бленда равен перепаду
+            // ВНУТРЕННЕЙ пары колонок — сравниваем с худшей такой парой;
+            // seamH (стык строк) — симметрично с худшей парой строк.
+            var maxColPair = 0.0
+            var maxRowPair = 0.0
             for (x in 0 until size - 1) {
                 var pair = 0.0
                 for (y in 0 until size) {
-                    pair += channelDiff(px[y * size + x], px[y * size + x + size])
+                    pair += channelDiff(px[y * size + x], px[y * size + x + 1])
                 }
-                maxPairY = maxOf(maxPairY, pair / size)
+                maxColPair = maxOf(maxColPair, pair / size)
+            }
+            for (y in 0 until size - 1) {
+                var pair = 0.0
+                for (x in 0 until size) {
+                    pair += channelDiff(px[y * size + x], px[(y + 1) * size + x])
+                }
+                maxRowPair = maxOf(maxRowPair, pair / size)
             }
             assertTrue(
-                "$id: вертикальный шов $seamV грубее худшей внутренней пары X $maxPairX",
-                seamV <= maxPairX + 3.0
+                "$id: вертикальный шов $seamV грубее худшей пары колонок $maxColPair",
+                seamV <= maxColPair + 3.0
             )
             assertTrue(
-                "$id: горизонтальный шов $seamH грубее худшей внутренней пары Y $maxPairY",
-                seamH <= maxPairY + 3.0
+                "$id: горизонтальный шов $seamH грубее худшей пары строк $maxRowPair",
+                seamH <= maxRowPair + 3.0
             )
         }
     }
