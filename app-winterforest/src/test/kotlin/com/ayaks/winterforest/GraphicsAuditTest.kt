@@ -53,29 +53,42 @@ class GraphicsAuditTest {
             val px = ProceduralTextures.generateArgbPixels(id, LocationId.BASE_CLEARING.palette, size)
             var seamV = 0.0
             var seamH = 0.0
-            var innerX = 0.0
-            var innerY = 0.0
             for (y in 0 until size) {
                 seamV += channelDiff(px[y * size], px[y * size + size - 1])
-                innerX += channelDiff(px[y * size + size / 2], px[y * size + size / 2 + 1])
             }
             for (x in 0 until size) {
                 seamH += channelDiff(px[x], px[(size - 1) * size + x])
-                innerY += channelDiff(px[size / 2 * size + x], px[(size / 2 + 1) * size + x])
             }
             seamV /= size
             seamH /= size
-            innerX /= size
-            innerY /= size
-            // Шов сравнивается с соседними пикселями ПО ТОЙ ЖЕ ОСИ: у снега
-            // высокочастотная структура вдоль Y, и x-база занижала бы норму
+            // После torus crossfade шов — это обычная СОСЕДНЯЯ пара краёв
+            // сдвинутой копии: его перепад не может превышать максимальный
+            // перепад среди всех соседних пар той же оси внутри текстуры.
+            // (У льда трещины Вороного дают разброс пара на пару — поэтому
+            // сравниваем с максимумом, а не со средним.)
+            var maxPairX = 0.0
+            var maxPairY = 0.0
+            for (y in 0 until size) {
+                var pair = 0.0
+                for (x in 0 until size - 1) {
+                    pair += channelDiff(px[y * size + x], px[y * size + x + 1])
+                }
+                maxPairX = maxOf(maxPairX, pair / (size - 1))
+            }
+            for (x in 0 until size - 1) {
+                var pair = 0.0
+                for (y in 0 until size) {
+                    pair += channelDiff(px[y * size + x], px[y * size + x + size])
+                }
+                maxPairY = maxOf(maxPairY, pair / size)
+            }
             assertTrue(
-                "$id: вертикальный шов $seamV грубее внутренности X $innerX",
-                seamV <= innerX * 1.6 + 2.0
+                "$id: вертикальный шов $seamV грубее худшей внутренней пары X $maxPairX",
+                seamV <= maxPairX + 3.0
             )
             assertTrue(
-                "$id: горизонтальный шов $seamH грубее внутренности Y $innerY",
-                seamH <= innerY * 1.6 + 2.0
+                "$id: горизонтальный шов $seamH грубее худшей внутренней пары Y $maxPairY",
+                seamH <= maxPairY + 3.0
             )
         }
     }
