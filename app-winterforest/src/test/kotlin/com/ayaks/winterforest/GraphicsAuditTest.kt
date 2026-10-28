@@ -53,24 +53,29 @@ class GraphicsAuditTest {
             val px = ProceduralTextures.generateArgbPixels(id, LocationId.BASE_CLEARING.palette, size)
             var seamV = 0.0
             var seamH = 0.0
-            var inner = 0.0
+            var innerX = 0.0
+            var innerY = 0.0
             for (y in 0 until size) {
                 seamV += channelDiff(px[y * size], px[y * size + size - 1])
-                inner += channelDiff(px[y * size + size / 2], px[y * size + size / 2 + 1])
+                innerX += channelDiff(px[y * size + size / 2], px[y * size + size / 2 + 1])
             }
             for (x in 0 until size) {
                 seamH += channelDiff(px[x], px[(size - 1) * size + x])
+                innerY += channelDiff(px[size / 2 * size + x], px[(size / 2 + 1) * size + x])
             }
             seamV /= size
             seamH /= size
-            inner /= size
+            innerX /= size
+            innerY /= size
+            // Шов сравнивается с соседними пикселями ПО ТОЙ ЖЕ ОСИ: у снега
+            // высокочастотная структура вдоль Y, и x-база занижала бы норму
             assertTrue(
-                "$id: вертикальный шов $seamV грубее внутренности $inner",
-                seamV <= inner * 1.6 + 2.0
+                "$id: вертикальный шов $seamV грубее внутренности X $innerX",
+                seamV <= innerX * 1.6 + 2.0
             )
             assertTrue(
-                "$id: горизонтальный шов $seamH грубее внутренности $inner",
-                seamH <= inner * 1.6 + 2.0
+                "$id: горизонтальный шов $seamH грубее внутренности Y $innerY",
+                seamH <= innerY * 1.6 + 2.0
             )
         }
     }
