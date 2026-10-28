@@ -275,15 +275,6 @@ MODELS = {
         mat_map={"fence": "@fencing_fence_BaseColor"},
         default_tex="@fencing_fence_BaseColor",
         default_fallback=procedural_rust),
-    "winter_tree": dict(
-        blend="models/winter_tree.blend",
-        keep=["Arch", "horizontal beams 1", "Horizontal beams 2",
-              "Large roof support beam", "Pillars", "Roof.006"],
-        target=5.4, by_height=True,
-        mat_map={"chalky": "@PaintedMetal013_2K_Color",
-                 "painted": "@Wood076_2K_Color"},
-        default_tex="@Wood076_2K_Color",
-        default_fallback=procedural_wood),
     "workbench": dict(
         blend="models/workbench.blend", keep=["industrial_storage_cart"], target=1.35, by_height=False,
         mat_map={"cart": "@industrial_storage_cart_diff"},
@@ -293,14 +284,6 @@ MODELS = {
         blend="models/barrel.blend", keep=["Cylinder"], target=1.02, by_height=True,
         mat_map={"rusty": "@PaintedMetal013_2K_Color"},
         default_tex=None, default_fallback=procedural_rust),
-    "gate": dict(
-        blend="models/gate.blend",
-        keep=["large_iron_gate", "large_iron_gate_bolt",
-              "large_iron_gate_left_door", "large_iron_gate_right_door"],
-        target=2.55, by_height=True,
-        mat_map={"gate": "@large_iron_gate_diff"},
-        default_tex="@large_iron_gate_diff",
-        default_fallback=procedural_rust),
     "lantern": dict(
         blend="models/lantern.blend", keep=["Base.001"], target=0.42, by_height=True,
         mat_map={"metal": "@untitled951_Lantern_metal_BaseColor"},

@@ -118,6 +118,23 @@ class WorldCollisionTest {
     }
 
     @Test
+    fun `base interior furniture blocks player but door stays passable`() {
+        val (ox, oz) = WorldRegions.centerOf(LocationId.BASE_CLEARING)
+        // точка внутри кровати — выталкивается
+        val bed = WorldCollision.resolveFor(LocationId.BASE_CLEARING, emptyList(), ox - 8.25f, oz - 6.55f)
+        val d = kotlin.math.hypot(bed[0] - (ox - 8.25f), bed[1] - (oz - 6.55f))
+        assertTrue("кровать обязана выталкивать игрока, d=$d", d > 0.05f)
+        // точка внутри печи — выталкивается
+        val stove = WorldCollision.resolveFor(LocationId.BASE_CLEARING, emptyList(), ox - 5.53f, oz - 5.27f)
+        val d2 = kotlin.math.hypot(stove[0] - (ox - 5.53f), stove[1] - (oz - 5.27f))
+        assertTrue("печь обязана выталкивать игрока, d=$d2", d2 > 0.05f)
+        // свободный пол между кроватью и печью (проход от двери) — не двигается
+        val free = WorldCollision.resolveFor(LocationId.BASE_CLEARING, emptyList(), ox - 7.3f, oz - 5.0f)
+        assertEquals(ox - 7.3f, free[0], 1e-3f)
+        assertEquals(oz - 5.0f, free[1], 1e-3f)
+    }
+
+    @Test
     fun `resolve is stable when already clear`() {
         val (circles, rects) = WorldCollision.obstacles(LocationId.FROZEN_LAKE, emptyList())
         val resolved = WorldCollision.resolve(0f, 0f, WorldCollision.PLAYER_RADIUS, circles, rects)

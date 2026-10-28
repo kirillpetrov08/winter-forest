@@ -319,25 +319,35 @@ class WinterForestViewModel(
         persistCheckpointAsync()
     }
 
+    /** UI-подсказка без движка: пишет сообщение в строку статуса. */
+    fun onUiNote(message: String) {
+        _uiState.update { st ->
+            val run = st.activeRun ?: return@update st
+            st.copy(activeRun = run.copy(lastStatusMessage = message))
+        }
+    }
+
     /**
      * ЕДИНСТВЕННАЯ кнопка «Восстановить ресурсы»: сбрасывает перезарядку всех
      * узлов текущей локации и уходит на 5-минутный кулдаун.
      */
     fun onRestoreResources() {
-        if ((_uiState.value.cooldowns["restore"] ?: 0f) > 0f) return
         _uiState.update { st ->
             val run = st.activeRun ?: return@update st
+            // Кулдаун живёт в сейве: перезапуск приложения его не сбрасывает
+            if (run.restoreCooldownRemainingSec > 0f) return@update st
             val updatedNodes = run.nodesByLocation.mapValues { (_, nodes) ->
                 nodes.map { it.copy(respawnRemainingSec = 0f) }
             }
             st.copy(
                 activeRun = run.copy(
                     nodesByLocation = updatedNodes,
+                    restoreCooldownRemainingSec = RESTORE_RESOURCES_COOLDOWN_SEC,
                     lastStatusMessage = "Ресурсы на карте восстановлены."
-                ),
-                cooldowns = st.cooldowns + ("restore" to RESTORE_RESOURCES_COOLDOWN_SEC)
+                )
             )
         }
+        persistCheckpointAsync()
     }
 
     /** Настройка «Радиус обзора» (вертикальный FOV камеры, градусы). */
@@ -458,7 +468,9 @@ class WinterForestViewModel(
         val dayIndex = (outcome.run.elapsedRealSeconds / GameRunState.FULL_CYCLE_SECONDS).toInt()
         var nextBase = com.ayaks.winterforest.domain.rules.AdvancedMechanics.syncDaily(outcome.base, dayIndex)
         if (levelGain > 0) nextBase = nextBase.copy(perkPoints = nextBase.perkPoints + levelGain)
-        val outcome2 = outcome.copy(base = nextBase)
+        val sanitized = com.ayaks.winterforest.domain.rules.AdvancedMechanics
+            .sanitizeHotbarEntries(outcome.run)
+        val outcome2 = outcome.copy(run = sanitized, base = nextBase)
 
         val diedJustNow = outcome2.run.phase == RunPhase.DEAD
         _uiState.update {
@@ -822,7 +834,10 @@ class WinterForestViewModel(
     ) {
         val state = _uiState.value
         val run = state.activeRun ?: return
-        val outcome = block(run, state.baseProgress)
+        val raw = block(run, state.baseProgress)
+        val outcome = raw.copy(
+            run = com.ayaks.winterforest.domain.rules.AdvancedMechanics.sanitizeHotbarEntries(raw.run)
+        )
         _uiState.update {
             it.copy(
                 activeRun = outcome.run,
@@ -840,9 +855,17 @@ class WinterForestViewModel(
     private fun startGameLoopIfNeeded() {
         if (gameLoopJob?.isActive == true) return
         gameLoopJob = vmScope.launch {
+            // dt по реальным часам: под нагрузкой кадры тикера запаздывают,
+            // и фиксированные 50 мс растягивали игровое время относительно
+            // настоящего (рассинхрон кулдаунов и суток); клампим [5..250] мс,
+            // чтобы фоновая пауза не «прокручивала» мир гигантским шагом
+            var lastTickNs = android.os.SystemClock.elapsedRealtimeNanos()
             while (isActive) {
                 delay(TICK_INTERVAL_MS)
-                stepSimulation(TICK_INTERVAL_MS / 1000f)
+                val nowNs = android.os.SystemClock.elapsedRealtimeNanos()
+                val dtSec = ((nowNs - lastTickNs) / 1_000_000_000f).coerceIn(0.005f, 0.25f)
+                lastTickNs = nowNs
+                stepSimulation(dtSec)
             }
         }
     }

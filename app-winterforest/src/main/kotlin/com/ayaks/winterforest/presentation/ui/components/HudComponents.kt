@@ -371,9 +371,9 @@ fun QuickEquipmentHotbar(
             // Количество еды/ресурсов/инструментов прямо на ячейке хотбара
             val count = entry?.let { e ->
                 when {
-                    e.resourceType != null -> run.inventory.countOf(e.resourceType!!)
-                    e.specialLootId != null -> run.inventory.specialCount(e.specialLootId!!)
-                    e.tool != null -> run.inventory.toolCount(e.tool!!)
+                    e.resourceType != null -> run.inventory.countOf(e.resourceType)
+                    e.specialLootId != null -> run.inventory.specialCount(e.specialLootId)
+                    e.tool != null -> run.inventory.toolCount(e.tool)
                     else -> 0
                 }
             } ?: 0
@@ -429,7 +429,7 @@ private fun HotbarSlotChip(
                         )
                         entry.resourceType != null && customIcon == null -> {
                             ResourceTypeGlyph(
-                                type = entry.resourceType!!,
+                                type = entry.resourceType,
                                 modifier = Modifier.size(26.dp)
                             )
                         }

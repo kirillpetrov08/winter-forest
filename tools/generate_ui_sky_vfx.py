@@ -354,19 +354,6 @@ def moon_disc():
     a[..., 3] = np.clip(body * 1.6 + np.exp(-r * 3) * 0.35, 0, 1) * 255
     return Image.fromarray(np.clip(a, 0, 255).astype(np.uint8), "RGBA")
 
-def aurora_band():
-    w, h = 2048, 512
-    n = tile_noise((h, w), 1.5, 601, aniso=0.25)
-    yy = np.linspace(0, 1, h)[:, None]
-    band = np.exp(-((yy - 0.55) / 0.22) ** 2)
-    m = band * (0.35 + 0.65 * n)
-    a = np.zeros((h, w, 4), np.float32)
-    a[..., 0] = 0.25 + 0.35 * (1 - yy)
-    a[..., 1] = 0.95 - 0.35 * yy
-    a[..., 2] = 0.62 + 0.35 * yy
-    a[..., 3] = np.clip(m, 0, 1) * 210
-    return Image.fromarray(np.clip(a, 0, 255).astype(np.uint8), "RGBA")
-
 # ---------------- vfx ----------------
 
 def snowflake():
@@ -465,7 +452,7 @@ def main():
     save(clouds(2048, 1024, 402, 0.62, 1.35), os.path.join(SKY, "clouds_low.png"))
     save(sun_disc(), os.path.join(SKY, "sun_disc.png"))
     save(moon_disc(), os.path.join(SKY, "moon_disc.png"))
-    save(aurora_band(), os.path.join(SKY, "aurora_band.png"))
+    # aurora_band.png удалён: северное сияние рисуется процедурно в SKY_FRAGMENT_SHADER
     print("vfx:")
     save(snowflake(), os.path.join(VFX, "snowflake.png"))
     save(smoke_puff(), os.path.join(VFX, "smoke_puff.png"))

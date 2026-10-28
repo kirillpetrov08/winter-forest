@@ -46,7 +46,7 @@
 
 | Модель | Текстура | Откуда |
 |---|---|---|
-| `models/gate` | `diff.png` + `mesh_frame/mesh_left/mesh_right` | ваш `gate.blend` (ворота на тропе, створки распахиваются) |
+| ~~`models/gate`~~ | — | **удалено из игры (PR #17)** — текстуры больше не нужны |
 | `models/rat_body` | `diff.png` | ваш `Rigged Rat.blend` (крыса вместо зайца) |
 | `models/cache_crate` | `diff.png` | ваш `special_cache.blend` (закрытый военный ящик) |
 | `models/cache_crate_open` | `diff.png` | тот же бленд, вскрытый ящик |
@@ -67,7 +67,7 @@
 | Альфа-маска листвы | `Trees & Bushes pack/Trees & Bushes.png` (полностью непрозрачный) | ✅ сделано в коде: `tools/make_foliage_alpha.py` синтезирует листья по родной палитре |
 | Крышки бочки | `barrel.blend` → `models/barrel/diff.png` | ✅ сделано в коде: 1 992/3 144 граней переразвёрнуты |
 | Бесшовные тайлы | `textures/bark_pine.png`, `textures/pine_needles.png` | ✅ сшиты в коде (края приведены к внутренней яркости) |
-| Объёмное дерево | `models/winter_tree/` | модель 7.0×5.4×**0.9** м — плоская, читается аркой |
+| ~~Объёмное дерево~~ | ~~`models/winter_tree/`~~ | **удалено из игры (PR #17)** — замена больше не нужна |
 | Ноги оленя | `models/deer_body/mesh_leg2.obj`, `mesh_leg3.obj` | файлы пустые, олень стоит на 2 ногах (сейчас зеркалится кодом) |
 
 ## Куда это попадёт после привоза
