@@ -239,7 +239,6 @@ class ForestGlRenderer(
     private var skyAuroraLoc = -1
 
     private val textures = EnumMap<ProceduralTextureId, Int>(ProceduralTextureId::class.java)
-    private var uploadedPaletteLocation: LocationId? = null
     private var uploadedQuality: GraphicsQuality? = null
 
     // Уровень 1: Статические VBO рельефа, дальнего леса и архитектуры локации (строятся 1 раз!)
@@ -331,7 +330,6 @@ class ForestGlRenderer(
         // Небо (облака/солнце/луна и quad) раньше не сбрасывалось: после каждого
         // поворота экрана утекало 4 текстуры и один VBO.
         releaseSkyResources()
-        uploadedPaletteLocation = null
         staticBuiltQuality = null
         staticBuiltBaseSig = -1
         cachedNodeStateHash = Int.MIN_VALUE
@@ -381,8 +379,16 @@ class ForestGlRenderer(
         viewportHeight = height.coerceAtLeast(1)
         aspectRatio = viewportWidth.toFloat() / viewportHeight.toFloat()
         GLES20.glViewport(0, 0, viewportWidth, viewportHeight)
-        // Широкоугольная горизонтальная перспектива (62° по вертикали -> ~94° по горизонтали на 16:9 / 20:9!)
-        Matrix.perspectiveM(projMatrix, 0, 62f, aspectRatio, 0.12f, 135f)
+        // Пересборка проекции с НАСТРОЕННЫМ FOV: раньше здесь стояли жёсткие 62°,
+        // условие пересборки в onDrawFrame не срабатывало, и пользовательский
+        // FOV молча терялся после любого поворота экрана
+        val snap = snapshot
+        appliedFovDeg = snap.fovDegrees
+        appliedDrawScale = drawScale()
+        Matrix.perspectiveM(
+            projMatrix, 0, snap.fovDegrees.coerceIn(35f, 100f), aspectRatio,
+            NEAR_PLANE, FAR_PLANE * drawScale()
+        )
     }
 
     override fun onDrawFrame(gl: GL10?) {
@@ -402,7 +408,7 @@ class ForestGlRenderer(
             appliedDrawScale = drawScale()
             Matrix.perspectiveM(
                 projMatrix, 0, snap.fovDegrees.coerceIn(35f, 100f), aspectRatio,
-                0.12f, 135f * drawScale()
+                NEAR_PLANE, FAR_PLANE * drawScale()
             )
         }
 
@@ -477,19 +483,23 @@ class ForestGlRenderer(
         val lookY = camY + sin(pitchRad)
         val lookZ = camZ - cos(yawRad) * cos(pitchRad)
 
-        // 3. Рендер 3D-купола неба с горами 360°, облаками и Северным сиянием
+        // 3. Матрицы мира — ДО неба: солнце и луна проецируются настоящей
+        //    view-projection и стоят ровно там, куда направлен свет мира
+        Matrix.setLookAtM(viewMatrix, 0, camX, camY, camZ, lookX, lookY, lookZ, 0f, 1f, 0f)
+        Matrix.multiplyMM(vpMatrix, 0, projMatrix, 0, viewMatrix, 0)
+        Matrix.setIdentityM(modelMatrix, 0)
+        System.arraycopy(vpMatrix, 0, mvpMatrix, 0, 16)
+
+        // 3b. Рендер 3D-купола неба с горами 360°, облаками и Северным сиянием
         val auroraStrength = if (loc == LocationId.ABANDONED_MINE) {
             0f
         } else {
             ((0.68f - daylight) * 1.65f).coerceIn(0f, 1f)
         }
-        drawSkyDome(cycleT, yawRad, pitchRad, animTimeSec, auroraStrength)
+        val sunDir = sunDirFor(cycleT)
+        drawSkyDome(cycleT, camX, camY, camZ, yawRad, pitchRad, animTimeSec, auroraStrength, daylight)
 
-        // 4. Матрицы мира и расстановка 3 тёплых динамических источников света
-        Matrix.setLookAtM(viewMatrix, 0, camX, camY, camZ, lookX, lookY, lookZ, 0f, 1f, 0f)
-        Matrix.multiplyMM(vpMatrix, 0, projMatrix, 0, viewMatrix, 0)
-        Matrix.setIdentityM(modelMatrix, 0)
-        System.arraycopy(vpMatrix, 0, mvpMatrix, 0, 16)
+        // 4. Расстановка 3 тёплых динамических источников света
 
         val fireFlicker = 0.92f + 0.08f * sin(animTimeSec * 10.5f)
         // Свет №1: Костёр Базовой поляны либо факел/крепи в штольне
@@ -550,7 +560,7 @@ class ForestGlRenderer(
         ambientRgb[2] = horizonRgb[2] * 0.74f
 
         GLES20.glUseProgram(worldProgram)
-        applyWorldUniforms(camX, camY, camZ, cycleT * (Math.PI.toFloat() * 2f), rad1, rad2, rad3, fogNear, fogFar)
+        applyWorldUniforms(camX, camY, camZ, sunDir, rad1, rad2, rad3, fogNear, fogFar)
 
         // 5. Отрисовка статического ландшафта и озёрного льда напрямую из GPU VBO
         val groundTex = if (loc == LocationId.ABANDONED_MINE) ProceduralTextureId.STONE else ProceduralTextureId.SNOW
@@ -566,6 +576,9 @@ class ForestGlRenderer(
             nodeBatches[mat]?.let { drawVbo(it, textures[mat] ?: 0, unlit = false, specStrength = spec) }
             dropBatches[mat]?.let { drawVbo(it, textures[mat] ?: 0, unlit = false, specStrength = spec) }
         }
+        // Полупрозрачное пламя НЕ пишет глубину: раньше задние языки и искры
+        // вырезались передними (дыры и щелчки при движении вокруг костра)
+        GLES20.glDepthMask(false)
         staticBatches[ProceduralTextureId.FIRE_EMBER]?.let {
             drawVbo(it, textures[ProceduralTextureId.FIRE_EMBER] ?: 0, unlit = true, specStrength = 0f)
         }
@@ -575,6 +588,7 @@ class ForestGlRenderer(
         dropBatches[ProceduralTextureId.FIRE_EMBER]?.let {
             drawVbo(it, textures[ProceduralTextureId.FIRE_EMBER] ?: 0, unlit = true, specStrength = 0f)
         }
+        GLES20.glDepthMask(true)
         // 6b. Импортированные 3D-модели Poly Haven (камни, кострище, топор, ветви, растение, деревья)
         for ((modelId, vbo) in assetPropBatches) {
             drawVbo(vbo, assetTextures[modelId] ?: 0, unlit = false, specStrength = 0.18f)
@@ -773,7 +787,6 @@ class ForestGlRenderer(
                 GLES20.glGenerateMipmap(GLES20.GL_TEXTURE_2D)
                 textures[kind] = texHandle[0]
             }
-            uploadedPaletteLocation = loc
             uploadedQuality = quality
         }
 
@@ -1588,13 +1601,18 @@ class ForestGlRenderer(
             reusableUploadBuffer = vbo.uploadDynamic(builder, reusableUploadBuffer)
             // Хлопья метели и дым — ЯРКИЕ незатеняемые частицы (без тёмных граней кубиков!)
             val unlitParticles = mat == ProceduralTextureId.SNOW
+            // Частицы не пишут глубину: задние хлопья больше не вырезаются передними
+            if (unlitParticles) GLES20.glDepthMask(false)
             drawVbo(vbo, textures[mat] ?: 0, unlit = unlitParticles, specStrength = materialSpecular(mat))
+            if (unlitParticles) GLES20.glDepthMask(true)
         }
         val fireBuilder = dynBuilders[ProceduralTextureId.FIRE_EMBER]!!
         if (fireBuilder.vertexCount > 0) {
             val fireVbo = dynVbos[ProceduralTextureId.FIRE_EMBER]!!
             reusableUploadBuffer = fireVbo.uploadDynamic(fireBuilder, reusableUploadBuffer)
+            GLES20.glDepthMask(false)
             drawVbo(fireVbo, textures[ProceduralTextureId.FIRE_EMBER] ?: 0, unlit = true, specStrength = 0f)
+            GLES20.glDepthMask(true)
         }
 
         // Импортированные 3D-модели животных (волк/олень) — тело + ноги с шагом
@@ -2128,6 +2146,9 @@ class ForestGlRenderer(
         skyMoonDiscLoc = GLES20.glGetUniformLocation(skyProgram, "uMoonDisc")
         skyNightAmountLoc = GLES20.glGetUniformLocation(skyProgram, "uNightAmount")
         skyDiscColorLoc = GLES20.glGetUniformLocation(skyProgram, "uDiscColor")
+        skyMoonUvLoc = GLES20.glGetUniformLocation(skyProgram, "uMoonScreenUv")
+        skySunDirLoc = GLES20.glGetUniformLocation(skyProgram, "uSunDir")
+        skyTanHalfFovLoc = GLES20.glGetUniformLocation(skyProgram, "uTanHalfFov")
         ensureSkyTextures()
     }
 
@@ -2141,24 +2162,74 @@ class ForestGlRenderer(
     private var skyMoonDiscLoc = -1
     private var skyNightAmountLoc = -1
     private var skyDiscColorLoc = -1
+    private var skyMoonUvLoc = -1
+    private var skySunDirLoc = -1
+    private var skyTanHalfFovLoc = -1
     /** Переиспользуемый буфер цвета диска светила (0 аллокаций в кадре). */
     private val discRgb = FloatArray(3)
+
+    /**
+     * Мировое направление на солнце — ЕДИНЫЙ источник для освещения мира и неба.
+     * cycleT=0 — рассвет, 0.25 — полдень (согласовано с computeDaylightFactor);
+     * солнце никогда не опускается ниже 0.14 (стилизация полярного дня/сумерек).
+     */
+    private fun fillSunDir(cycleT: Float, out: FloatArray) {
+        val a = (cycleT % 1f) * (Math.PI.toFloat() * 2f)
+        out[0] = cos(a) * 0.62f
+        out[1] = (0.32f + 0.68f * sin(a)).coerceAtLeast(0.14f)
+        out[2] = 0.46f
+    }
+
+    private val sunDirScratch = FloatArray(3)
+    private fun sunDirFor(cycleT: Float): FloatArray {
+        fillSunDir(cycleT, sunDirScratch)
+        return sunDirScratch
+    }
+
+    private val skySunDir = FloatArray(3)
+    private val skyMoonDir = FloatArray(3)
+    private val sunUvScratch = FloatArray(2)
+    private val moonUvScratch = FloatArray(2)
+    private val skyPointScratch = FloatArray(4)
+    private val skyClipScratch = FloatArray(4)
+
+    /** Проекция далёкой точки направления в экранные UV [0..1]; за камерой — (-2,-2). */
+    private fun projectSkyBody(camX: Float, camY: Float, camZ: Float, dir: FloatArray, out: FloatArray) {
+        skyPointScratch[0] = camX + dir[0] * 500f
+        skyPointScratch[1] = camY + dir[1] * 500f
+        skyPointScratch[2] = camZ + dir[2] * 500f
+        skyPointScratch[3] = 1f
+        Matrix.multiplyMV(skyClipScratch, 0, vpMatrix, 0, skyPointScratch, 0)
+        val w = skyClipScratch[3]
+        if (w > 0.0001f) {
+            out[0] = skyClipScratch[0] / w * 0.5f + 0.5f
+            out[1] = skyClipScratch[1] / w * 0.5f + 0.5f
+        } else {
+            out[0] = -2f
+            out[1] = -2f
+        }
+    }
 
     private fun uploadSkyTexture(path: String, wrapRepeat: Boolean): Int {
         val ctx = appContext ?: return 0
         val bmp = runCatching {
             ctx.assets.open(path).use { android.graphics.BitmapFactory.decodeStream(it) }
         }.getOrNull() ?: return 0
-        val outSize = if (wrapRepeat) 1024 else 256
-        val scaled = if (bmp.width != outSize || bmp.height != outSize) {
-            android.graphics.Bitmap.createScaledBitmap(bmp, outSize, outSize, true)
+        // Пропорции источника сохраняются: облака 2048×1024 — эквидистантная
+        // панорама, прежняя квадратизация 1024×1024 растягивала их вдвое по высоте
+        val outW = if (wrapRepeat) 1024 else 256
+        val outH = (outW.toLong() * bmp.height / bmp.width).toInt().coerceAtLeast(1)
+        val scaled = if (bmp.width != outW || bmp.height != outH) {
+            android.graphics.Bitmap.createScaledBitmap(bmp, outW, outH, true)
         } else {
             bmp
         }
-        val buf = java.nio.ByteBuffer.allocateDirect(outSize * outSize * 4)
+        val buf = java.nio.ByteBuffer.allocateDirect(outW * outH * 4)
             .order(java.nio.ByteOrder.nativeOrder())
         scaled.copyPixelsToBuffer(buf)
         buf.position(0)
+        if (scaled !== bmp) bmp.recycle()
+        scaled.recycle()
         val tex = IntArray(1)
         GLES20.glGenTextures(1, tex, 0)
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, tex[0])
@@ -2169,7 +2240,7 @@ class ForestGlRenderer(
         GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, wrap)
         GLES20.glTexImage2D(
             GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA,
-            outSize, outSize, 0, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, buf
+            outW, outH, 0, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, buf
         )
         // mipmaps — небо и облака не «плывут» и не мерцают вдали
         GLES20.glGenerateMipmap(GLES20.GL_TEXTURE_2D)
@@ -2185,22 +2256,30 @@ class ForestGlRenderer(
 
     private fun drawSkyDome(
         cycleT: Float,
+        camX: Float,
+        camY: Float,
+        camZ: Float,
         camYaw: Float,
         camPitch: Float,
         timeSec: Float,
-        auroraStrength: Float
+        auroraStrength: Float,
+        daylight: Float
     ) {
         if (skyQuadVbo == 0) return
         GLES20.glDisable(GLES20.GL_DEPTH_TEST)
+        // Небо не пишет глубину (depth-test выключен, запись была лишней)
+        GLES20.glDepthMask(false)
         GLES20.glUseProgram(skyProgram)
 
         GLES20.glUniform3fv(skyZenithLoc, 1, zenithRgb, 0)
         GLES20.glUniform3fv(skyHorizonLoc, 1, horizonRgb, 0)
         GLES20.glUniform3fv(skyFogLoc, 1, fogRgb, 0)
         GLES20.glUniform3fv(skySunHaloLoc, 1, sunRgb, 0)
-        // Ночь/день для неба: 0 — полнодень, 1 — глубокая ночь. Плавная синусоида
-        // без ступеней, поэтому светило и его цвет меняются непрерывно.
-        val nightAmount = (0.5f - 0.5f * cos(cycleT * Math.PI.toFloat() * 2f))
+        // Ночная маска неба выводится из ТОГО ЖЕ коэффициента дневного света,
+        // что и освещение мира: закаты/рассветы неба и мира совпадают. Старая
+        // синусоида пиковала на 0.5 цикла, хотя игровая ночь длится [0.6..1.0) —
+        // днём по небу ходила луна, а ночью всходило солнце.
+        val nightAmount = ((0.60f - daylight) / 0.40f).coerceIn(0f, 1f)
         GLES20.glUniform1f(skyNightAmountLoc, nightAmount)
         // Цвет диска: днём тёплое солнце, ночью холодная луна (смесь по nightAmount).
         val moonR = 0.72f
@@ -2210,10 +2289,19 @@ class ForestGlRenderer(
         discRgb[1] = sunRgb[1] * (1f - nightAmount) + moonG * nightAmount
         discRgb[2] = sunRgb[2] * (1f - nightAmount) + moonB * nightAmount
         GLES20.glUniform3fv(skyDiscColorLoc, 1, discRgb, 0)
-        val sunAz = cycleT * Math.PI.toFloat() * 2f - camYaw * 0.35f
-        val sunX = (0.5f + 0.34f * sin(sunAz)).coerceIn(-0.4f, 1.4f)
-        val sunY = (0.56f + 0.24f * sin(cycleT * Math.PI.toFloat() * 2f) - camPitch * 0.55f).coerceIn(-0.3f, 1.3f)
-        GLES20.glUniform2f(skySunUvLoc, sunX, sunY)
+        // Экранные проекции солнца и луны через настоящую view-projection:
+        // светила честно уходят за край экрана при повороте камеры (прежний
+        // синус-костыль «sunX/sunY с camYaw*0.35» скользил по небу и залипал
+        // на кромке), луна идёт противофазой солнцу и ночью стоит высоко.
+        fillSunDir(cycleT, skySunDir)
+        fillSunDir(cycleT + 0.5f, skyMoonDir)
+        projectSkyBody(camX, camY, camZ, skySunDir, sunUvScratch)
+        projectSkyBody(camX, camY, camZ, skyMoonDir, moonUvScratch)
+        GLES20.glUniform2f(skySunUvLoc, sunUvScratch[0], sunUvScratch[1])
+        GLES20.glUniform2f(skyMoonUvLoc, moonUvScratch[0], moonUvScratch[1])
+        GLES20.glUniform3fv(skySunDirLoc, 1, skySunDir, 0)
+        val fovRad = Math.toRadians((snapshot.fovDegrees.coerceIn(35f, 100f) / 2f).toDouble())
+        GLES20.glUniform1f(skyTanHalfFovLoc, kotlin.math.tan(fovRad).toFloat())
         GLES20.glUniform1f(skyCamYawLoc, camYaw)
         GLES20.glUniform1f(skyCamPitchLoc, camPitch)
         GLES20.glUniform1f(skyAspectLoc, aspectRatio)
@@ -2241,12 +2329,13 @@ class ForestGlRenderer(
         GLES20.glDrawArrays(GLES20.GL_TRIANGLES, 0, 6)
         GLES20.glDisableVertexAttribArray(skyQuadAttrLoc)
         GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, 0)
+        GLES20.glDepthMask(true)
         GLES20.glEnable(GLES20.GL_DEPTH_TEST)
     }
 
     private fun applyWorldUniforms(
         camX: Float, camY: Float, camZ: Float,
-        sunAngle: Float,
+        sunDir: FloatArray,
         rad1: Float,
         rad2: Float,
         rad3: Float,
@@ -2256,12 +2345,7 @@ class ForestGlRenderer(
         GLES20.glUniformMatrix4fv(uMvpLoc, 1, false, mvpMatrix, 0)
         GLES20.glUniformMatrix4fv(uModelLoc, 1, false, modelMatrix, 0)
         GLES20.glUniform3f(uCamPosLoc, camX, camY, camZ)
-        GLES20.glUniform3f(
-            uSunDirLoc,
-            cos(sunAngle) * 0.62f,
-            (0.32f + 0.68f * sin(sunAngle)).coerceAtLeast(0.14f),
-            0.46f
-        )
+        GLES20.glUniform3fv(uSunDirLoc, 1, sunDir, 0)
         GLES20.glUniform3fv(uSunColLoc, 1, sunRgb, 0)
         GLES20.glUniform3fv(uAmbSkyLoc, 1, ambientRgb, 0)
         GLES20.glUniform3fv(uPtPos1Loc, 1, ptLight1, 0)
@@ -2725,11 +2809,9 @@ class ForestGlRenderer(
         GLES20.glVertexAttribPointer(aColorLoc, 4, GLES20.GL_FLOAT, false, GlMesh.STRIDE_BYTES, 32)
 
         GLES20.glDrawArrays(GLES20.GL_TRIANGLES, 0, vbo.vertexCount)
-
-        GLES20.glDisableVertexAttribArray(aPositionLoc)
-        GLES20.glDisableVertexAttribArray(aNormalLoc)
-        GLES20.glDisableVertexAttribArray(aTexCoordLoc)
-        GLES20.glDisableVertexAttribArray(aColorLoc)
+        // Атрибуты остаются включёнными: 60–90 enable/disable за кадр были
+        // лишним state churn (указатели и так переустанавливаются на каждый VBO,
+        // а небо включает/выключает СВОЙ атрибут и не конфликтует)
         GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, 0)
     }
 
@@ -2802,13 +2884,28 @@ class ForestGlRenderer(
             ProceduralTextureId.PINE_FOLIAGE
         )
 
+        /**
+         * Near/far проекции: near 0.12 вместе с 16-битной глубиной давал
+         * соотношение 1100–2200 — дальний рельеф и пропы мерцали (z-fighting).
+         * 0.25 + 24-битный буфер (см. ForestGlSurfaceView) решают проблему;
+         * инструмент в руках (0.58 м) и позёмка (от 1.2 м) не задеваются.
+         */
+        const val NEAR_PLANE = 0.25f
+        const val FAR_PLANE = 135f
+
+        /**
+         * Кривая дневного света СОГЛАСОВАНА с движком: игровая ночь — это
+         * cycleFraction [0.6, 1.0) (GameRunState.isNight), поэтому визуальная ночь
+         * держится плоской до самого рассвета. Прежний подъём 0.92→1.0
+         * высветлял последние 48 с игровой ночи под «утро», пока механика
+         * (волки, темнота шахты) ещё считала ночь ночью.
+         */
         fun computeDaylightFactor(cycleFraction: Float): Float {
             return when {
-                cycleFraction < 0.08f -> 0.45f + (cycleFraction / 0.08f) * 0.55f
+                cycleFraction < 0.12f -> 0.20f + (cycleFraction / 0.12f) * 0.80f
                 cycleFraction < 0.52f -> 1.0f
                 cycleFraction < 0.62f -> 1.0f - ((cycleFraction - 0.52f) / 0.10f) * 0.80f
-                cycleFraction < 0.92f -> 0.20f
-                else -> 0.20f + ((cycleFraction - 0.92f) / 0.08f) * 0.25f
+                else -> 0.20f
             }.coerceIn(0.18f, 1.0f)
         }
 
@@ -2834,7 +2931,9 @@ class ForestGlSurfaceView(
 ) : GLSurfaceView(context) {
     init {
         setEGLContextClientVersion(2)
-        setEGLConfigChooser(8, 8, 8, 8, 16, 0)
+        // 24 бита глубины вместо 16: при near/far 0.25/135·drawScale соотношение
+        // ~540–1100, и 16-битный буфер давал z-fighting дальнего рельефа и пропов
+        setEGLConfigChooser(8, 8, 8, 8, 24, 0)
         preserveEGLContextOnPause = true
         // Целевые 60 FPS: swap interval 1 (ожидание vsync) выставляется в
         // onSurfaceCreated, а поверхность просит фиксированные 60 Гц.

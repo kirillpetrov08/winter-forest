@@ -25,7 +25,13 @@ enum class ProceduralTextureId {
 /**
  * Высокодетализированный процедурный генератор 10 игровых материалов
  * (многооктавный FBM + гребневый мультифрактал + ячеистый Вороной + микрорельеф).
- * Все текстуры бесшовные (tileable) и генерируются один раз при загрузке локации в GPU mipmap-буфер.
+ *
+ * Бесшовность: сам шум (gradientNoise/fbm/voronoi) апериодический, поэтому
+ * tileable-текстуры делаются постобработкой — torus crossfade: полосы у краёв
+ * плавно подмешивают копию изображения, сдвинутую на полразмера, и шов на
+ * границе тайла исчезает. Направленные материалы (пламя, металл со скосом,
+ * брёвна с рядами) блендятся только по той оси, где рисунок изотропный.
+ * Генерируются один раз при загрузке и уходят в GPU mipmap-буфер.
  */
 object ProceduralTextures {
 
@@ -217,7 +223,73 @@ object ProceduralTextures {
                 pixels[idx] = packArgb(a, r, g, b)
             }
         }
+        makeSeamless(pixels, size, id)
         return pixels
+    }
+
+    /** Материалы, которым можно блендить и вертикальные швы (изотропный рисунок). */
+    private val BLEND_Y = setOf(
+        ProceduralTextureId.SNOW,
+        ProceduralTextureId.STONE,
+        ProceduralTextureId.WOOD_BARK,
+        ProceduralTextureId.PINE_FOLIAGE,
+        ProceduralTextureId.ICE,
+        ProceduralTextureId.FUR_HIDE
+    )
+
+    /** Направленные материалы — горизонтальный шов тоже нельзя трогать. */
+    private val NO_BLEND_X = setOf(
+        ProceduralTextureId.FIRE_EMBER,
+        ProceduralTextureId.METAL_STEEL
+    )
+
+    /**
+     * Torus crossfade: в полосе [0..m) и [size−m..size) пиксель смешивается
+     * с образцом, сдвинутым на size/2 (по торусу). На самом шве вес исходного
+     * изображения нулевой, а сдвинутая копия непрерывна по построению —
+     * граница тайла совпадает до долей единицы.
+     */
+    private fun makeSeamless(pixels: IntArray, size: Int, id: ProceduralTextureId) {
+        val blendX = id !in NO_BLEND_X
+        val blendY = id in BLEND_Y
+        if (!blendX && !blendY) return
+        val m = maxOf(2, size / 8)
+        val half = size / 2
+        val src = pixels.copyOf()
+        fun sample(x: Int, y: Int): Int = src[y * size + x]
+        fun weightX(x: Int): Float {
+            val d = minOf(x, size - 1 - x)
+            return if (d >= m) 0f else (m - d) / m.toFloat()
+        }
+        fun weightY(y: Int): Float {
+            val d = minOf(y, size - 1 - y)
+            return if (d >= m) 0f else (m - d) / m.toFloat()
+        }
+        fun chan(px: Int, shift: Int): Int = (px ushr shift) and 0xFF
+        for (y in 0 until size) {
+            val wy = if (blendY) weightY(y) else 0f
+            val sy = (y + half) % size
+            for (x in 0 until size) {
+                val wx = if (blendX) weightX(x) else 0f
+                if (wx == 0f && wy == 0f) continue
+                val sx = (x + half) % size
+                val p00 = sample(x, y)
+                val p10 = sample(sx, y)
+                val p01 = sample(x, sy)
+                val p11 = sample(sx, sy)
+                val w00 = (1f - wx) * (1f - wy)
+                val w10 = wx * (1f - wy)
+                val w01 = (1f - wx) * wy
+                val w11 = wx * wy
+                var out = 0
+                for (shift in intArrayOf(24, 16, 8, 0)) {
+                    val v = chan(p00, shift) * w00 + chan(p10, shift) * w10 +
+                        chan(p01, shift) * w01 + chan(p11, shift) * w11
+                    out = (out shl 8) or v.toInt().coerceIn(0, 255)
+                }
+                pixels[y * size + x] = out
+            }
+        }
     }
 
     fun ridgedFbm(x: Float, y: Float, octaves: Int = 4, seed: Int = 0): Float {

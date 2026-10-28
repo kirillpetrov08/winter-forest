@@ -1064,102 +1064,10 @@ class MeshBuilder(initialFloatsCapacity: Int = 16384) {
         }
     }
 
-    fun buildTerrainMesh(location: LocationId, halfExtent: Float = 48f, steps: Int = 64): GlMesh {
-            val builder = buildTerrainIntoBuilder(location, halfExtent, steps)
-            return builder.build()
-        }
-
-        fun buildTerrainIntoBuilder(location: LocationId, halfExtent: Float = 48f, steps: Int = 64): MeshBuilder {
-            val gCount = steps + 1
-            val cell = (halfExtent * 2f) / steps
-            val heights = FloatArray(gCount * gCount)
-            val normX = FloatArray(gCount * gCount)
-            val normY = FloatArray(gCount * gCount)
-            val normZ = FloatArray(gCount * gCount)
-            val vertAo = FloatArray(gCount * gCount)
-
-            for (gz in 0..steps) {
-                val z = -halfExtent + gz * cell
-                for (gx in 0..steps) {
-                    val x = -halfExtent + gx * cell
-                    heights[gz * gCount + gx] = terrainWithBorderCliff(location, x, z)
-                }
-            }
-
-            // Плавные по-вершинные нормали центральными разностями + АО впадин рельефа
-            for (gz in 0..steps) {
-                for (gx in 0..steps) {
-                    val idx = gz * gCount + gx
-                    val hL = heights[gz * gCount + max(gx - 1, 0)]
-                    val hR = heights[gz * gCount + minOf(gx + 1, steps)]
-                    val hD = heights[max(gz - 1, 0) * gCount + gx]
-                    val hU = heights[minOf(gz + 1, steps) * gCount + gx]
-                    val hC = heights[idx]
-
-                    val dx = (hL - hR) / (2f * cell)
-                    val dz = (hD - hU) / (2f * cell)
-                    val inv = 1f / sqrt(dx * dx + 1f + dz * dz)
-                    normX[idx] = dx * inv
-                    normY[idx] = inv
-                    normZ[idx] = dz * inv
-
-                    val avgNeighbors = (hL + hR + hD + hU) * 0.25f
-                    val cavity = ((hC - avgNeighbors) * 0.55f).coerceIn(-0.18f, 0.10f)
-                    // Утоптанная снежная тропа от лагеря к северным воротам (x ≈ 0, z in -36..6)
-                    val x = -halfExtent + gx * cell
-                    val z = -halfExtent + gz * cell
-                    val onPath = if (z in -36f..7f && abs(x - sin(z * 0.14f) * 1.4f) < 1.35f) 0.90f else 1.0f
-                    vertAo[idx] = ((0.94f + cavity) * onPath).coerceIn(0.74f, 1.03f)
-                }
-            }
-
-            val mb = MeshBuilder(steps * steps * 6 * GlMesh.FLOATS_PER_VERTEX)
-            val uvScale = 0.52f
-            for (gz in 0 until steps) {
-                val z0 = -halfExtent + gz * cell
-                val z1 = z0 + cell
-                for (gx in 0 until steps) {
-                    val x0 = -halfExtent + gx * cell
-                    val x1 = x0 + cell
-
-                    val i00 = gz * gCount + gx
-                    val i10 = gz * gCount + (gx + 1)
-                    val i01 = (gz + 1) * gCount + gx
-                    val i11 = (gz + 1) * gCount + (gx + 1)
-
-                    val u0 = gx * uvScale; val v0 = gz * uvScale
-                    val u1 = (gx + 1) * uvScale; val v1 = (gz + 1) * uvScale
-
-                    fun emit(idx: Int, px: Float, pz: Float, u: Float, v: Float) {
-                        val ao = vertAo[idx]
-                        mb.addVertex(
-                            px, heights[idx], pz,
-                            normX[idx], normY[idx], normZ[idx],
-                            u, v,
-                            ao * 0.99f, ao, (ao * 1.02f).coerceAtMost(1.04f), 1f
-                        )
-                    }
-
-                    emit(i00, x0, z0, u0, v0)
-                    emit(i01, x0, z1, u0, v1)
-                    emit(i11, x1, z1, u1, v1)
-
-                    emit(i00, x0, z0, u0, v0)
-                    emit(i11, x1, z1, u1, v1)
-                    emit(i10, x1, z0, u1, v0)
-                }
-            }
-            return mb
-        }
-
-        fun terrainWithBorderCliff(location: LocationId, x: Float, z: Float): Float {
-            val base = WorldPopulator.terrainHeight(location, x, z)
-            val radial = hypot(x, z)
-            val edge = maxOf(abs(x), abs(z))
-            val ridge = ((edge - 38.2f) * 1.55f).coerceAtLeast(0f) +
-                (0.55f * sin(radial * 0.45f) * ((edge - 38.2f).coerceIn(0f, 4f) * 0.25f))
-            return base + ridge
-        }
+    // Legacy-террейн отдельной локации (buildTerrainMesh/buildTerrainIntoBuilder/
+    // terrainWithBorderCliff, ~130 строк) удалён: в проде использовался только
+    // buildWorldTerrainIntoBuilder единого мира, а внутри мёртвого кода жила
+    // устаревшая AO-тропа «к северным воротам» (ворота удалены в PR #17).
 
         /** Полуразмер мира и сетка мирового рельефа — одна правда для меша и пропов. */
         const val WORLD_HALF_EXTENT = 168f

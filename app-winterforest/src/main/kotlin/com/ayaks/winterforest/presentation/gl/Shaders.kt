@@ -163,6 +163,9 @@ object Shaders {
         uniform float uAuroraStrength;
         uniform float uNightAmount;
         uniform vec3 uDiscColor;
+        uniform vec2 uMoonScreenUv;
+        uniform vec3 uSunDir;
+        uniform float uTanHalfFov;
         uniform sampler2D uCloudsHigh;
         uniform sampler2D uCloudsLow;
         uniform sampler2D uSunDisc;
@@ -233,7 +236,10 @@ object Shaders {
         void main() {
             // Истинный 3D-луч взгляда для панорамного неба 360°
             vec2 ndc = vScreenUv * 2.0 - 1.0;
-            float tanHalfFov = 0.60086;
+            // Тангенс половины вертикального FOV приходит из настроек: раньше
+            // здесь был хардкод под 62°, и при любом другом FOV звёзды, сияние,
+            // горы и облака разъезжались с проекцией мира
+            float tanHalfFov = uTanHalfFov;
             vec3 rayCam = normalize(vec3(ndc.x * uAspect * tanHalfFov, ndc.y * tanHalfFov, -1.0));
 
             float cp = cos(uCamPitch);
@@ -251,14 +257,16 @@ object Shaders {
             float skyGrad = clamp(pow(max(elev, 0.0), 0.58), 0.0, 1.0);
             vec3 col = mix(uSkyHorizon, uSkyZenith, skyGrad);
 
-            // 2. Тёплое зарево в стороне солнца (нормированный азимут к солнцу)
-            float sunAz = atan(uSunScreenUv.y - 0.5, uSunScreenUv.x - 0.5);
-            float azAlign = max(0.0, cos(az - sunAz));
+            // 2. Тёплое зарево в стороне солнца: 3D-скалярное произведение луча
+            //    и мирового направления на светило (работает и за краем экрана,
+            //    прежний atan по экранному UV давал мусорный азимут)
+            float azAlign = max(0.0, dot(dir, normalize(uSunDir)));
             float duskBand = pow(azAlign, 3.0) * exp(-abs(elev) * 4.2);
             col += uSunHaloColor * duskBand * 0.28;
 
-            // 3. Звёздное небо: мерцание, разный размер, только выше горизонта
-            if (uAuroraStrength > 0.02 && elev > 0.015) {
+            // 3. Звёздное небо: мерцание, разный размер, только выше горизонта.
+            //    Звёзды больше не привязаны к «рубильнику» сияния — своя ночная маска.
+            if (uNightAmount > 0.05 && elev > 0.015) {
                 vec2 starCell = floor(vec2(az * 60.0, elev * 110.0));
                 float starRnd = hash21(starCell);
                 if (starRnd > 0.978) {
@@ -267,10 +275,12 @@ object Shaders {
                     vec2 starUv = fract(vec2(az * 60.0, elev * 110.0)) - 0.5;
                     float starShape = smoothstep(0.34, 0.02, length(starUv));
                     col += vec3(0.82, 0.90, 1.0) * starShape * twinkle * (0.35 + 0.65 * mag) *
-                        uAuroraStrength * smoothstep(0.015, 0.22, elev);
+                        uNightAmount * smoothstep(0.015, 0.22, elev);
                 }
+            }
 
-                // 4. Два живых занавеса северного сияния
+            // 4. Два живых занавеса северного сияния
+            if (uAuroraStrength > 0.02 && elev > 0.015) {
                 float wave1 = sin(az * 3.0 + uTime * 0.28 + sin(az * 7.0 - uTime * 0.15) * 0.8);
                 float wave2 = sin(az * 2.2 - uTime * 0.20 + sin(az * 5.0 + uTime * 0.12) * 1.1);
                 float curtain1 = exp(-abs(elev - (0.30 + 0.09 * wave1)) * 7.5);
@@ -295,26 +305,29 @@ object Shaders {
                 col = mix(col, cloudLit, highMask * 0.34 + lowMask * 0.30);
             }
 
-            // 6. Диск солнца/луны из текстуры + мягкое гало
-            float dScreen = distance(vScreenUv, uSunScreenUv);
-            vec2 sunTexUv = (vScreenUv - uSunScreenUv) / 0.085 + 0.5;
-            vec4 sunTex = vec4(0.0);
+            // 6. Солнце и луна — ДВА независимых диска в настоящих экранных
+            //    проекциях мировых направлений (стоят там же, куда светят).
+            //    UV скорректированы на аспект: на широких экранах диски круглые,
+            //    а не растянутые в 2.2× эллипсы; яркость кросс-фейдится по ночи
+            //    без жёсткого щелчка на пороге 0.5. Маски sun/moon_disc.png —
+            //    чистая альфа: диски только добавляют свет (аддитивно).
+            float dayFactor = clamp(1.0 - uNightAmount, 0.0, 1.0);
+
+            vec2 dSunUv = vec2((vScreenUv.x - uSunScreenUv.x) * uAspect, vScreenUv.y - uSunScreenUv.y);
+            float dSun = length(dSunUv);
+            vec2 sunTexUv = dSunUv / 0.085 + 0.5;
             if (sunTexUv.x > 0.0 && sunTexUv.x < 1.0 && sunTexUv.y > 0.0 && sunTexUv.y < 1.0) {
-                // Ночью на том же месте неба — луна: маска своя, цвет холодный.
-                // Ветвление по uniform (одинаково для всех фрагментов) — без расхождения волн.
-                sunTex = (uNightAmount > 0.5)
-                    ? texture2D(uMoonDisc, sunTexUv)
-                    : texture2D(uSunDisc, sunTexUv);
+                col += uSunHaloColor * clamp(texture2D(uSunDisc, sunTexUv).a, 0.0, 1.0) * 1.35 * dayFactor;
             }
-            float halo = exp(-dScreen * 5.6) * 0.36 + exp(-dScreen * 1.7) * 0.10;
-            col += uSunHaloColor * halo;
-            // Диск светила — АДДИТИВНО по альфа-маске, цвет из uDiscColor.
-            // sun_disc.png / moon_disc.png являются чистыми масками: их RGB равен
-            // (1,0,0) и (0,0,0) во всех пикселях, поэтому прежний
-            // mix(col, sunTex.rgb, sunTex.a) подставлял почти чёрный цвет ровно там,
-            // где маска непрозрачна (35% площади солнца, 23% луны) — в небе висел
-            // чёрный круг с ярким гало вокруг. Теперь маска только добавляет свет.
-            col += uDiscColor * clamp(sunTex.a, 0.0, 1.0) * 1.35;
+            col += uSunHaloColor * (exp(-dSun * 5.6) * 0.36 + exp(-dSun * 1.7) * 0.10) * dayFactor;
+
+            vec2 dMoonUv = vec2((vScreenUv.x - uMoonScreenUv.x) * uAspect, vScreenUv.y - uMoonScreenUv.y);
+            float dMoon = length(dMoonUv);
+            vec2 moonTexUv = dMoonUv / 0.085 + 0.5;
+            if (moonTexUv.x > 0.0 && moonTexUv.x < 1.0 && moonTexUv.y > 0.0 && moonTexUv.y < 1.0) {
+                col += uDiscColor * clamp(texture2D(uMoonDisc, moonTexUv).a, 0.0, 1.0) * 1.35 * uNightAmount;
+            }
+            col += vec3(0.55, 0.62, 0.78) * (exp(-dMoon * 6.2) * 0.20 + exp(-dMoon * 2.0) * 0.06) * uNightAmount;
 
             // 7. Три эшелона заснеженных горных хребтов 360°
             float farPeak = 0.150 * mountainRidge(az, 2.6, 4.2) + 0.012;

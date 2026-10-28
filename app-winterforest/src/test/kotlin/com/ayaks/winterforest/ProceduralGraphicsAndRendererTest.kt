@@ -65,9 +65,11 @@ class ProceduralGraphicsAndRendererTest {
             addShadowDisc(0f, 0f, 0f, 2.4f)
         }.build()
 
-        val meshes = LocationId.entries.map { loc ->
-            MeshBuilder.buildTerrainMesh(location = loc, halfExtent = 46f, steps = 20)
-        } + pineAndCabinMesh
+        // Legacy-террейн отдельной локации удалён (мёртвый код): проверяем
+        // единственный прод-билдер рельефа единого мира
+        val meshes = listOf(
+            MeshBuilder.buildWorldTerrainIntoBuilder(steps = 120).build()
+        ) + pineAndCabinMesh
 
         for (mesh in meshes) {
             assertTrue(mesh.vertexCount >= 6)
